@@ -2,11 +2,23 @@ import numpy as np
 import random
 
 def random_tesselation_order(nof_tesselations, nof_steps, tess_prob):
+    """
+    This routine creates a list of tessellations given a probability distribution to each tessellation.
+
+    Parameters:
+    - nof_tesselations (int): The total number of tessellations
+    - nof_steps (int): The total number of steps
+    - tess_prob (List[float]): A list of probabilities assigned to each tessellation.
+
+    Returns:
+    - List[Tessellation]: A list containing the generated tessellations based on the given probabilities.
+    """
     
     tesselation_list = []
     
     for x in range(nof_steps):
-        tesselation_list.append([np.random.choice(np.arange(0, nof_tesselations), p = tess_prob) for x in range(nof_tesselations)])
+        tesselation_list.append([np.random.choice(np.arange(0, nof_tesselations), p = tess_prob) 
+                                 for x in range(nof_tesselations)])
     
     return tesselation_list
 
