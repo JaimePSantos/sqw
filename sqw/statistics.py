@@ -14,6 +14,6 @@ def states2mean(states, domain):
     
     return mean_values
 
-std
-ipr
-survival
+# std
+# ipr
+# survival
