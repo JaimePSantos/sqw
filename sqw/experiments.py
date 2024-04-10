@@ -46,7 +46,7 @@ def running(G, T, steps, initial_state, angles = [], tesselation_order = []):
         # master unitary creation
         for u in range(number_of_tesselations):
             unitary_operator = U[tesselation_order[t][u]] @ unitary_operator
-            
+
         initial_state = unitary_operator @ initial_state
             
         final_states.append(initial_state)
