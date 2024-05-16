@@ -52,6 +52,6 @@ def running(G, T, steps, initial_state, angles = [], tesselation_order = []):
 
         initial_state = unitary_operator @ initial_state
             
-        final_states.append(initial_state)
+        final_states.append(np.array(initial_state))
                    
     return final_states
