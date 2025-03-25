@@ -51,7 +51,7 @@ def survival_plot(survival_values, steps):
     plt.ylim([np.min(survival_values), np.max(survival_values)])
     plt.show()
 
-<<<<<<< HEAD
+
 def tesselation_plot(T):
     H = nx.Graph()
     
@@ -97,7 +97,7 @@ def square_grid_plot(prob, N):
     
     cbar = fig.colorbar(im,fraction=0.035, pad=0.04)
     cbar.set_label('Probability', rotation=270,labelpad=20,fontsize = 14)
-=======
+
 def general_plot(
         x_value_matrix,
         y_value_matrix,
@@ -377,4 +377,4 @@ def general_plot(
         plt.show()
     else:
         plt.show()
->>>>>>> a3f4f5dad734ceabf003ca2ad907ebdc760bc223
+
