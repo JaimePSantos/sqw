@@ -54,3 +54,16 @@ def square_grid_tesselation(N, periodic = True):
     
     
     return tesselations
+
+def even_line_two_tesselation(N):
+    """
+    Returns two tesselations of a line of N sites (no periodic boundary).
+    Each tesselation is a list of pairs of neighboring sites.
+    """
+    tesselations = []
+    for c in range(2):
+        tesselation_aux = []
+        for x in range(c, N-1, 2):
+            tesselation_aux.append([x, x+1])
+        tesselations.append(tesselation_aux)
+    return tesselations
