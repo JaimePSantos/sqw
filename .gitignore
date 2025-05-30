@@ -188,3 +188,4 @@ cython_debug/
 # qwak_cupy
 !core/qwak_cupy/
 experiments_data
+experiments_data_samples

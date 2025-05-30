@@ -32,7 +32,6 @@ def random_angle_deviation(angle_values, angle_dev, nof_steps):
 
     return angles_list
 
-
 def tesselation_choice(tesselations_list, steps, prob):
     
     nof_tesselations = len(tesselations_list)
