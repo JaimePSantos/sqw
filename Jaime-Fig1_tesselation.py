@@ -215,13 +215,13 @@ def plot_multiple_timesteps(results_list, shift_probs, timesteps, domain, title_
 
 # Example usage:
 if __name__ == "__main__":
-    N = 100
-    steps = N//3
+    N = 300
+    steps = N//4
     angles = [[np.pi/3, np.pi/3]] * steps  # Fixed angles, no noise
     initial_state_kwargs = {"nodes": [N//2]}
 
     # List of shift probabilities for tesselation order switching
-    shift_probs = [0, 0.1, 0.2, 0.3, 0.5]
+    shift_probs = [0, 0.1, 0.2, 0.3, 0.5,0.8]
     
     # Generate tesselation orders for each shift probability
     tesselation_orders_list = []
