@@ -5,10 +5,10 @@ from sqw.statistics import states2mean, states2std, states2ipr, states2survival
 from sqw.plots import final_distribution_plot, mean_plot, std_plot, ipr_plot, survival_plot
 from sqw.utils import random_tesselation_order, random_angle_deviation, tesselation_choice
 
+from QWAK.core.utils.plotTools import plot_qwak
+
 import networkx as nx
 import numpy as np
-import matplotlib.pyplot as plt
-import seaborn as sns
 import os
 import pickle
 
@@ -154,64 +154,93 @@ def load_or_create_experiment(
             base_dir=base_dir
         )
 
-def plot_distributions_at_timestep(results_list, shift_probs, timestep, domain, title_prefix="Tesselation"):
+def plot_multiple_timesteps_qwak(results_list, shift_probs, timesteps, domain, title_prefix="Tesselation"):
     """
-    Plot probability distributions for all noise levels at a specific timestep.
+    Plot probability distributions for multiple timesteps using plot_qwak.
+    Each line is a walk, each color is a timestep, all in a single figure.
     """
-    plt.figure(figsize=(10, 6))
-    for i, (walk_states, shift_prob) in enumerate(zip(results_list, shift_probs)):
-        if walk_states and len(walk_states) > timestep and walk_states[timestep] is not None:
-            state = walk_states[timestep]
-            prob_dist = np.abs(state)**2
-            plt.plot(domain, prob_dist, label=f'{title_prefix} shift prob={shift_prob:.3f}', alpha=0.8)
-        else:
-            print(f"No valid state for shift_prob={shift_prob:.3f} at timestep {timestep}")
-    
-    plt.xlabel('Position')
-    plt.ylabel('Probability')
-    plt.title(f'Probability Distributions at Timestep {timestep}')
-    plt.legend()
-    plt.grid(True, alpha=0.3)
-    plt.tight_layout()
-    plt.show()
+    import matplotlib.pyplot as plt
 
-def plot_multiple_timesteps(results_list, shift_probs, timesteps, domain, title_prefix="Tesselation"):
-    """
-    Plot probability distributions for multiple timesteps in subplots.
-    """
-    n_timesteps = len(timesteps)
-    cols = min(3, n_timesteps)
-    rows = (n_timesteps + cols - 1) // cols
-    
-    fig, axes = plt.subplots(rows, cols, figsize=(5*cols, 4*rows))
-    if n_timesteps == 1:
-        axes = [axes]
-    elif rows == 1:
-        axes = [axes]
-    else:
-        axes = axes.flatten()
-    
-    for idx, timestep in enumerate(timesteps):
-        ax = axes[idx]
-        for i, (walk_states, shift_prob) in enumerate(zip(results_list, shift_probs)):
+    # For each walk, plot its distribution at each timestep as a separate line (color by timestep)
+    for i, (walk_states, shift_prob) in enumerate(zip(results_list, shift_probs)):
+        x_value_matrix = []
+        y_value_matrix = []
+        legend_labels = []
+        for timestep in timesteps:
             if walk_states and len(walk_states) > timestep and walk_states[timestep] is not None:
                 state = walk_states[timestep]
                 prob_dist = np.abs(state)**2
-                ax.plot(domain, prob_dist, label=f'prob={shift_prob:.3f}', alpha=0.8)
-        
-        ax.set_xlabel('Position')
-        ax.set_ylabel('Probability')
-        ax.set_title(f'Timestep {timestep}')
-        ax.legend()
-        ax.grid(True, alpha=0.3)
-    
-    # Hide empty subplots
-    for idx in range(n_timesteps, len(axes)):
-        axes[idx].set_visible(False)
-    
-    plt.suptitle(f'{title_prefix} Noise: Probability Distributions at Different Timesteps')
-    plt.tight_layout()
-    plt.show()
+                x_value_matrix.append(domain)
+                y_value_matrix.append(prob_dist)
+                legend_labels.append(f't={timestep}')
+        if y_value_matrix:
+            plot_qwak(
+                x_value_matrix,
+                y_value_matrix,
+                x_label='Position',
+                y_label='Probability',
+                plot_title=f'{title_prefix} shift prob={shift_prob:.3f}: Distributions at Multiple Timesteps',
+                legend_labels=legend_labels,
+                legend_title='Timestep',
+                legend_ncol=1,
+                legend_loc='best',
+                use_grid=True,
+                font_size=12,
+                figsize=(8, 5)
+            )
+
+def plot_std_vs_time_qwak(stds, shift_probs):
+    """
+    Plot standard deviation vs time for all walks using plot_qwak.
+    """
+    x_value_matrix = [list(range(len(std))) for std in stds if len(std) > 0]
+    y_value_matrix = [std for std in stds if len(std) > 0]
+    legend_labels = [f'Tesselation shift prob={shift_prob:.3f}' for std, shift_prob in zip(stds, shift_probs) if len(std) > 0]
+    if y_value_matrix:
+        plot_qwak(
+            x_value_matrix,
+            y_value_matrix,
+            x_label='Time Step',
+            y_label='Standard Deviation',
+            plot_title='Standard Deviation vs Time for Different Tesselation Shift Probabilities',
+            legend_labels=legend_labels,
+            legend_title=None,
+            legend_ncol=1,
+            legend_loc='best',
+            use_grid=True,
+            font_size=14,
+            figsize=(8, 5)
+        )
+
+def plot_single_timestep_qwak(results_list, shift_probs, timestep, domain, title_prefix="Tesselation"):
+    """
+    Plot probability distributions for all noise levels at a specific timestep using plot_qwak.
+    """
+    x_value_matrix = []
+    y_value_matrix = []
+    legend_labels = []
+    for walk_states, shift_prob in zip(results_list, shift_probs):
+        if walk_states and len(walk_states) > timestep and walk_states[timestep] is not None:
+            state = walk_states[timestep]
+            prob_dist = np.abs(state)**2
+            x_value_matrix.append(domain)
+            y_value_matrix.append(prob_dist)
+            legend_labels.append(f'{title_prefix} shift prob={shift_prob:.3f}')
+    if y_value_matrix:
+        plot_qwak(
+            x_value_matrix,
+            y_value_matrix,
+            x_label='Position',
+            y_label='Probability',
+            plot_title=f'Probability Distributions at Timestep {timestep}',
+            legend_labels=legend_labels,
+            legend_title=None,
+            legend_ncol=1,
+            legend_loc='best',
+            use_grid=True,
+            font_size=14,
+            figsize=(10, 6)
+        )
 
 # Example usage:
 if __name__ == "__main__":
@@ -264,23 +293,14 @@ if __name__ == "__main__":
             stds.append([])
 
     # Plot all walks in a single figure
-    plt.figure(figsize=(8, 5))
-    for std, shift_prob in zip(stds, shift_probs):
-        if len(std) > 0:
-            plt.plot(std, label=f'Tesselation shift prob={shift_prob:.3f}')
-    plt.xlabel('Time Step')
-    plt.ylabel('Standard Deviation')
-    plt.title('Standard Deviation vs Time for Different Tesselation Shift Probabilities')
-    plt.legend()
-    plt.tight_layout()
-    plt.show()
+    plot_std_vs_time_qwak(stds, shift_probs)
 
     # Plot probability distributions at specific timesteps
     timestep_to_plot = steps // 2  # Middle timestep
     print(f"\nPlotting distributions at timestep {timestep_to_plot}")
-    plot_distributions_at_timestep(results_list, shift_probs, timestep_to_plot, domain, "Tesselation")
-    
+    plot_single_timestep_qwak(results_list, shift_probs, timestep_to_plot, domain, "Tesselation")
+
     # Plot distributions at multiple timesteps
     timesteps_to_plot = [0, steps//4, steps//2, 3*steps//4, steps-1]
     print(f"\nPlotting distributions at timesteps {timesteps_to_plot}")
-    plot_multiple_timesteps(results_list, shift_probs, timesteps_to_plot, domain, "Tesselation")
+    plot_multiple_timesteps_qwak(results_list, shift_probs, timesteps_to_plot, domain, "Tesselation")
