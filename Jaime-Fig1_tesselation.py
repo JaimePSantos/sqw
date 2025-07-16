@@ -6,34 +6,20 @@ from sqw.plots import final_distribution_plot, mean_plot, std_plot, ipr_plot, su
 from sqw.utils import random_tesselation_order, random_angle_deviation, tesselation_choice
 
 from utils.plotTools import plot_qwak
+from jaime_scripts import (
+    get_experiment_dir, 
+    run_and_save_experiment_generic, 
+    load_experiment_results_generic,
+    load_or_create_experiment_generic,
+    plot_multiple_timesteps_qwak,
+    plot_std_vs_time_qwak,
+    plot_single_timestep_qwak
+)
 
 import networkx as nx
 import numpy as np
 import os
 import pickle
-
-def get_experiment_dir(
-    tesselation_func,
-    has_noise,
-    N,
-    noise_params=None,
-    base_dir="experiments_data"
-):
-    """
-    Returns the directory path for the experiment based on tesselation, noise, and graph size.
-    Now, shift_prob is a subfolder inside the tesselation_order_noise/N_{N} folder.
-    """
-    tesselation_name = tesselation_func.__name__
-    noise_str = "tesselation_order_noise" if has_noise else "tesselation_order_nonoise"
-    folder = f"{tesselation_name}_{noise_str}"
-    base = os.path.join(base_dir, folder, f"N_{N}")
-    if has_noise and noise_params is not None:
-        # Round each noise param to 3 decimal places for folder name
-        noise_suffix = "_".join(f"{float(x):.3f}" for x in noise_params)
-        shift_folder = f"tesselation_shift_prob_{noise_suffix}"
-        return os.path.join(base, shift_folder)
-    else:
-        return base
 
 def run_and_save_experiment(
     graph_func,
@@ -50,32 +36,22 @@ def run_and_save_experiment(
     """
     Runs the experiment for each tesselation_order/shift_prob and saves each walk's final states in its own shift_prob folder.
     """
-    results = []
-    for tesselation_order, shift_prob in zip(tesselation_orders_list, shift_probs):
-        has_noise = shift_prob > 0
-        noise_params = [shift_prob] if has_noise else None
-        exp_dir = get_experiment_dir(tesselation_func, has_noise, N, noise_params=noise_params, base_dir=base_dir)
-        os.makedirs(exp_dir, exist_ok=True)
-        print(f"[run_and_save_experiment] Saving results to {exp_dir} for shift_prob={shift_prob:.3f}")
-
-        G = graph_func(N)
-        T = tesselation_func(N)
-        initial_state = initial_state_func(N, **initial_state_kwargs)
-
-        print("[run_and_save_experiment] Running walk...")
-        final_states = running(
-            G, T, steps,
-            initial_state,
-            angles=angles,
-            tesselation_order=tesselation_order
-        )
-        for i, state in enumerate(final_states):
-            filename = f"final_state_step_{i}.pkl"
-            with open(os.path.join(exp_dir, filename), "wb") as f:
-                pickle.dump(state, f)
-        print(f"[run_and_save_experiment] Saved {len(final_states)} states for shift_prob={shift_prob:.3f}.")
-        results.append(final_states)
-    return results
+    noise_params_list = [[shift_prob] if shift_prob > 0 else [0] for shift_prob in shift_probs]
+    return run_and_save_experiment_generic(
+        graph_func=graph_func,
+        tesselation_func=tesselation_func,
+        N=N,
+        steps=steps,
+        parameter_list=shift_probs,
+        angles_or_angles_list=angles,
+        tesselation_order_or_list=tesselation_orders_list,
+        initial_state_func=initial_state_func,
+        initial_state_kwargs=initial_state_kwargs,
+        noise_params_list=noise_params_list,
+        noise_type="tesselation_order",
+        parameter_name="shift_prob",
+        base_dir=base_dir
+    )
 
 def load_experiment_results(
     tesselation_func,
@@ -88,23 +64,16 @@ def load_experiment_results(
     """
     Loads all final states from disk for each shift_prob/tesselation_order in the list.
     """
-    all_results = []
-    for tesselation_order, shift_prob in zip(tesselation_orders_list, shift_probs):
-        has_noise = shift_prob > 0
-        noise_params = [shift_prob] if has_noise else None
-        exp_dir = get_experiment_dir(tesselation_func, has_noise, N, noise_params=noise_params, base_dir=base_dir)
-        walk_results = []
-        for i in range(steps):
-            filename = f"final_state_step_{i}.pkl"
-            filepath = os.path.join(exp_dir, filename)
-            if os.path.exists(filepath):
-                with open(filepath, "rb") as f:
-                    walk_results.append(pickle.load(f))
-            else:
-                print(f"[load_experiment_results] File {filepath} does not exist.")
-                walk_results.append(None)
-        all_results.append(walk_results)
-    return all_results
+    noise_params_list = [[shift_prob] if shift_prob > 0 else [0] for shift_prob in shift_probs]
+    return load_experiment_results_generic(
+        tesselation_func=tesselation_func,
+        N=N,
+        steps=steps,
+        parameter_list=shift_probs,
+        noise_params_list=noise_params_list,
+        noise_type="tesselation_order",
+        base_dir=base_dir
+    )
 
 def load_or_create_experiment(
     graph_func,
@@ -122,125 +91,24 @@ def load_or_create_experiment(
     Loads experiment results for each walk if they exist, otherwise runs and saves them.
     Returns a list of lists: [walk1_states, walk2_states, ...]
     """
-    # Check for each walk
-    all_exists = []
-    for tesselation_order, shift_prob in zip(tesselation_orders_list, shift_probs):
-        has_noise = shift_prob > 0
-        noise_params = [shift_prob] if has_noise else None
-        exp_dir = get_experiment_dir(tesselation_func, has_noise, N, noise_params=noise_params, base_dir=base_dir)
-        exists = all(
-            os.path.exists(os.path.join(exp_dir, f"final_state_step_{i}.pkl"))
-            for i in range(steps)
-        )
-        all_exists.append(exists)
+    noise_params_list = [[shift_prob] if shift_prob > 0 else [0] for shift_prob in shift_probs]
+    return load_or_create_experiment_generic(
+        graph_func=graph_func,
+        tesselation_func=tesselation_func,
+        N=N,
+        steps=steps,
+        parameter_list=shift_probs,
+        angles_or_angles_list=angles,
+        tesselation_order_or_list=tesselation_orders_list,
+        initial_state_func=initial_state_func,
+        initial_state_kwargs=initial_state_kwargs,
+        noise_params_list=noise_params_list,
+        noise_type="tesselation_order",
+        parameter_name="shift_prob",
+        base_dir=base_dir
+    )
 
-    if all(all_exists):
-        print("[load_or_create_experiment] All files found, loading results.")
-        return load_experiment_results(
-            tesselation_func, N, steps, shift_probs, tesselation_orders_list, base_dir=base_dir
-        )
-    else:
-        print("[load_or_create_experiment] Some files missing, running experiment and saving results.")
-        return run_and_save_experiment(
-            graph_func=graph_func,
-            tesselation_func=tesselation_func,
-            N=N,
-            steps=steps,
-            tesselation_orders_list=tesselation_orders_list,
-            angles=angles,
-            initial_state_func=initial_state_func,
-            initial_state_kwargs=initial_state_kwargs,
-            shift_probs=shift_probs,
-            base_dir=base_dir
-        )
 
-def plot_multiple_timesteps_qwak(results_list, shift_probs, timesteps, domain, title_prefix="Tesselation"):
-    """
-    Plot probability distributions for multiple timesteps using plot_qwak.
-    Each line is a walk, each color is a timestep, all in a single figure.
-    """
-    import matplotlib.pyplot as plt
-
-    # For each walk, plot its distribution at each timestep as a separate line (color by timestep)
-    for i, (walk_states, shift_prob) in enumerate(zip(results_list, shift_probs)):
-        x_value_matrix = []
-        y_value_matrix = []
-        legend_labels = []
-        for timestep in timesteps:
-            if walk_states and len(walk_states) > timestep and walk_states[timestep] is not None:
-                state = walk_states[timestep]
-                prob_dist = np.abs(state)**2
-                x_value_matrix.append(domain)
-                y_value_matrix.append(prob_dist)
-                legend_labels.append(f't={timestep}')
-        if y_value_matrix:
-            plot_qwak(
-                x_value_matrix,
-                y_value_matrix,
-                x_label='Position',
-                y_label='Probability',
-                plot_title=f'{title_prefix} shift prob={shift_prob:.3f}: Distributions at Multiple Timesteps',
-                legend_labels=legend_labels,
-                legend_title='Timestep',
-                legend_ncol=1,
-                legend_loc='best',
-                use_grid=True,
-                font_size=12,
-                figsize=(8, 5)
-            )
-
-def plot_std_vs_time_qwak(stds, shift_probs):
-    """
-    Plot standard deviation vs time for all walks using plot_qwak.
-    """
-    x_value_matrix = [list(range(len(std))) for std in stds if len(std) > 0]
-    y_value_matrix = [std for std in stds if len(std) > 0]
-    legend_labels = [f'Tesselation shift prob={shift_prob:.3f}' for std, shift_prob in zip(stds, shift_probs) if len(std) > 0]
-    if y_value_matrix:
-        plot_qwak(
-            x_value_matrix,
-            y_value_matrix,
-            x_label='Time Step',
-            y_label='Standard Deviation',
-            plot_title='Standard Deviation vs Time for Different Tesselation Shift Probabilities',
-            legend_labels=legend_labels,
-            legend_title=None,
-            legend_ncol=1,
-            legend_loc='best',
-            use_grid=True,
-            font_size=14,
-            figsize=(8, 5)
-        )
-
-def plot_single_timestep_qwak(results_list, shift_probs, timestep, domain, title_prefix="Tesselation"):
-    """
-    Plot probability distributions for all noise levels at a specific timestep using plot_qwak.
-    """
-    x_value_matrix = []
-    y_value_matrix = []
-    legend_labels = []
-    for walk_states, shift_prob in zip(results_list, shift_probs):
-        if walk_states and len(walk_states) > timestep and walk_states[timestep] is not None:
-            state = walk_states[timestep]
-            prob_dist = np.abs(state)**2
-            x_value_matrix.append(domain)
-            y_value_matrix.append(prob_dist)
-            legend_labels.append(f'{title_prefix} shift prob={shift_prob:.3f}')
-    if y_value_matrix:
-        plot_qwak(
-            x_value_matrix,
-            y_value_matrix,
-            x_label='Position',
-            y_label='Probability',
-            plot_title=f'Probability Distributions at Timestep {timestep}',
-            legend_labels=legend_labels,
-            legend_title=None,
-            legend_ncol=1,
-            legend_loc='best',
-            use_grid=True,
-            font_size=14,
-            figsize=(10, 6)
-        )
 
 # Example usage:
 if __name__ == "__main__":
@@ -293,14 +161,14 @@ if __name__ == "__main__":
             stds.append([])
 
     # Plot all walks in a single figure
-    plot_std_vs_time_qwak(stds, shift_probs)
+    plot_std_vs_time_qwak(stds, shift_probs, title_prefix="Tesselation shift", parameter_name="prob")
 
     # Plot probability distributions at specific timesteps
     timestep_to_plot = steps // 2  # Middle timestep
     print(f"\nPlotting distributions at timestep {timestep_to_plot}")
-    plot_single_timestep_qwak(results_list, shift_probs, timestep_to_plot, domain, "Tesselation")
+    plot_single_timestep_qwak(results_list, shift_probs, timestep_to_plot, domain, "Tesselation shift", "prob")
 
     # Plot distributions at multiple timesteps
     timesteps_to_plot = [0, steps//4, steps//2, 3*steps//4, steps-1]
     print(f"\nPlotting distributions at timesteps {timesteps_to_plot}")
-    plot_multiple_timesteps_qwak(results_list, shift_probs, timesteps_to_plot, domain, "Tesselation")
+    plot_multiple_timesteps_qwak(results_list, shift_probs, timesteps_to_plot, domain, "Tesselation shift", "prob")

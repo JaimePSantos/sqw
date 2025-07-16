@@ -153,3 +153,269 @@ def load_array_list_from_file(filename):
             array = np.loadtxt(array_data.splitlines()).reshape(shape)
             array_list.append(array)
     return array_list
+
+def get_experiment_dir(
+    tesselation_func,
+    has_noise,
+    N,
+    noise_params=None,
+    noise_type="angle",  # "angle" or "tesselation_order"
+    base_dir="experiments_data"
+):
+    """
+    Returns the directory path for the experiment based on tesselation, noise, and graph size.
+    """
+    tesselation_name = tesselation_func.__name__
+    if noise_type == "angle":
+        noise_str = "angle_noise" if has_noise else "angle_nonoise"
+        folder = f"{tesselation_name}_{noise_str}"
+        base = os.path.join(base_dir, folder, f"N_{N}")
+        if has_noise and noise_params is not None:
+            # Round each noise param to 2 decimal places for folder name
+            noise_suffix = "_".join(f"{float(x):.2f}" for x in noise_params)
+            dev_folder = f"angle_dev_{noise_suffix}"
+            return os.path.join(base, dev_folder)
+        else:
+            return base
+    elif noise_type == "tesselation_order":
+        noise_str = "tesselation_order_noise" if has_noise else "tesselation_order_nonoise"
+        folder = f"{tesselation_name}_{noise_str}"
+        base = os.path.join(base_dir, folder, f"N_{N}")
+        if has_noise and noise_params is not None:
+            # Round each noise param to 3 decimal places for folder name
+            noise_suffix = "_".join(f"{float(x):.3f}" for x in noise_params)
+            shift_folder = f"tesselation_shift_prob_{noise_suffix}"
+            return os.path.join(base, shift_folder)
+        else:
+            return base
+    else:
+        raise ValueError(f"Unknown noise_type: {noise_type}")
+
+def run_and_save_experiment_generic(
+    graph_func,
+    tesselation_func,
+    N,
+    steps,
+    parameter_list,  # List of varying parameters for each walk
+    angles_or_angles_list,  # Either fixed angles or list of angles for each walk
+    tesselation_order_or_list,  # Either fixed tesselation_order or list for each walk
+    initial_state_func,
+    initial_state_kwargs,
+    noise_params_list,  # List of noise parameters for each walk
+    noise_type="angle",  # "angle" or "tesselation_order"
+    parameter_name="dev",  # Name of the parameter for logging
+    base_dir="experiments_data"
+):
+    """
+    Generic function to run and save experiments for different parameter values.
+    """
+    from sqw.experiments_expanded import running
+    import pickle
+    
+    results = []
+    for i, (param, noise_params) in enumerate(zip(parameter_list, noise_params_list)):
+        has_noise = any(p > 0 for p in noise_params) if isinstance(noise_params, list) else noise_params > 0
+        exp_dir = get_experiment_dir(tesselation_func, has_noise, N, noise_params=noise_params, noise_type=noise_type, base_dir=base_dir)
+        os.makedirs(exp_dir, exist_ok=True)
+        print(f"[run_and_save_experiment] Saving results to {exp_dir} for {parameter_name}={param:.3f}")
+
+        G = graph_func(N)
+        T = tesselation_func(N)
+        initial_state = initial_state_func(N, **initial_state_kwargs)
+
+        # Get the appropriate angles and tesselation_order for this walk
+        if isinstance(angles_or_angles_list[0], list) and len(angles_or_angles_list) == len(parameter_list):
+            angles = angles_or_angles_list[i]
+        else:
+            angles = angles_or_angles_list
+
+        if isinstance(tesselation_order_or_list[0], list) and len(tesselation_order_or_list) == len(parameter_list):
+            tesselation_order = tesselation_order_or_list[i]
+        else:
+            tesselation_order = tesselation_order_or_list
+
+        print("[run_and_save_experiment] Running walk...")
+        final_states = running(
+            G, T, steps,
+            initial_state,
+            angles=angles,
+            tesselation_order=tesselation_order
+        )
+        for j, state in enumerate(final_states):
+            filename = f"final_state_step_{j}.pkl"
+            with open(os.path.join(exp_dir, filename), "wb") as f:
+                pickle.dump(state, f)
+        print(f"[run_and_save_experiment] Saved {len(final_states)} states for {parameter_name}={param:.3f}.")
+        results.append(final_states)
+    return results
+
+def load_experiment_results_generic(
+    tesselation_func,
+    N,
+    steps,
+    parameter_list,
+    noise_params_list,
+    noise_type="angle",
+    base_dir="experiments_data"
+):
+    """
+    Generic function to load experiment results from disk.
+    """
+    import pickle
+    
+    all_results = []
+    for param, noise_params in zip(parameter_list, noise_params_list):
+        has_noise = any(p > 0 for p in noise_params) if isinstance(noise_params, list) else noise_params > 0
+        exp_dir = get_experiment_dir(tesselation_func, has_noise, N, noise_params=noise_params, noise_type=noise_type, base_dir=base_dir)
+        walk_results = []
+        for i in range(steps):
+            filename = f"final_state_step_{i}.pkl"
+            filepath = os.path.join(exp_dir, filename)
+            if os.path.exists(filepath):
+                with open(filepath, "rb") as f:
+                    walk_results.append(pickle.load(f))
+            else:
+                print(f"[load_experiment_results] File {filepath} does not exist.")
+                walk_results.append(None)
+        all_results.append(walk_results)
+    return all_results
+
+def load_or_create_experiment_generic(
+    graph_func,
+    tesselation_func,
+    N,
+    steps,
+    parameter_list,
+    angles_or_angles_list,
+    tesselation_order_or_list,
+    initial_state_func,
+    initial_state_kwargs,
+    noise_params_list,
+    noise_type="angle",
+    parameter_name="dev",
+    base_dir="experiments_data"
+):
+    """
+    Generic function to load experiment results if they exist, otherwise run and save them.
+    """
+    # Check for each walk
+    all_exists = []
+    for param, noise_params in zip(parameter_list, noise_params_list):
+        has_noise = any(p > 0 for p in noise_params) if isinstance(noise_params, list) else noise_params > 0
+        exp_dir = get_experiment_dir(tesselation_func, has_noise, N, noise_params=noise_params, noise_type=noise_type, base_dir=base_dir)
+        exists = all(
+            os.path.exists(os.path.join(exp_dir, f"final_state_step_{i}.pkl"))
+            for i in range(steps)
+        )
+        all_exists.append(exists)
+
+    if all(all_exists):
+        print("[load_or_create_experiment] All files found, loading results.")
+        return load_experiment_results_generic(
+            tesselation_func, N, steps, parameter_list, noise_params_list, noise_type=noise_type, base_dir=base_dir
+        )
+    else:
+        print("[load_or_create_experiment] Some files missing, running experiment and saving results.")
+        return run_and_save_experiment_generic(
+            graph_func=graph_func,
+            tesselation_func=tesselation_func,
+            N=N,
+            steps=steps,
+            parameter_list=parameter_list,
+            angles_or_angles_list=angles_or_angles_list,
+            tesselation_order_or_list=tesselation_order_or_list,
+            initial_state_func=initial_state_func,
+            initial_state_kwargs=initial_state_kwargs,
+            noise_params_list=noise_params_list,
+            noise_type=noise_type,
+            parameter_name=parameter_name,
+            base_dir=base_dir
+        )
+
+def plot_multiple_timesteps_qwak(results_list, parameter_values, timesteps, domain, title_prefix="Parameter", parameter_name="param"):
+    """
+    Generic function to plot probability distributions for multiple timesteps using plot_qwak.
+    Each line is a walk, each color is a timestep, all in a single figure.
+    """
+    import matplotlib.pyplot as plt
+
+    # For each walk, plot its distribution at each timestep as a separate line (color by timestep)
+    for i, (walk_states, param_val) in enumerate(zip(results_list, parameter_values)):
+        x_value_matrix = []
+        y_value_matrix = []
+        legend_labels = []
+        for timestep in timesteps:
+            if walk_states and len(walk_states) > timestep and walk_states[timestep] is not None:
+                state = walk_states[timestep]
+                prob_dist = np.abs(state)**2
+                x_value_matrix.append(domain)
+                y_value_matrix.append(prob_dist)
+                legend_labels.append(f't={timestep}')
+        if y_value_matrix:
+            plot_qwak(
+                x_value_matrix,
+                y_value_matrix,
+                x_label='Position',
+                y_label='Probability',
+                plot_title=f'{title_prefix} {parameter_name}={param_val:.3f}: Distributions at Multiple Timesteps',
+                legend_labels=legend_labels,
+                legend_title='Timestep',
+                legend_ncol=1,
+                legend_loc='best',
+                use_grid=True,
+                font_size=12,
+                figsize=(8, 5)
+            )
+
+def plot_std_vs_time_qwak(stds, parameter_values, title_prefix="Parameter", parameter_name="param"):
+    """
+    Generic function to plot standard deviation vs time for all walks using plot_qwak.
+    """
+    x_value_matrix = [list(range(len(std))) for std in stds if len(std) > 0]
+    y_value_matrix = [std for std in stds if len(std) > 0]
+    legend_labels = [f'{title_prefix} {parameter_name}={param_val:.3f}' for std, param_val in zip(stds, parameter_values) if len(std) > 0]
+    if y_value_matrix:
+        plot_qwak(
+            x_value_matrix,
+            y_value_matrix,
+            x_label='Time Step',
+            y_label='Standard Deviation',
+            plot_title=f'Standard Deviation vs Time for Different {title_prefix} {parameter_name} Values',
+            legend_labels=legend_labels,
+            legend_title=None,
+            legend_ncol=1,
+            legend_loc='best',
+            use_grid=True,
+            font_size=14,
+            figsize=(8, 5)
+        )
+
+def plot_single_timestep_qwak(results_list, parameter_values, timestep, domain, title_prefix="Parameter", parameter_name="param"):
+    """
+    Generic function to plot probability distributions for all parameter values at a specific timestep using plot_qwak.
+    """
+    x_value_matrix = []
+    y_value_matrix = []
+    legend_labels = []
+    for walk_states, param_val in zip(results_list, parameter_values):
+        if walk_states and len(walk_states) > timestep and walk_states[timestep] is not None:
+            state = walk_states[timestep]
+            prob_dist = np.abs(state)**2
+            x_value_matrix.append(domain)
+            y_value_matrix.append(prob_dist)
+            legend_labels.append(f'{title_prefix} {parameter_name}={param_val:.3f}')
+    if y_value_matrix:
+        plot_qwak(
+            x_value_matrix,
+            y_value_matrix,
+            x_label='Position',
+            y_label='Probability',
+            plot_title=f'Probability Distributions at Timestep {timestep}',
+            legend_labels=legend_labels,
+            legend_title=None,
+            legend_ncol=1,
+            legend_loc='best',
+            use_grid=True,
+            font_size=14,
+            figsize=(10, 6)
+        )
