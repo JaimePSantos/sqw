@@ -5,7 +5,7 @@ from sqw.statistics import states2mean, states2std, states2ipr, states2survival
 from sqw.plots import final_distribution_plot, mean_plot, std_plot, ipr_plot, survival_plot
 from sqw.utils import random_tesselation_order, random_angle_deviation, tesselation_choice
 
-from QWAK.core.utils.plotTools import plot_qwak
+from utils.plotTools import plot_qwak
 
 import networkx as nx
 import numpy as np
@@ -244,7 +244,7 @@ def plot_single_timestep_qwak(results_list, shift_probs, timestep, domain, title
 
 # Example usage:
 if __name__ == "__main__":
-    N = 300
+    N = 1000
     steps = N//4
     angles = [[np.pi/3, np.pi/3]] * steps  # Fixed angles, no noise
     initial_state_kwargs = {"nodes": [N//2]}

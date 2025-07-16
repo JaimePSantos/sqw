@@ -276,7 +276,7 @@ def plot_single_timestep_qwak(results_list, devs, timestep, domain, title_prefix
 
 # Example usage:
 if __name__ == "__main__":
-    N = 100
+    N = 1000
     steps = N//3
     angles = [[np.pi/3, np.pi/3]] * steps
     tesselation_order = [[0,1] for x in range(steps)]
