@@ -533,7 +533,7 @@ def run_experiment():
 
     # Run the actual experiment
     print("Starting quantum walk experiment...")
-    N = 100
+    N = 2000
     steps = N//4
     samples = 10  # Number of samples per deviation
     angles = [[np.pi/3, np.pi/3]] * steps
