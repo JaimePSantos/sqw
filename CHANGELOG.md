@@ -9,7 +9,7 @@ Created cluster-compatible quantum walk experiment with sample functionality, qu
 
 #### 1. **Cluster-Compatible Script** 
 - **File**: `Jaime-Fig1_angles_samples_cluster.py`
-- **Features**: Self-contained execution, virtual environment management, dependency installation, automatic cleanup
+- **Features**: Self-contained execution, simplified deployment, automatic result bundling
 
 #### 2. **Sample Functionality**
 - **Nested folder structure**:
@@ -28,9 +28,9 @@ Created cluster-compatible quantum walk experiment with sample functionality, qu
 - **Fixed averaging**: Converts complex amplitudes to probability distributions (`|amplitude|²`) before statistical analysis
 - **Scientific accuracy**: Proper quantum state handling vs classical probability distributions
 
-#### 4. **Virtual Environment Management**
-- **Auto-detection**: Checks dependencies and creates venv if needed
-- **Self-contained**: Minimal external dependencies (Python 3.7+ only)
+#### 4. **Simplified Cluster Deployment**
+- **Direct execution**: No environment management overhead
+- **Minimal dependencies**: Assumes numpy, networkx, etc. are pre-installed
 - **Cross-platform**: Linux cluster optimized with Windows compatibility
 
 #### 5. **Native Linux Bundling**

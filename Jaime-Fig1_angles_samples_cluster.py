@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
 """
 Cluster-compatible version of the angle samples experiment.
-Handles virtual environment setup, dependency installation, and cleanup.
+Installs dependencies directly in the system environment.
 """
 
 import os
 import sys
 import subprocess
 import shutil
-import tempfile
 from pathlib import Path
 
 def run_command(cmd, check=True, capture_output=False):
@@ -28,75 +27,31 @@ def run_command(cmd, check=True, capture_output=False):
             sys.exit(1)
         return result
 
-def check_python_version():
-    """Check if Python version is compatible."""
-    if sys.version_info < (3, 7):
-        print("Error: Python 3.7 or higher is required")
-        sys.exit(1)
-    print(f"Python version: {sys.version}")
-
-def setup_virtual_environment(venv_path):
-    """Create and setup virtual environment with required packages."""
-    print("Setting up virtual environment...")
-    
-    # Create virtual environment
-    run_command(f"python3 -m venv {venv_path}")
-    
-    # Activate virtual environment and install packages
-    pip_cmd = f"{venv_path}/bin/pip"
-    
-    # Upgrade pip first
-    run_command(f"{pip_cmd} install --upgrade pip")
-    
-    # Install required packages
-    packages = [
-        "numpy",
-        "scipy", 
-        "matplotlib",
-        "networkx",
-        "pickle5"  # For better pickle compatibility
-    ]
-    
-    for package in packages:
-        print(f"Installing {package}...")
-        run_command(f"{pip_cmd} install {package}")
-    
-    print("Virtual environment setup complete.")
-    return f"{venv_path}/bin/python"
-
 def check_dependencies():
-    """Check if required dependencies are available."""
-    required_modules = ["numpy", "scipy", "matplotlib", "networkx"]
-    missing_modules = []
+    """Check if required dependencies are installed and install them if missing."""
+    required_packages = ['numpy', 'networkx']
+    missing_packages = []
     
-    for module in required_modules:
+    for package in required_packages:
         try:
-            __import__(module)
+            __import__(package)
+            print(f"✓ {package} is already installed")
         except ImportError:
-            missing_modules.append(module)
+            print(f"✗ {package} is missing")
+            missing_packages.append(package)
     
-    return missing_modules
-
-def create_sqw_mock_modules():
-    """Create mock/minimal versions of sqw modules for cluster environment."""
-    sqw_dir = Path("sqw")
-    sqw_dir.mkdir(exist_ok=True)
-    
-    # Create __init__.py files
-    for subdir in ["", "tesselations", "experiments_expanded", "states", "statistics", "plots", "utils"]:
-        if subdir:
-            (sqw_dir / subdir).mkdir(exist_ok=True)
-            (sqw_dir / subdir / "__init__.py").touch()
-        else:
-            (sqw_dir / "__init__.py").touch()
-    
-    # Create utils directory and plotTools
-    utils_dir = Path("utils")
-    utils_dir.mkdir(exist_ok=True)
-    (utils_dir / "__init__.py").touch()
-    
-    # Create jaime_scripts module
-    Path("jaime_scripts.py").touch()
+    if missing_packages:
+        print(f"Installing missing packages: {missing_packages}")
+        try:
+            # Install packages directly in system environment
+            cmd = f"{sys.executable} -m pip install " + " ".join(missing_packages)
+            run_command(cmd, check=True)
+            print("✓ All dependencies installed successfully")
+        except Exception as e:
+            print(f"Warning: Could not install dependencies: {e}")
+            print("Please ensure numpy and networkx are installed manually")
+    else:
+        print("✓ All required dependencies are available")
 
 def zip_results(results_dir="experiments_data_samples"):
     """Bundle the results directory using native Linux tar (no compression)."""
@@ -125,51 +80,20 @@ def zip_results(results_dir="experiments_data_samples"):
     else:
         print(f"Warning: Results directory {results_dir} not found")
 
-def cleanup_environment(venv_path):
-    """Clean up virtual environment."""
-    if os.path.exists(venv_path):
-        print("Cleaning up virtual environment...")
-        shutil.rmtree(venv_path)
-        print("Virtual environment removed.")
-
 def main():
     """Main execution function for cluster environment."""
     print("=== Cluster Quantum Walk Experiment ===")
     
-    # Check Python version
-    check_python_version()
+    # Check and install dependencies
+    print("Checking dependencies...")
+    check_dependencies()
     
-    # Setup paths
-    work_dir = Path.cwd()
-    venv_path = work_dir / "qw_venv"
-    
-    # Check if we need to setup virtual environment
-    missing_deps = check_dependencies()
-    python_executable = sys.executable
-    
-    if missing_deps:
-        print(f"Missing dependencies: {missing_deps}")
-        print("Setting up virtual environment...")
-        python_executable = setup_virtual_environment(venv_path)
-        
-        # Re-execute this script with the virtual environment Python
-        script_path = __file__
-        print(f"Re-executing with virtual environment Python: {python_executable}")
-        run_command(f"{python_executable} {script_path} --venv-ready")
-        
-        # Cleanup and exit
-        zip_results()
-        cleanup_environment(venv_path)
-        print("=== Experiment completed ===")
-        return
-    
-    # If we reach here, dependencies are available - run the experiment
-    print("Dependencies available, running experiment...")
+    # Run the experiment directly
+    print("Running quantum walk experiment...")
     run_experiment()
 
 def run_experiment():
     """Run the actual quantum walk experiment."""
-    # Import here to ensure virtual environment is active
     import numpy as np
     import networkx as nx
     import pickle
@@ -675,17 +599,11 @@ def run_experiment():
     print("Experiment completed successfully!")
     print(f"Results saved in experiments_data_samples/")
     
-    # Create ZIP archive of results
-    print("Creating ZIP archive of results...")
+    # Create TAR archive of results
+    print("Creating TAR archive of results...")
     zip_results("experiments_data_samples")
 
 
 if __name__ == "__main__":
-    # Check for virtual environment flag
-    if len(sys.argv) > 1 and sys.argv[1] == "--venv-ready":
-        # We're running in virtual environment, just run experiment
-        run_experiment()
-        print("=== Experiment completed in virtual environment ===")
-    else:
-        # Run main setup function
-        main()
+    # Run main function
+    main()
