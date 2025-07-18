@@ -561,42 +561,6 @@ def run_experiment():
             results.append(dev_results)
         return results
 
-    def prob_distributions2std(prob_distributions, domain):
-        """
-        Calculate standard deviation from probability distributions.
-        
-        Parameters
-        ----------
-        prob_distributions : list
-            List of probability distributions (already |amplitude|²)
-        domain : array-like
-            Position domain (e.g., np.arange(N))
-            
-        Returns
-        -------
-        list
-            Standard deviations for each time step
-        """
-        std_values = []
-        
-        for prob_dist in prob_distributions:
-            if prob_dist is None:
-                std_values.append(0)
-                continue
-                
-            # Calculate mean (first moment)
-            mean = np.sum(domain * prob_dist.flatten())
-            
-            # Calculate second moment
-            second_moment = np.sum((domain ** 2) * prob_dist.flatten())
-            
-            # Calculate variance and standard deviation
-            variance = second_moment - mean ** 2
-            std = np.sqrt(variance) if variance > 0 else 0
-            std_values.append(std)
-            
-        return std_values
-
     # Run the actual experiment
     print("Starting quantum walk experiment...")
     N = 2000
@@ -639,35 +603,16 @@ def run_experiment():
 
     print(f"Got results for {len(results_list)} devs with {samples} samples each")
 
-    # Calculate or load mean results for plotting
-    print("Calculating or loading means...")
-    mean_results = calculate_or_load_mean(
-        tesselation_func=even_line_two_tesselation,
-        N=N,
-        steps=steps,
-        devs=devs,
-        samples=samples,
-        base_dir="experiments_data_samples"
-    )
-
-    # Calculate statistics for plotting using mean results
-    domain = np.arange(N)
-    stds = []
-    for i, dev_mean_prob_dists in enumerate(mean_results):
-        if dev_mean_prob_dists and len(dev_mean_prob_dists) > 0 and all(state is not None for state in dev_mean_prob_dists):
-            std_values = prob_distributions2std(dev_mean_prob_dists, domain)
-            stds.append(std_values)
-            print(f"Dev {i} (angle_dev={devs[i]:.3f}): {len(std_values)} std values")
-        else:
-            print(f"Dev {i} (angle_dev={devs[i]:.3f}): No valid mean probability distributions")
-            stds.append([])
-
     print("Experiment completed successfully!")
     print(f"Results saved in experiments_data_samples/")
     
-    # Create ZIP archive of results
-    print("Creating ZIP archive of results...")
+    # Create TAR archive of results
+    print("Creating TAR archive of results...")
     zip_results("experiments_data_samples")
+    
+    print("=== Analysis Instructions ===")
+    print("To analyze the results, use the separate analyzer script:")
+    print("python cluster_results_analyzer.py --base-dir experiments_data_samples --N 2000")
 
 
 if __name__ == "__main__":

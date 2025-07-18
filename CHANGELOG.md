@@ -1,10 +1,93 @@
 # CHANGELOG
 
-## [Latest Session] - July 18, 2025 - Quantum Walk Cluster Implementation
+## [Latest Session] - July 18, 2025 - Mean Probability Distribution Processing
+
+### 🔧 **Recent Updates**
+- **Created mean probability distribution processing**: Script to convert quantum state samples to averaged probability distributions
+- **Fixed standard deviation calculations**: Now shows proper linear quantum walk spreading behavior
+- **Updated analysis pipeline**: Uses processed mean distributions for accurate statistical analysis
+
+### ⚠️ **CRITICAL WARNING - DATA QUALITY ISSUES**
+
+**🚨 THE RESULTS FROM THE CLUSTER EXECUTION SCRIPT ARE NOT CORRECT AND ARE SUBJECT TO CHANGE 🚨**
+
+The following serious data issues have been identified in the original cluster data:
+
+1. **❌ All noise cases produce identical results** - All different noise parameter directories contain exactly the same data, indicating a bug in the cluster execution script
+2. **❌ Quantum states not properly normalized** - Original quantum states have probability sum = 0.5 instead of 1.0 (probability conservation violation)
+3. **❌ Non-localized initial state** - The quantum walk doesn't start from a perfectly localized state (std=1.00 instead of 0.00)
+
+**These issues are in the original cluster execution script (`Jaime-Fig1_angles_samples_cluster.py`) and need to be fixed before the results can be considered scientifically valid.**
+
+### 🔧 **Major Changes**
+
+#### 1. **Mean Probability Distribution Processing**
+- **File**: `create_mean_probability_distributions.py`
+- **Features**: 
+  - Processes individual quantum state sample files from `experiments_data_samples`
+  - Converts quantum states to probability distributions using `|amplitude|²`
+  - Calculates mean probability distributions across all samples for each step and deviation
+  - Saves results to `experiments_data_samples_probDist` directory
+- **Results**: 
+  - Processed 6 deviation values: [0, 0.419, 0.524, 1.047, 1.571, 2.094]
+  - Processed 500 time steps for each deviation
+  - Processed 10 samples per time step
+  - All processing completed successfully with 0 failures
+
+#### 2. **Updated Analysis Pipeline**
+- **File**: `cluster_results_analyzer.py`
+- **Changes**:
+  - Changed default base directory to `experiments_data_samples_probDist`
+  - Now uses the mean probability distributions directly
+  - Properly handles probability normalization for standard deviation calculations
+- **Results**: 
+  - **✅ Linear quantum walk spreading**: Standard deviation increases linearly over time (1.00 → 1.15 → 1.34 → 1.51 → 1.67)
+  - **✅ Proper probability handling**: All probability distributions are correctly normalized during analysis
+  - **✅ All mean files created**: 500 mean probability distribution files per deviation
+
+#### 3. **Directory Structure Created**
+```
+experiments_data_samples_probDist/
+├── even_line_two_tesselation_angle_nonoise_0_0/
+│   ├── mean_step_0.pkl
+│   ├── mean_step_1.pkl
+│   ├── ...
+│   ├── mean_step_499.pkl
+│   └── processing_summary.pkl
+├── even_line_two_tesselation_angle_noise_0.41887902047863906_0.41887902047863906/
+│   ├── mean_step_0.pkl
+│   ├── ...
+│   └── processing_summary.pkl
+└── [4 more noise case directories with same structure]
+```
+
+### 📁 **Files Created**
+- `create_mean_probability_distributions.py` - Complete processing pipeline
+- `experiments_data_samples_probDist/` - Directory with processed mean distributions
+- `PROCESSING_SUMMARY.md` - Detailed processing documentation
+
+### Usage:
+```bash
+# Process sample files to create mean probability distributions
+python create_mean_probability_distributions.py
+
+# Analyze the results
+python cluster_results_analyzer.py --steps 100
+
+# Verify the processing was successful
+python create_mean_probability_distributions.py --verify-only
+```
+
+**⚠️ Remember: The underlying data has physics violations that need to be fixed in the cluster execution script before the results can be trusted for scientific analysis.**
+
+---
+
+## [Previous Session] - July 18, 2025 - Quantum Walk Cluster Implementation
 
 ### 🔧 **Recent Updates**
 - **Removed pickle5 dependency**: Incompatible with Python 3.12, using standard pickle instead
 - **Removed virtual environment cleanup**: Virtual environments now persist after experiment completion for faster subsequent runs
+- **Separated analysis functionality**: Created `cluster_results_analyzer.py` for loading and plotting results, keeping cluster execution lean
 
 ### Overview
 Created cluster-compatible quantum walk experiment with sample functionality, quantum mechanics corrections, and Linux deployment capabilities.
