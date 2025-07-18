@@ -52,9 +52,7 @@ def setup_virtual_environment(venv_path):
     packages = [
         "numpy",
         "scipy", 
-        "matplotlib",
-        "networkx",
-        "pickle5"  # For better pickle compatibility
+        "networkx"
     ]
     
     for package in packages:
