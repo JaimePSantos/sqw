@@ -123,13 +123,6 @@ def zip_results(results_dir="experiments_data_samples"):
     else:
         print(f"Warning: Results directory {results_dir} not found")
 
-def cleanup_environment(venv_path):
-    """Clean up virtual environment."""
-    if os.path.exists(venv_path):
-        print("Cleaning up virtual environment...")
-        shutil.rmtree(venv_path)
-        print("Virtual environment removed.")
-
 def main():
     """Main execution function for cluster environment."""
     print("=== Cluster Quantum Walk Experiment ===")
@@ -155,9 +148,8 @@ def main():
         print(f"Re-executing with virtual environment Python: {python_executable}")
         run_command(f"{python_executable} {script_path} --venv-ready")
         
-        # Cleanup and exit
+        # Bundle results and exit
         zip_results()
-        cleanup_environment(venv_path)
         print("=== Experiment completed ===")
         return
     

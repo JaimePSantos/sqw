@@ -2,6 +2,10 @@
 
 ## [Latest Session] - July 18, 2025 - Quantum Walk Cluster Implementation
 
+### 🔧 **Recent Updates**
+- **Removed pickle5 dependency**: Incompatible with Python 3.12, using standard pickle instead
+- **Removed virtual environment cleanup**: Virtual environments now persist after experiment completion for faster subsequent runs
+
 ### Overview
 Created cluster-compatible quantum walk experiment with sample functionality, quantum mechanics corrections, and Linux deployment capabilities.
 
