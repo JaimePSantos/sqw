@@ -3,6 +3,7 @@
 Fixed cluster-compatible version of the angle samples experiment.
 This version preserves the exact functionality of Jaime-Fig1_angles_samples.py
 while adding cluster environment setup and cleanup capabilities.
+Plotting dependencies and functions have been removed for cluster compatibility.
 """
 
 import sys
@@ -52,8 +53,7 @@ def setup_virtual_environment(venv_path):
     packages = [
         "numpy",
         "scipy", 
-        "networkx",
-        "matplotlib"
+        "networkx"
     ]
     
     for package in packages:
@@ -65,7 +65,7 @@ def setup_virtual_environment(venv_path):
 
 def check_dependencies():
     """Check if required dependencies are available."""
-    required_modules = ["numpy", "scipy", "matplotlib", "networkx"]
+    required_modules = ["numpy", "scipy", "networkx"]
     missing_modules = []
     
     for module in required_modules:
@@ -155,22 +155,13 @@ def run_experiment():
         from sqw.experiments_expanded import running, hamiltonian_builder, unitary_builder
         from sqw.states import uniform_initial_state, amp2prob
         from sqw.statistics import states2mean, states2std, states2ipr, states2survival
-        from sqw.plots import final_distribution_plot, mean_plot, std_plot, ipr_plot, survival_plot
         from sqw.utils import random_tesselation_order, random_angle_deviation, tesselation_choice
-        
-        try:
-            from utils.plotTools import plot_qwak
-        except ImportError:
-            print("Warning: Could not import utils.plotTools, plotting will be disabled")
             
         from jaime_scripts import (
             get_experiment_dir, 
             run_and_save_experiment_generic, 
             load_experiment_results_generic,
-            load_or_create_experiment_generic,
-            plot_multiple_timesteps_qwak,
-            plot_std_vs_time_qwak,
-            plot_single_timestep_qwak
+            load_or_create_experiment_generic
         )
         print("Successfully imported all required modules")
     except ImportError as e:
