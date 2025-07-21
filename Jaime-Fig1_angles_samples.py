@@ -526,7 +526,7 @@ def prob_distributions2std(prob_distributions, domain):
 
 # Example usage:
 if __name__ == "__main__":
-    N = 500
+    N = 2000
     steps = N//4
     samples = 10  # Number of samples per deviation
     angles = [[np.pi/3, np.pi/3]] * steps
