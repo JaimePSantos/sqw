@@ -191,3 +191,4 @@ experiments_data
 experiments_data_samples
 qw_venv
 experiments_data*
+**/__pycache__
