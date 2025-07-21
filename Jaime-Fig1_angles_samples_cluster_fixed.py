@@ -546,7 +546,7 @@ def run_experiment():
     print("Starting quantum walk experiment...")
     
     # Use cluster-appropriate parameters (larger N for cluster computing)
-    N = 500  # Larger system size for cluster
+    N = 2000  # Larger system size for cluster
     steps = N//4
     samples = 10  # Number of samples per deviation
     angles = [[np.pi/3, np.pi/3]] * steps
