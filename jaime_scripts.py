@@ -169,25 +169,25 @@ def get_experiment_dir(
     if noise_type == "angle":
         noise_str = "angle_noise" if has_noise else "angle_nonoise"
         folder = f"{tesselation_name}_{noise_str}"
-        base = os.path.join(base_dir, folder, f"N_{N}")
+        base = os.path.join(base_dir, folder)
         if has_noise and noise_params is not None:
             # Round each noise param to 2 decimal places for folder name
             noise_suffix = "_".join(f"{float(x):.2f}" for x in noise_params)
-            dev_folder = f"angle_dev_{noise_suffix}"
-            return os.path.join(base, dev_folder)
+            dev_folder = f"dev_{noise_suffix}"
+            return os.path.join(base, dev_folder, f"N_{N}")
         else:
-            return base
+            return os.path.join(base, f"N_{N}")
     elif noise_type == "tesselation_order":
         noise_str = "tesselation_order_noise" if has_noise else "tesselation_order_nonoise"
         folder = f"{tesselation_name}_{noise_str}"
-        base = os.path.join(base_dir, folder, f"N_{N}")
+        base = os.path.join(base_dir, folder)
         if has_noise and noise_params is not None:
             # Round each noise param to 3 decimal places for folder name
             noise_suffix = "_".join(f"{float(x):.3f}" for x in noise_params)
             shift_folder = f"tesselation_shift_prob_{noise_suffix}"
-            return os.path.join(base, shift_folder)
+            return os.path.join(base, shift_folder, f"N_{N}")
         else:
-            return base
+            return os.path.join(base, f"N_{N}")
     else:
         raise ValueError(f"Unknown noise_type: {noise_type}")
 

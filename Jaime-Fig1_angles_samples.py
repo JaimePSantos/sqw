@@ -338,6 +338,155 @@ def load_mean(
         results.append(dev_results)
     return results
 
+def create_mean_probability_distributions(
+    tesselation_func,
+    N,
+    steps,
+    devs,
+    samples,
+    source_base_dir="experiments_data_samples",
+    target_base_dir="experiments_data_samples_probDist"
+):
+    """
+    Convert each sample to probability distribution and create mean probability distributions
+    for each step, saving them to a new folder structure.
+    
+    Parameters
+    ----------
+    tesselation_func : function
+        The tesselation function used
+    N : int
+        Graph size
+    steps : int
+        Number of time steps
+    devs : list
+        List of deviation values
+    samples : int
+        Number of samples per deviation
+    source_base_dir : str
+        Source directory containing sample files
+    target_base_dir : str
+        Target directory for mean probability distributions
+    """
+    from sqw.states import amp2prob
+    
+    for dev in devs:
+        has_noise = dev > 0
+        source_exp_dir = get_experiment_dir(tesselation_func, has_noise, N, noise_params=[dev, dev], noise_type="angle", base_dir=source_base_dir)
+        target_exp_dir = get_experiment_dir(tesselation_func, has_noise, N, noise_params=[dev, dev], noise_type="angle", base_dir=target_base_dir)
+        
+        os.makedirs(target_exp_dir, exist_ok=True)
+        print(f"Processing dev={dev:.2f}, creating mean probability distributions...")
+        
+        for step_idx in range(steps):
+            step_dir = os.path.join(source_exp_dir, f"step_{step_idx}")
+            
+            # Load all samples for this step
+            sample_states = []
+            for sample_idx in range(samples):
+                filename = f"final_step_{step_idx}_sample{sample_idx}.pkl"
+                filepath = os.path.join(step_dir, filename)
+                
+                if os.path.exists(filepath):
+                    with open(filepath, "rb") as f:
+                        state = pickle.load(f)
+                    sample_states.append(state)
+                else:
+                    print(f"Warning: Sample file not found: {filepath}")
+            
+            if sample_states:
+                # Convert quantum states to probability distributions
+                prob_distributions = []
+                for state in sample_states:
+                    prob_dist = amp2prob(state)  # |amplitude|²
+                    prob_distributions.append(prob_dist)
+                
+                # Calculate mean probability distribution across samples
+                mean_prob_dist = np.mean(prob_distributions, axis=0)
+                
+                # Save mean probability distribution in the target directory
+                mean_filename = f"mean_step_{step_idx}.pkl"
+                mean_filepath = os.path.join(target_exp_dir, mean_filename)
+                with open(mean_filepath, "wb") as f:
+                    pickle.dump(mean_prob_dist, f)
+                print(f"  Saved mean probability distribution for step {step_idx}")
+            else:
+                print(f"  No valid samples found for step {step_idx}")
+
+def load_mean_probability_distributions(
+    tesselation_func,
+    N,
+    steps,
+    devs,
+    base_dir="experiments_data_samples_probDist"
+):
+    """
+    Load the mean probability distributions from the probDist folder.
+    Returns: List[List] - [dev][step] -> mean_probability_distribution
+    """
+    results = []
+    for dev in devs:
+        has_noise = dev > 0
+        exp_dir = get_experiment_dir(tesselation_func, has_noise, N, noise_params=[dev, dev], noise_type="angle", base_dir=base_dir)
+        
+        dev_results = []
+        for step_idx in range(steps):
+            mean_filename = f"mean_step_{step_idx}.pkl"
+            mean_filepath = os.path.join(exp_dir, mean_filename)
+            
+            if os.path.exists(mean_filepath):
+                with open(mean_filepath, "rb") as f:
+                    mean_state = pickle.load(f)
+                dev_results.append(mean_state)
+            else:
+                print(f"Warning: Mean probability distribution file not found: {mean_filepath}")
+                dev_results.append(None)
+        results.append(dev_results)
+    return results
+
+def check_mean_probability_distributions_exist(
+    tesselation_func,
+    N,
+    steps,
+    devs,
+    base_dir="experiments_data_samples_probDist"
+):
+    """
+    Check if all mean probability distribution files exist.
+    Returns: bool
+    """
+    for dev in devs:
+        has_noise = dev > 0
+        exp_dir = get_experiment_dir(tesselation_func, has_noise, N, noise_params=[dev, dev], noise_type="angle", base_dir=base_dir)
+        
+        for step_idx in range(steps):
+            mean_filename = f"mean_step_{step_idx}.pkl"
+            mean_filepath = os.path.join(exp_dir, mean_filename)
+            if not os.path.exists(mean_filepath):
+                return False
+    return True
+
+def load_or_create_mean_probability_distributions(
+    tesselation_func,
+    N,
+    steps,
+    devs,
+    samples,
+    source_base_dir="experiments_data_samples",
+    target_base_dir="experiments_data_samples_probDist"
+):
+    """
+    Load mean probability distributions if they exist, otherwise create them.
+    Returns: List[List] - [dev][step] -> mean_probability_distribution
+    """
+    if check_mean_probability_distributions_exist(tesselation_func, N, steps, devs, target_base_dir):
+        print("Loading existing mean probability distributions...")
+        return load_mean_probability_distributions(tesselation_func, N, steps, devs, target_base_dir)
+    else:
+        print("Creating mean probability distributions...")
+        create_mean_probability_distributions(tesselation_func, N, steps, devs, samples, source_base_dir, target_base_dir)
+        return load_mean_probability_distributions(tesselation_func, N, steps, devs, target_base_dir)
+
 def prob_distributions2std(prob_distributions, domain):
     """
     Calculate standard deviation from probability distributions.
@@ -377,15 +526,16 @@ def prob_distributions2std(prob_distributions, domain):
 
 # Example usage:
 if __name__ == "__main__":
-    N = 100
+    N = 500
     steps = N//4
-    samples = 100  # Number of samples per deviation
+    samples = 10  # Number of samples per deviation
     angles = [[np.pi/3, np.pi/3]] * steps
     tesselation_order = [[0,1] for x in range(steps)]
     initial_state_kwargs = {"nodes": [N//2]}
 
     # List of devs and corresponding angles_list_list
-    devs = [0, (np.pi/3)/2.5, (np.pi/3)/2, (np.pi/3), (np.pi/3) * 1.5,(np.pi/3) * 2]
+    # devs = [0, (np.pi/3)/2.5, (np.pi/3)/2, (np.pi/3), (np.pi/3) * 1.5,(np.pi/3) * 2]
+    devs = [0, (np.pi/3)/2.5,(np.pi/3) * 2]
     angles_list_list = []  # [dev][sample] -> angles
     
     for dev in devs:
@@ -417,15 +567,16 @@ if __name__ == "__main__":
 
     print(f"Got results for {len(results_list)} devs with {samples} samples each")
 
-    # Calculate or load mean results for plotting
-    print("Calculating or loading means...")
-    mean_results = calculate_or_load_mean(
+    # Create or load mean probability distributions
+    print("Creating or loading mean probability distributions...")
+    mean_results = load_or_create_mean_probability_distributions(
         tesselation_func=even_line_two_tesselation,
         N=N,
         steps=steps,
         devs=devs,
         samples=samples,
-        base_dir="experiments_data_samples"
+        source_base_dir="experiments_data_samples",
+        target_base_dir="experiments_data_samples_probDist"
     )
 
     # Calculate statistics for plotting using mean results
@@ -435,9 +586,9 @@ if __name__ == "__main__":
         if dev_mean_prob_dists and len(dev_mean_prob_dists) > 0 and all(state is not None for state in dev_mean_prob_dists):
             std_values = prob_distributions2std(dev_mean_prob_dists, domain)
             stds.append(std_values)
-            print(f"Dev {i} (angle_dev={devs[i]:.3f}): {len(std_values)} std values")
+            print(f"Dev {i} (angle_dev={devs[i]:.2f}): {len(std_values)} std values")
         else:
-            print(f"Dev {i} (angle_dev={devs[i]:.3f}): No valid mean probability distributions")
+            print(f"Dev {i} (angle_dev={devs[i]:.2f}): No valid mean probability distributions")
             stds.append([])
 
     # Plot all devs in a single figure
