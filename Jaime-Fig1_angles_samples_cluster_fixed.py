@@ -617,15 +617,15 @@ def run_experiment():
     print("Starting quantum walk experiment...")
     
     # Optimized parameters for better cluster performance
-    N = 1000  # Reduced system size for faster computation
-    steps = N//8  # Reduced steps for faster execution
-    samples = 5  # Reduced samples for quicker testing
+    N = 2000  # Reduced system size for faster computation
+    steps = N//4  # Reduced steps for faster execution
+    samples = 10  # Reduced samples for quicker testing
     angles = [[np.pi/3, np.pi/3]] * steps
     tesselation_order = [[0,1] for x in range(steps)]
     initial_state_kwargs = {"nodes": [N//2]}
 
     # Reduced list of devs for faster execution
-    devs = [0, (np.pi/3)/2.5, (np.pi/3)]  # Reduced from 6 to 3 deviations
+    devs = [0, (np.pi/3)/2.5, (np.pi/3)*2]  # Reduced from 6 to 3 deviations
     angles_list_list = []  # [dev][sample] -> angles
     
     print(f"Cluster-optimized parameters: N={N}, steps={steps}, samples={samples}")
