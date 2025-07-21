@@ -3,7 +3,6 @@
 Fixed cluster-compatible version of the angle samples experiment.
 This version preserves the exact functionality of Jaime-Fig1_angles_samples.py
 while adding cluster environment setup and cleanup capabilities.
-Plotting dependencies and functions have been removed for cluster compatibility.
 """
 
 import sys
@@ -53,7 +52,8 @@ def setup_virtual_environment(venv_path):
     packages = [
         "numpy",
         "scipy", 
-        "networkx"
+        "networkx",
+        "matplotlib"
     ]
     
     for package in packages:
@@ -65,7 +65,7 @@ def setup_virtual_environment(venv_path):
 
 def check_dependencies():
     """Check if required dependencies are available."""
-    required_modules = ["numpy", "scipy", "networkx"]
+    required_modules = ["numpy", "scipy", "networkx", "matplotlib"]
     missing_modules = []
     
     for module in required_modules:
