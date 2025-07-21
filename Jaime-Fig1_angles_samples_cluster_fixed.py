@@ -296,6 +296,8 @@ def run_experiment():
         total_start_time = time.time()
         total_samples = len(devs) * samples
         completed_samples = 0
+        skipped_samples = 0
+        computed_samples = 0
         
         for dev_idx, dev in enumerate(devs):
             has_noise = dev > 0
@@ -310,8 +312,49 @@ def run_experiment():
             # Track timing for this deviation
             dev_start_time = time.time()
             dev_results = []
+            dev_computed_samples = 0
+            dev_skipped_samples = 0
             
             for sample_idx in range(samples):
+                # Check if this sample already exists - skip if it does
+                sample_exists = True
+                for step_idx in range(steps):
+                    step_dir = os.path.join(exp_dir, f"step_{step_idx}")
+                    filename = f"final_step_{step_idx}_sample{sample_idx}.pkl"
+                    filepath = os.path.join(step_dir, filename)
+                    if not os.path.exists(filepath):
+                        sample_exists = False
+                        break
+                
+                if sample_exists:
+                    print(f"[run_and_save_experiment] Sample {sample_idx+1}/{samples} for dev={dev:.3f} already exists, skipping...")
+                    completed_samples += 1
+                    skipped_samples += 1
+                    dev_skipped_samples += 1
+                    # Load existing data for consistency
+                    sample_states = []
+                    for step_idx in range(steps):
+                        step_dir = os.path.join(exp_dir, f"step_{step_idx}")
+                        filename = f"final_step_{step_idx}_sample{sample_idx}.pkl"
+                        filepath = os.path.join(step_dir, filename)
+                        with open(filepath, "rb") as f:
+                            state = pickle.load(f)
+                        sample_states.append(state)
+                    dev_results.append(sample_states)
+                    
+                    # Update progress for skipped sample
+                    elapsed_total = time.time() - total_start_time
+                    remaining_samples = total_samples - completed_samples
+                    if completed_samples > skipped_samples:  # Only calculate ETA if we have computed samples
+                        avg_time_per_computed_sample = elapsed_total / (completed_samples - skipped_samples)
+                        eta_seconds = avg_time_per_computed_sample * (remaining_samples - skipped_samples)
+                        print(f"[Progress] {completed_samples}/{total_samples} samples completed ({completed_samples/total_samples*100:.1f}%) - {skipped_samples} skipped")
+                        if eta_seconds > 0:
+                            print(f"[ETA] Estimated time remaining: {eta_seconds/60:.1f} minutes ({eta_seconds:.1f} seconds)")
+                    else:
+                        print(f"[Progress] {completed_samples}/{total_samples} samples completed ({completed_samples/total_samples*100:.1f}%) - {skipped_samples} skipped")
+                    continue
+                
                 angles = angles_list_list[dev_idx][sample_idx]
                 
                 print(f"[run_and_save_experiment] Running walk for dev={dev:.3f}, sample={sample_idx+1}/{samples}...")
@@ -331,13 +374,15 @@ def run_experiment():
                 
                 # Calculate progress and ETA
                 completed_samples += 1
+                computed_samples += 1
+                dev_computed_samples += 1
                 elapsed_total = time.time() - total_start_time
-                avg_time_per_sample = elapsed_total / completed_samples
-                remaining_samples = total_samples - completed_samples
-                eta_seconds = avg_time_per_sample * remaining_samples
+                avg_time_per_computed_sample = elapsed_total / computed_samples
+                remaining_computed_samples = (total_samples - completed_samples) - (skipped_samples * (total_samples - completed_samples) / total_samples)
+                eta_seconds = avg_time_per_computed_sample * remaining_computed_samples
                 
-                print(f"[Progress] {completed_samples}/{total_samples} samples completed ({completed_samples/total_samples*100:.1f}%)")
-                if remaining_samples > 0:
+                print(f"[Progress] {completed_samples}/{total_samples} samples completed ({completed_samples/total_samples*100:.1f}%) - {skipped_samples} skipped, {computed_samples} computed")
+                if remaining_computed_samples > 0:
                     print(f"[ETA] Estimated time remaining: {eta_seconds/60:.1f} minutes ({eta_seconds:.1f} seconds)")
                 
                 # Save each step's final state in its own step folder (optimized I/O)
@@ -357,10 +402,22 @@ def run_experiment():
             # Summary for this deviation
             dev_total_time = time.time() - dev_start_time
             print(f"[Dev Summary] Completed all {samples} samples for dev={dev:.3f} in {dev_total_time:.2f} seconds")
-            print(f"[Dev Summary] Average time per sample for dev={dev:.3f}: {dev_total_time/samples:.2f} seconds")
+            if dev_computed_samples > 0:
+                print(f"[Dev Summary] Computed {dev_computed_samples} samples, skipped {dev_skipped_samples} existing samples")
+                print(f"[Dev Summary] Average time per computed sample for dev={dev:.3f}: {dev_total_time/dev_computed_samples:.2f} seconds")
+            else:
+                print(f"[Dev Summary] All {samples} samples were already computed (skipped)")
             print("=" * 60)
             
             results.append(dev_results)
+        
+        # Final summary
+        print(f"\n=== Experiment Completion Summary ===")
+        print(f"Total samples: {total_samples}")
+        print(f"Computed samples: {computed_samples}")
+        print(f"Skipped existing samples: {skipped_samples}")
+        print(f"Computation efficiency: {computed_samples/total_samples*100:.1f}% new work")
+        
         return results
 
     def load_experiment_results(
