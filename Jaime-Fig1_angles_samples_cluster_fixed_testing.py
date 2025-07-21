@@ -617,8 +617,8 @@ def run_experiment():
     print("Starting quantum walk experiment...")
     
     # Optimized parameters for better cluster performance
-    N = 1000  # Reduced system size for faster computation
-    steps = N//8  # Reduced steps for faster execution
+    N = 100  # Reduced system size for faster computation
+    steps = N//4  # Reduced steps for faster execution
     samples = 5  # Reduced samples for quicker testing
     angles = [[np.pi/3, np.pi/3]] * steps
     tesselation_order = [[0,1] for x in range(steps)]
@@ -683,7 +683,7 @@ def run_experiment():
     prob_time = time.time() - prob_start_time
     print(f"Probability distributions processing completed in {prob_time:.2f} seconds")
 
-    # Calculate statistics for verification (but skip plotting on cluster)
+    # Calculate statistics for verification and plotting
     domain = np.arange(N)
     stds = []
     for i, dev_mean_prob_dists in enumerate(mean_results):
@@ -694,6 +694,79 @@ def run_experiment():
         else:
             print(f"Dev {i} (angle_dev={devs[i]:.2f}): No valid mean probability distributions")
             stds.append([])
+
+    # Plot standard deviation as a function of time steps
+    print("Creating standard deviation vs time steps plot...")
+    try:
+        import matplotlib.pyplot as plt
+        
+        plt.figure(figsize=(10, 6))
+        time_steps = np.arange(len(stds[0]) if stds[0] else 0)
+        
+        for i, (dev, std_values) in enumerate(zip(devs, stds)):
+            if std_values:  # Only plot if we have data
+                plt.plot(time_steps, std_values, 'o-', label=f'angle_dev = {dev:.3f}', linewidth=2, markersize=4)
+        
+        plt.xlabel('Time Steps', fontsize=12)
+        plt.ylabel('Standard Deviation', fontsize=12)
+        plt.title(f'Standard Deviation vs Time Steps\n(N={N}, samples={samples})', fontsize=14)
+        plt.legend(fontsize=10)
+        plt.grid(True, alpha=0.3)
+        plt.tight_layout()
+        
+        # Save the plot
+        plot_filename = f"stdev_vs_timesteps_N{N}_samples{samples}.png"
+        plt.savefig(plot_filename, dpi=300, bbox_inches='tight')
+        print(f"Plot saved as: {plot_filename}")
+        
+        # Also show the plot if running interactively
+        plt.show()
+        
+        # Create a second plot showing the evolution more clearly
+        plt.figure(figsize=(12, 8))
+        
+        # Plot 1: Standard deviation vs time steps
+        plt.subplot(2, 1, 1)
+        for i, (dev, std_values) in enumerate(zip(devs, stds)):
+            if std_values:
+                plt.plot(time_steps, std_values, 'o-', label=f'angle_dev = {dev:.3f}', linewidth=2, markersize=3)
+        plt.xlabel('Time Steps')
+        plt.ylabel('Standard Deviation')
+        plt.title(f'Standard Deviation Evolution (N={N}, samples={samples})')
+        plt.legend()
+        plt.grid(True, alpha=0.3)
+        
+        # Plot 2: Final standard deviation vs angle deviation
+        plt.subplot(2, 1, 2)
+        final_stds = [std_values[-1] if std_values else 0 for std_values in stds]
+        plt.plot(devs, final_stds, 'ro-', linewidth=2, markersize=8)
+        plt.xlabel('Angle Deviation (radians)')
+        plt.ylabel('Final Standard Deviation')
+        plt.title('Final Standard Deviation vs Angle Noise')
+        plt.grid(True, alpha=0.3)
+        
+        plt.tight_layout()
+        
+        # Save the combined plot
+        combined_plot_filename = f"stdev_analysis_N{N}_samples{samples}.png"
+        plt.savefig(combined_plot_filename, dpi=300, bbox_inches='tight')
+        print(f"Combined analysis plot saved as: {combined_plot_filename}")
+        
+        plt.show()
+        
+        # Print some statistics
+        print("\n=== Standard Deviation Analysis ===")
+        for i, (dev, std_values) in enumerate(zip(devs, stds)):
+            if std_values:
+                initial_std = std_values[0]
+                final_std = std_values[-1]
+                max_std = max(std_values)
+                print(f"Dev {dev:.3f}: Initial={initial_std:.3f}, Final={final_std:.3f}, Max={max_std:.3f}")
+        
+    except ImportError:
+        print("Warning: matplotlib not available for plotting")
+    except Exception as e:
+        print(f"Warning: Could not create plot: {e}")
 
     print("Experiment completed successfully!")
     total_time = time.time() - start_time
