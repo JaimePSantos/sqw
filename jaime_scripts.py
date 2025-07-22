@@ -8,6 +8,8 @@ import os
 import ast
 import numpy as np
 import json
+import pickle
+import time
 
 def load_list_from_file(file_path):
     with open(file_path, 'r') as file:
@@ -419,3 +421,418 @@ def plot_single_timestep_qwak(results_list, parameter_values, timestep, domain, 
             font_size=14,
             figsize=(10, 6)
         )
+
+# ===== IMPROVED EXPERIMENT FUNCTIONS =====
+
+def run_and_save_experiment_samples(
+    graph_func,
+    tesselation_func,
+    N,
+    steps,
+    angles_list_list,  # List of lists: [dev][sample] -> angles for each walk
+    tesselation_order,
+    initial_state_func,
+    initial_state_kwargs,
+    devs,  # List of devs for each walk
+    samples,  # Number of samples per deviation
+    base_dir="experiments_data_samples"
+):
+    """
+    Runs the experiment for each dev with multiple samples and saves each sample's final states 
+    in step folders within each dev folder. Includes progress tracking and memory optimization.
+    """
+    from sqw.experiments_expanded import running
+    
+    results = []
+    total_start_time = time.time()
+    total_samples = len(devs) * samples
+    completed_samples = 0
+    skipped_samples = 0
+    computed_samples = 0
+    
+    for dev_idx, dev in enumerate(devs):
+        has_noise = dev > 0
+        exp_dir = get_experiment_dir(tesselation_func, has_noise, N, noise_params=[dev, dev], noise_type="angle", base_dir=base_dir)
+        os.makedirs(exp_dir, exist_ok=True)
+        print(f"[run_and_save_experiment] Saving results to {exp_dir} for angle_dev={dev:.3f}")
+
+        G = graph_func(N)
+        T = tesselation_func(N)
+        initial_state = initial_state_func(N, **initial_state_kwargs)
+
+        # Track timing for this deviation
+        dev_start_time = time.time()
+        dev_results = []
+        dev_computed_samples = 0
+        dev_skipped_samples = 0
+        
+        for sample_idx in range(samples):
+            # Check if this sample already exists - skip if it does
+            sample_exists = True
+            for step_idx in range(steps):
+                step_dir = os.path.join(exp_dir, f"step_{step_idx}")
+                filename = f"final_step_{step_idx}_sample{sample_idx}.pkl"
+                filepath = os.path.join(step_dir, filename)
+                if not os.path.exists(filepath):
+                    sample_exists = False
+                    break
+            
+            if sample_exists:
+                print(f"[run_and_save_experiment] Sample {sample_idx+1}/{samples} for dev={dev:.3f} already exists, skipping...")
+                completed_samples += 1
+                skipped_samples += 1
+                dev_skipped_samples += 1
+                
+                # Update progress for skipped sample
+                elapsed_total = time.time() - total_start_time
+                remaining_samples = total_samples - completed_samples
+                if completed_samples > skipped_samples:  # Only calculate ETA if we have computed samples
+                    avg_time_per_computed_sample = elapsed_total / (completed_samples - skipped_samples)
+                    eta_seconds = avg_time_per_computed_sample * (remaining_samples - skipped_samples)
+                    print(f"[Progress] {completed_samples}/{total_samples} samples completed ({completed_samples/total_samples*100:.1f}%) - {skipped_samples} skipped")
+                    if eta_seconds > 0:
+                        print(f"[ETA] Estimated time remaining: {eta_seconds/60:.1f} minutes ({eta_seconds:.1f} seconds)")
+                else:
+                    print(f"[Progress] {completed_samples}/{total_samples} samples completed ({completed_samples/total_samples*100:.1f}%) - {skipped_samples} skipped")
+                continue
+            
+            angles = angles_list_list[dev_idx][sample_idx]
+            
+            print(f"[run_and_save_experiment] Running walk for dev={dev:.3f}, sample={sample_idx+1}/{samples}...")
+            
+            # Time each sample execution
+            sample_start_time = time.time()
+            final_states = running(
+                G, T, steps,
+                initial_state,
+                angles=angles,
+                tesselation_order=tesselation_order
+            )
+            sample_end_time = time.time()
+            sample_duration = sample_end_time - sample_start_time
+            
+            print(f"[run_and_save_experiment] Sample {sample_idx+1}/{samples} completed in {sample_duration:.2f} seconds")
+            
+            # Calculate progress and ETA
+            completed_samples += 1
+            computed_samples += 1
+            dev_computed_samples += 1
+            elapsed_total = time.time() - total_start_time
+            avg_time_per_computed_sample = elapsed_total / computed_samples
+            remaining_computed_samples = (total_samples - completed_samples) - (skipped_samples * (total_samples - completed_samples) / total_samples)
+            eta_seconds = avg_time_per_computed_sample * remaining_computed_samples
+            
+            print(f"[Progress] {completed_samples}/{total_samples} samples completed ({completed_samples/total_samples*100:.1f}%) - {skipped_samples} skipped, {computed_samples} computed")
+            if remaining_computed_samples > 0:
+                print(f"[ETA] Estimated time remaining: {eta_seconds/60:.1f} minutes ({eta_seconds:.1f} seconds)")
+            
+            # Save each step's final state in its own step folder (optimized I/O)
+            for step_idx, state in enumerate(final_states):
+                step_dir = os.path.join(exp_dir, f"step_{step_idx}")
+                os.makedirs(step_dir, exist_ok=True)
+                filename = f"final_step_{step_idx}_sample{sample_idx}.pkl"
+                filepath = os.path.join(step_dir, filename)
+                
+                # Use highest pickle protocol for faster I/O
+                with open(filepath, "wb") as f:
+                    pickle.dump(state, f, protocol=pickle.HIGHEST_PROTOCOL)
+            
+            # Do not append final_states to dev_results; just save to file and free memory
+            print(f"[run_and_save_experiment] Saved {len(final_states)} states for dev={dev:.3f}, sample={sample_idx}.")
+            final_states = None
+        
+        # Summary for this deviation
+        dev_total_time = time.time() - dev_start_time
+        print(f"[Dev Summary] Completed all {samples} samples for dev={dev:.3f} in {dev_total_time:.2f} seconds")
+        if dev_computed_samples > 0:
+            print(f"[Dev Summary] Computed {dev_computed_samples} samples, skipped {dev_skipped_samples} existing samples")
+            print(f"[Dev Summary] Average time per computed sample for dev={dev:.3f}: {dev_total_time/dev_computed_samples:.2f} seconds")
+        else:
+            print(f"[Dev Summary] All {samples} samples were already computed (skipped)")
+        print("=" * 60)
+        
+        results.append(dev_results)
+    
+    # Final summary
+    print(f"\n=== Experiment Completion Summary ===")
+    print(f"Total samples: {total_samples}")
+    print(f"Computed samples: {computed_samples}")
+    print(f"Skipped existing samples: {skipped_samples}")
+    print(f"Computation efficiency: {computed_samples/total_samples*100:.1f}% new work")
+    
+    return results
+
+def load_experiment_results_samples(
+    tesselation_func,
+    N,
+    steps,
+    devs,
+    samples,
+    base_dir="experiments_data_samples"
+):
+    """
+    Loads all final states from disk for each dev with multiple samples.
+    Memory-optimized version that doesn't load everything into memory.
+    Returns: None (for memory efficiency)
+    """
+    results = []
+    for dev in devs:
+        has_noise = dev > 0
+        exp_dir = get_experiment_dir(tesselation_func, has_noise, N, noise_params=[dev, dev], noise_type="angle", base_dir=base_dir)
+        
+        dev_results = []
+        for sample_idx in range(samples):
+            sample_states = []
+            for step_idx in range(steps):
+                step_dir = os.path.join(exp_dir, f"step_{step_idx}")
+                filename = f"final_step_{step_idx}_sample{sample_idx}.pkl"
+                filepath = os.path.join(step_dir, filename)
+                
+                if os.path.exists(filepath):
+                    # Use faster pickle loading
+                    with open(filepath, "rb") as f:
+                        state = pickle.load(f)
+                    sample_states.append(state)
+                else:
+                    print(f"Warning: File not found: {filepath}")
+                    sample_states.append(None)
+        # Do not append sample_states to dev_results; just load for consistency, then free
+        # Do not append dev_results to results; just process for statistics if needed
+    # Return None or summary statistics if needed, but not the full states
+    return None
+
+def load_or_create_experiment_samples(
+    graph_func,
+    tesselation_func,
+    N,
+    steps,
+    angles_list_list,  # List of lists: [dev][sample] -> angles for each walk
+    tesselation_order,
+    initial_state_func,
+    initial_state_kwargs,
+    devs,  # List of devs for each walk
+    samples,  # Number of samples per deviation
+    base_dir="experiments_data_samples"
+):
+    """
+    Loads experiment results for each walk with samples if they exist, otherwise runs and saves them.
+    Returns: List[List[List]] - [dev][sample][step] -> state
+    """
+    # Check if all experiment files exist
+    all_exist = True
+    for dev in devs:
+        has_noise = dev > 0
+        exp_dir = get_experiment_dir(tesselation_func, has_noise, N, noise_params=[dev, dev], noise_type="angle", base_dir=base_dir)
+        
+        for sample_idx in range(samples):
+            for step_idx in range(steps):
+                step_dir = os.path.join(exp_dir, f"step_{step_idx}")
+                filename = f"final_step_{step_idx}_sample{sample_idx}.pkl"
+                filepath = os.path.join(step_dir, filename)
+                if not os.path.exists(filepath):
+                    all_exist = False
+                    break
+            if not all_exist:
+                break
+        if not all_exist:
+            break
+    
+    if all_exist:
+        print("Loading existing experiment results...")
+        return load_experiment_results_samples(tesselation_func, N, steps, devs, samples, base_dir)
+    else:
+        print("Some results missing, running new experiment...")
+        return run_and_save_experiment_samples(
+            graph_func, tesselation_func, N, steps, angles_list_list,
+            tesselation_order, initial_state_func, initial_state_kwargs,
+            devs, samples, base_dir
+        )
+
+def create_mean_probability_distributions(
+    tesselation_func,
+    N,
+    steps,
+    devs,
+    samples,
+    source_base_dir="experiments_data_samples",
+    target_base_dir="experiments_data_samples_probDist"
+):
+    """
+    Convert each sample to probability distribution and create mean probability distributions
+    for each step, saving them to a new folder structure.
+    """
+    from sqw.states import amp2prob
+    
+    for dev in devs:
+        has_noise = dev > 0
+        source_exp_dir = get_experiment_dir(tesselation_func, has_noise, N, noise_params=[dev, dev], noise_type="angle", base_dir=source_base_dir)
+        target_exp_dir = get_experiment_dir(tesselation_func, has_noise, N, noise_params=[dev, dev], noise_type="angle", base_dir=target_base_dir)
+        
+        os.makedirs(target_exp_dir, exist_ok=True)
+        print(f"Processing dev={dev:.2f}, creating mean probability distributions...")
+        
+        for step_idx in range(steps):
+            step_dir = os.path.join(source_exp_dir, f"step_{step_idx}")
+            
+            # Load all samples for this step with optimized memory usage
+            sample_states = []
+            valid_samples = 0
+            for sample_idx in range(samples):
+                filename = f"final_step_{step_idx}_sample{sample_idx}.pkl"
+                filepath = os.path.join(step_dir, filename)
+                
+                if os.path.exists(filepath):
+                    with open(filepath, "rb") as f:
+                        state = pickle.load(f)
+                    sample_states.append(state)
+                    valid_samples += 1
+                else:
+                    print(f"Warning: Sample file not found: {filepath}")
+            
+            if sample_states and valid_samples > 0:
+                # Convert quantum states to probability distributions with memory optimization
+                prob_distributions = []
+                for i, state in enumerate(sample_states):
+                    prob_dist = amp2prob(state)  # |amplitude|²
+                    prob_distributions.append(prob_dist)
+                    # Clear state from memory to save RAM
+                    sample_states[i] = None
+                
+                # Calculate mean probability distribution across samples
+                mean_prob_dist = np.mean(prob_distributions, axis=0)
+                
+                # Clear prob_distributions to save memory
+                del prob_distributions
+                
+                # Save mean probability distribution with high protocol
+                mean_filename = f"mean_step_{step_idx}.pkl"
+                mean_filepath = os.path.join(target_exp_dir, mean_filename)
+                with open(mean_filepath, "wb") as f:
+                    pickle.dump(mean_prob_dist, f, protocol=pickle.HIGHEST_PROTOCOL)
+                
+                if step_idx % 50 == 0:  # Progress indicator
+                    print(f"  Processed {step_idx + 1}/{steps} steps for dev={dev:.2f}")
+            else:
+                print(f"  No valid samples found for step {step_idx}")
+
+def load_mean_probability_distributions(
+    tesselation_func,
+    N,
+    steps,
+    devs,
+    base_dir="experiments_data_samples_probDist"
+):
+    """
+    Load the mean probability distributions from the probDist folder.
+    Returns: List[List] - [dev][step] -> mean_probability_distribution
+    """
+    results = []
+    for dev in devs:
+        has_noise = dev > 0
+        exp_dir = get_experiment_dir(tesselation_func, has_noise, N, noise_params=[dev, dev], noise_type="angle", base_dir=base_dir)
+        
+        dev_results = []
+        for step_idx in range(steps):
+            mean_filename = f"mean_step_{step_idx}.pkl"
+            mean_filepath = os.path.join(exp_dir, mean_filename)
+            
+            if os.path.exists(mean_filepath):
+                # Use optimized pickle loading
+                with open(mean_filepath, "rb") as f:
+                    mean_state = pickle.load(f)
+                dev_results.append(mean_state)
+            else:
+                print(f"Warning: Mean probability distribution file not found: {mean_filepath}")
+                dev_results.append(None)
+        results.append(dev_results)
+    return results
+
+def check_mean_probability_distributions_exist(
+    tesselation_func,
+    N,
+    steps,
+    devs,
+    base_dir="experiments_data_samples_probDist"
+):
+    """
+    Check if all mean probability distribution files exist.
+    Returns: bool
+    """
+    for dev in devs:
+        has_noise = dev > 0
+        exp_dir = get_experiment_dir(tesselation_func, has_noise, N, noise_params=[dev, dev], noise_type="angle", base_dir=base_dir)
+        
+        for step_idx in range(steps):
+            mean_filename = f"mean_step_{step_idx}.pkl"
+            mean_filepath = os.path.join(exp_dir, mean_filename)
+            if not os.path.exists(mean_filepath):
+                return False
+    return True
+
+def load_or_create_mean_probability_distributions(
+    tesselation_func,
+    N,
+    steps,
+    devs,
+    samples,
+    source_base_dir="experiments_data_samples",
+    target_base_dir="experiments_data_samples_probDist"
+):
+    """
+    Load mean probability distributions if they exist, otherwise create them.
+    Returns: List[List] - [dev][step] -> mean_probability_distribution
+    """
+    if check_mean_probability_distributions_exist(tesselation_func, N, steps, devs, target_base_dir):
+        print("Loading existing mean probability distributions...")
+        return load_mean_probability_distributions(tesselation_func, N, steps, devs, target_base_dir)
+    else:
+        print("Creating mean probability distributions...")
+        create_mean_probability_distributions(tesselation_func, N, steps, devs, samples, source_base_dir, target_base_dir)
+        return load_mean_probability_distributions(tesselation_func, N, steps, devs, target_base_dir)
+
+def prob_distributions2std(prob_distributions, domain):
+    """
+    Calculate standard deviation from probability distributions.
+    
+    Parameters
+    ----------
+    prob_distributions : list
+        List of probability distributions (already |amplitude|²)
+    domain : array-like
+        Position domain (e.g., np.arange(N) - N//2)
+        
+    Returns
+    -------
+    list
+        Standard deviations for each time step
+    """
+    std_values = []
+    
+    for prob_dist in prob_distributions:
+        if prob_dist is None:
+            std_values.append(0)
+            continue
+            
+        # Ensure probability distribution is properly formatted
+        prob_dist_flat = prob_dist.flatten()
+        total_prob = np.sum(prob_dist_flat)
+        
+        if total_prob == 0:
+            std_values.append(0)
+            continue
+            
+        # Always normalize to ensure proper probability distribution
+        prob_dist_flat = prob_dist_flat / total_prob
+        
+        # Calculate 1st moment (mean position)
+        moment_1 = np.sum(domain * prob_dist_flat)
+        
+        # Calculate 2nd moment
+        moment_2 = np.sum(domain**2 * prob_dist_flat)
+        
+        # Calculate standard deviation: sqrt(moment(2) - moment(1)^2)
+        stDev = moment_2 - moment_1**2
+        std = np.sqrt(stDev) if stDev > 0 else 0
+        std_values.append(std)
+        
+    return std_values

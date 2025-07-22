@@ -11,53 +11,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from pathlib import Path
 import sys
-
-def prob_distributions2std(prob_distributions, domain):
-    """
-    Calculate standard deviation from probability distributions.
-    
-    Parameters
-    ----------
-    prob_distributions : list
-        List of mean probability distributions (already computed)
-    domain : array-like
-        Position domain (e.g., np.arange(N))
-        
-    Returns
-    -------
-    list
-        Standard deviations for each time step
-    """
-    std_values = []
-    
-    for step_idx, prob_dist in enumerate(prob_distributions):
-        if prob_dist is None:
-            std_values.append(0)
-            continue
-            
-        # Ensure probability distribution is properly formatted
-        prob_dist_flat = prob_dist.flatten()
-        total_prob = np.sum(prob_dist_flat)
-        
-        if total_prob == 0:
-            std_values.append(0)
-            continue
-            
-        # Always normalize to ensure proper probability distribution
-        prob_dist_flat = prob_dist_flat / total_prob
-        
-        # Calculate 1st moment (mean position)
-        moment_1 = np.sum(domain * prob_dist_flat)
-        
-        # Calculate 2nd moment
-        moment_2 = np.sum(domain**2 * prob_dist_flat)
-        
-        # Calculate standard deviation: sqrt(moment(2) - moment(1)^2)
-        stDev = moment_2 - moment_1**2
-        std = np.sqrt(stDev) if stDev > 0 else 0
-        std_values.append(std)
-        
-    return std_values
+from jaime_scripts import prob_distributions2std, get_experiment_dir
 
 def load_mean_probability_distributions(exp_dir, steps):
     """

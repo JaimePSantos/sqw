@@ -23,32 +23,96 @@ import pickle
 
 # All experiment functions are now imported from jaime_scripts to avoid duplication
 
-# Convenience wrapper for this specific use case
-def run_and_save_experiment(graph_func, tesselation_func, N, steps, angles_list, tesselation_order, initial_state_func, initial_state_kwargs, devs, base_dir="experiments_data"):
-    """Wrapper for run_and_save_experiment_generic with angle-specific settings."""
+if __name__ == "__main__":
+    graph_func,
+    tesselation_func,
+    N,
+    steps,
+    angles_list,  # List of angles for each walk
+    tesselation_order,
+    initial_state_func,
+    initial_state_kwargs,
+    devs,  # List of devs for each walk
+    base_dir="experiments_data"
+):
+    """
+    Runs the experiment for each angles_list/dev and saves each walk's final states in its own dev folder.
+    """
     noise_params_list = [[dev, dev] if dev > 0 else [0, 0] for dev in devs]
     return run_and_save_experiment_generic(
-        graph_func=graph_func, tesselation_func=tesselation_func, N=N, steps=steps, 
-        parameter_list=devs, angles_or_angles_list=angles_list, tesselation_order_or_list=tesselation_order,
-        initial_state_func=initial_state_func, initial_state_kwargs=initial_state_kwargs,
-        noise_params_list=noise_params_list, noise_type="angle", parameter_name="dev", base_dir=base_dir
+        graph_func=graph_func,
+        tesselation_func=tesselation_func,
+        N=N,
+        steps=steps,
+        parameter_list=devs,
+        angles_or_angles_list=angles_list,
+        tesselation_order_or_list=tesselation_order,
+        initial_state_func=initial_state_func,
+        initial_state_kwargs=initial_state_kwargs,
+        noise_params_list=noise_params_list,
+        noise_type="angle",
+        parameter_name="angle_dev",
+        base_dir=base_dir
     )
 
-def load_experiment_results(tesselation_func, N, steps, devs, base_dir="experiments_data"):
-    """Wrapper for load_experiment_results_generic with angle-specific settings."""
+def load_experiment_results(
+    tesselation_func,
+    N,
+    steps,
+    devs,
+    angles_list,
+    base_dir="experiments_data"
+):
+    """
+    Loads all final states from disk for each dev/angles in the list.
+    """
     noise_params_list = [[dev, dev] if dev > 0 else [0, 0] for dev in devs]
-    return load_experiment_results_generic(tesselation_func, N, steps, devs, noise_params_list, "angle", base_dir)
+    return load_experiment_results_generic(
+        tesselation_func=tesselation_func,
+        N=N,
+        steps=steps,
+        parameter_list=devs,
+        noise_params_list=noise_params_list,
+        noise_type="angle",
+        base_dir=base_dir
+    )
 
-def load_or_create_experiment(graph_func, tesselation_func, N, steps, angles_list, tesselation_order, initial_state_func, initial_state_kwargs, devs, base_dir="experiments_data"):
-    """Wrapper for load_or_create_experiment_generic with angle-specific settings."""
+def load_or_create_experiment(
+    graph_func,
+    tesselation_func,
+    N,
+    steps,
+    angles_list,  # List of angles for each walk
+    tesselation_order,
+    initial_state_func,
+    initial_state_kwargs,
+    devs,  # List of devs for each walk
+    base_dir="experiments_data"
+):
+    """
+    Loads experiment results for each walk if they exist, otherwise runs and saves them.
+    Returns a list of lists: [walk1_states, walk2_states, ...]
+    """
     noise_params_list = [[dev, dev] if dev > 0 else [0, 0] for dev in devs]
     return load_or_create_experiment_generic(
-        graph_func=graph_func, tesselation_func=tesselation_func, N=N, steps=steps,
-        parameter_list=devs, angles_or_angles_list=angles_list, tesselation_order_or_list=tesselation_order,
-        initial_state_func=initial_state_func, initial_state_kwargs=initial_state_kwargs,
-        noise_params_list=noise_params_list, noise_type="angle", parameter_name="dev", base_dir=base_dir
+        graph_func=graph_func,
+        tesselation_func=tesselation_func,
+        N=N,
+        steps=steps,
+        parameter_list=devs,
+        angles_or_angles_list=angles_list,
+        tesselation_order_or_list=tesselation_order,
+        initial_state_func=initial_state_func,
+        initial_state_kwargs=initial_state_kwargs,
+        noise_params_list=noise_params_list,
+        noise_type="angle",
+        parameter_name="angle_dev",
+        base_dir=base_dir
     )
 
+
+
+# Example usage:
 if __name__ == "__main__":
     N = 100
     steps = N//4

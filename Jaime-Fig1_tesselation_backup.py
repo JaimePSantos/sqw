@@ -21,34 +21,96 @@ import numpy as np
 import os
 import pickle
 
-# All experiment functions are now imported from jaime_scripts to avoid duplication
-
-# Convenience wrapper for tesselation-specific use case
-def run_and_save_experiment(graph_func, tesselation_func, N, steps, tesselation_orders_list, angles, initial_state_func, initial_state_kwargs, shift_probs, base_dir="experiments_data"):
-    """Wrapper for run_and_save_experiment_generic with tesselation-specific settings."""
-    noise_params_list = [[prob, prob] if prob > 0 else [0, 0] for prob in shift_probs]
+def run_and_save_experiment(
+    graph_func,
+    tesselation_func,
+    N,
+    steps,
+    tesselation_orders_list,  # List of tesselation orders for each walk
+    angles,  # Fixed angles (no noise)
+    initial_state_func,
+    initial_state_kwargs,
+    shift_probs,  # List of shift probabilities for each walk
+    base_dir="experiments_data"
+):
+    """
+    Runs the experiment for each tesselation_order/shift_prob and saves each walk's final states in its own shift_prob folder.
+    """
+    noise_params_list = [[shift_prob] if shift_prob > 0 else [0] for shift_prob in shift_probs]
     return run_and_save_experiment_generic(
-        graph_func=graph_func, tesselation_func=tesselation_func, N=N, steps=steps,
-        parameter_list=shift_probs, angles_or_angles_list=angles, tesselation_order_or_list=tesselation_orders_list,
-        initial_state_func=initial_state_func, initial_state_kwargs=initial_state_kwargs,
-        noise_params_list=noise_params_list, noise_type="tesselation_order", parameter_name="prob", base_dir=base_dir
+        graph_func=graph_func,
+        tesselation_func=tesselation_func,
+        N=N,
+        steps=steps,
+        parameter_list=shift_probs,
+        angles_or_angles_list=angles,
+        tesselation_order_or_list=tesselation_orders_list,
+        initial_state_func=initial_state_func,
+        initial_state_kwargs=initial_state_kwargs,
+        noise_params_list=noise_params_list,
+        noise_type="tesselation_order",
+        parameter_name="shift_prob",
+        base_dir=base_dir
     )
 
-def load_experiment_results(tesselation_func, N, steps, shift_probs, base_dir="experiments_data"):
-    """Wrapper for load_experiment_results_generic with tesselation-specific settings."""
-    noise_params_list = [[prob, prob] if prob > 0 else [0, 0] for prob in shift_probs]
-    return load_experiment_results_generic(tesselation_func, N, steps, shift_probs, noise_params_list, "tesselation_order", base_dir)
+def load_experiment_results(
+    tesselation_func,
+    N,
+    steps,
+    shift_probs,
+    tesselation_orders_list,
+    base_dir="experiments_data"
+):
+    """
+    Loads all final states from disk for each shift_prob/tesselation_order in the list.
+    """
+    noise_params_list = [[shift_prob] if shift_prob > 0 else [0] for shift_prob in shift_probs]
+    return load_experiment_results_generic(
+        tesselation_func=tesselation_func,
+        N=N,
+        steps=steps,
+        parameter_list=shift_probs,
+        noise_params_list=noise_params_list,
+        noise_type="tesselation_order",
+        base_dir=base_dir
+    )
 
-def load_or_create_experiment(graph_func, tesselation_func, N, steps, tesselation_orders_list, angles, initial_state_func, initial_state_kwargs, shift_probs, base_dir="experiments_data"):
-    """Wrapper for load_or_create_experiment_generic with tesselation-specific settings."""
-    noise_params_list = [[prob, prob] if prob > 0 else [0, 0] for prob in shift_probs]
+def load_or_create_experiment(
+    graph_func,
+    tesselation_func,
+    N,
+    steps,
+    tesselation_orders_list,  # List of tesselation orders for each walk
+    angles,  # Fixed angles (no noise)
+    initial_state_func,
+    initial_state_kwargs,
+    shift_probs,  # List of shift probabilities for each walk
+    base_dir="experiments_data"
+):
+    """
+    Loads experiment results for each walk if they exist, otherwise runs and saves them.
+    Returns a list of lists: [walk1_states, walk2_states, ...]
+    """
+    noise_params_list = [[shift_prob] if shift_prob > 0 else [0] for shift_prob in shift_probs]
     return load_or_create_experiment_generic(
-        graph_func=graph_func, tesselation_func=tesselation_func, N=N, steps=steps,
-        parameter_list=shift_probs, angles_or_angles_list=angles, tesselation_order_or_list=tesselation_orders_list,
-        initial_state_func=initial_state_func, initial_state_kwargs=initial_state_kwargs,
-        noise_params_list=noise_params_list, noise_type="tesselation_order", parameter_name="prob", base_dir=base_dir
+        graph_func=graph_func,
+        tesselation_func=tesselation_func,
+        N=N,
+        steps=steps,
+        parameter_list=shift_probs,
+        angles_or_angles_list=angles,
+        tesselation_order_or_list=tesselation_orders_list,
+        initial_state_func=initial_state_func,
+        initial_state_kwargs=initial_state_kwargs,
+        noise_params_list=noise_params_list,
+        noise_type="tesselation_order",
+        parameter_name="shift_prob",
+        base_dir=base_dir
     )
 
+
+
+# Example usage:
 if __name__ == "__main__":
     N = 1000
     steps = N//4
