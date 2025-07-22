@@ -9,25 +9,45 @@ import sys
 import os
 import subprocess
 import tarfile
-import time
-import numpy as np
-import networkx as nx
-import pickle
 from pathlib import Path
 
-# Import shared functions from jaime_scripts
-from jaime_scripts import (
-    get_experiment_dir,
-    run_and_save_experiment_samples,
-    load_experiment_results_samples,
-    load_or_create_experiment_samples,
-    create_mean_probability_distributions,
-    load_mean_probability_distributions,
-    check_mean_probability_distributions_exist,
-    load_or_create_mean_probability_distributions,
-    prob_distributions2std
-)
-
+def get_experiment_dir(
+    tesselation_func,
+    has_noise,
+    N,
+    noise_params=None,
+    noise_type="angle",  # "angle" or "tesselation_order"
+    base_dir="experiments_data"
+):
+    """
+    Returns the directory path for the experiment based on tesselation, noise, and graph size.
+    """
+    tesselation_name = tesselation_func.__name__
+    if noise_type == "angle":
+        noise_str = "angle_noise" if has_noise else "angle_nonoise"
+        folder = f"{tesselation_name}_{noise_str}"
+        base = os.path.join(base_dir, folder)
+        if has_noise and noise_params is not None:
+            # Round each noise param to 2 decimal places for folder name
+            noise_suffix = "_".join(f"{float(x):.2f}" for x in noise_params)
+            dev_folder = f"dev_{noise_suffix}"
+            return os.path.join(base, dev_folder, f"N_{N}")
+        else:
+            return os.path.join(base, f"N_{N}")
+    elif noise_type == "tesselation_order":
+        noise_str = "tesselation_order_noise" if has_noise else "tesselation_order_nonoise"
+        folder = f"{tesselation_name}_{noise_str}"
+        base = os.path.join(base_dir, folder)
+        if has_noise and noise_params is not None:
+            # Round each noise param to 3 decimal places for folder name
+            noise_suffix = "_".join(f"{float(x):.3f}" for x in noise_params)
+            shift_folder = f"tesselation_shift_prob_{noise_suffix}"
+            return os.path.join(base, shift_folder, f"N_{N}")
+        else:
+            return os.path.join(base, f"N_{N}")
+    else:
+        raise ValueError(f"Unknown noise_type: {noise_type}")
+    
 def run_command(cmd, check=True, capture_output=False):
     """Run a shell command and return the result."""
     print(f"Running: {cmd}")
