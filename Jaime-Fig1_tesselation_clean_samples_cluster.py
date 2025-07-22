@@ -53,7 +53,8 @@ def setup_virtual_environment(venv_path):
         "numpy",
         "scipy", 
         "networkx",
-        "matplotlib"
+        "matplotlib",
+        "qwak-sim"  # Assuming qwak-sim is the package for quantum walk simulations
     ]
     
     for package in packages:
