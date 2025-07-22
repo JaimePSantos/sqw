@@ -13,7 +13,8 @@ from jaime_scripts import (
     load_or_create_experiment_generic,
     plot_multiple_timesteps_qwak,
     plot_std_vs_time_qwak,
-    plot_single_timestep_qwak
+    plot_single_timestep_qwak,
+    smart_load_or_create_experiment  # New intelligent loading function
 )
 
 import networkx as nx
@@ -40,13 +41,13 @@ def load_experiment_results(tesselation_func, N, steps, devs, base_dir="experime
     return load_experiment_results_generic(tesselation_func, N, steps, devs, noise_params_list, "angle", base_dir)
 
 def load_or_create_experiment(graph_func, tesselation_func, N, steps, angles_list, tesselation_order, initial_state_func, initial_state_kwargs, devs, base_dir="experiments_data"):
-    """Wrapper for load_or_create_experiment_generic with angle-specific settings."""
-    noise_params_list = [[dev, dev] if dev > 0 else [0, 0] for dev in devs]
-    return load_or_create_experiment_generic(
+    """Wrapper for smart_load_or_create_experiment with angle-specific settings."""
+    return smart_load_or_create_experiment(
         graph_func=graph_func, tesselation_func=tesselation_func, N=N, steps=steps,
-        parameter_list=devs, angles_or_angles_list=angles_list, tesselation_order_or_list=tesselation_order,
+        angles_or_angles_list=angles_list, tesselation_order_or_list=tesselation_order,
         initial_state_func=initial_state_func, initial_state_kwargs=initial_state_kwargs,
-        noise_params_list=noise_params_list, noise_type="angle", parameter_name="dev", base_dir=base_dir
+        parameter_list=devs, samples=None, noise_type="angle", parameter_name="dev",
+        samples_base_dir=base_dir, probdist_base_dir=base_dir + "_probDist"
     )
 
 if __name__ == "__main__":
@@ -81,18 +82,19 @@ if __name__ == "__main__":
         devs=devs
     )
 
-    print(f"Got results for {len(results_list)} walks")
+    print(f"Got results for {len(devs)} walks")
 
-    # Calculate statistics for plotting
+    # Calculate statistics for plotting using probability distributions
     domain = np.arange(N)
     stds = []
-    for i, walk_states in enumerate(results_list):
-        if walk_states and len(walk_states) > 0 and all(state is not None for state in walk_states):
-            std_values = states2std(walk_states, domain)
+    from jaime_scripts import prob_distributions2std
+    for i, prob_dists in enumerate(results_list):
+        if prob_dists and len(prob_dists) > 0 and all(state is not None for state in prob_dists):
+            std_values = prob_distributions2std(prob_dists, domain)
             stds.append(std_values)
             print(f"Walk {i} (angle_dev={devs[i]:.3f}): {len(std_values)} std values")
         else:
-            print(f"Walk {i} (angle_dev={devs[i]:.3f}): No valid states")
+            print(f"Walk {i} (angle_dev={devs[i]:.3f}): No valid probability distributions")
             stds.append([])
 
     # Plot all walks in a single figure

@@ -14,6 +14,15 @@ from jaime_scripts import (
     plot_multiple_timesteps_qwak,
     plot_std_vs_time_qwak,
     plot_single_timestep_qwak,
+    # Import the improved sample-based functions
+    run_and_save_experiment_samples,
+    load_experiment_results_samples,
+    load_or_create_experiment_samples,
+    create_mean_probability_distributions,
+    load_mean_probability_distributions,
+    check_mean_probability_distributions_exist,
+    load_or_create_mean_probability_distributions,
+    prob_distributions2std,
     smart_load_or_create_experiment  # New intelligent loading function
 )
 
@@ -44,70 +53,79 @@ def load_or_create_experiment(graph_func, tesselation_func, N, steps, tesselatio
     """Wrapper for smart_load_or_create_experiment with tesselation-specific settings."""
     return smart_load_or_create_experiment(
         graph_func=graph_func, tesselation_func=tesselation_func, N=N, steps=steps,
-        angles_or_angles_list=angles, tesselation_order_or_list=tesselation_orders_list,
+        angles_or_angles_list=angles,  # Fixed angles for all experiments
+        tesselation_order_or_list=tesselation_orders_list,  # 2D list [shift_prob][sample] -> tesselation_order
         initial_state_func=initial_state_func, initial_state_kwargs=initial_state_kwargs,
-        parameter_list=shift_probs, samples=None, noise_type="tesselation_order", parameter_name="prob",
-        samples_base_dir=base_dir, probdist_base_dir=base_dir + "_probDist"
+        parameter_list=shift_probs, samples=len(tesselation_orders_list[0]) if tesselation_orders_list else None, 
+        noise_type="tesselation_order", parameter_name="prob",
+        samples_base_dir=base_dir + "_samples", probdist_base_dir=base_dir + "_samples_probDist"
     )
 
 if __name__ == "__main__":
-    N = 100
+    N = 300
     steps = N//4
+    samples = 1  # Number of samples per shift probability
     angles = [[np.pi/3, np.pi/3]] * steps  # Fixed angles, no noise
     initial_state_kwargs = {"nodes": [N//2]}
 
     # List of shift probabilities for tesselation order switching
-    shift_probs = [0, 0.1, 0.2, 0.3, 0.5,0.8]
+    shift_probs = [0, 0.2, 0.5]
     
-    # Generate tesselation orders for each shift probability
-    tesselation_orders_list = []
+    # Generate tesselation orders for each shift probability and sample
+    tesselation_orders_list = []  # [shift_prob][sample] -> tesselation_order
     for shift_prob in shift_probs:
-        if shift_prob == 0:
-            # No noise case - use fixed tesselation order
-            tesselation_orders_list.append([[0, 1]] * steps)
-        else:
-            # Noisy tesselation order
-            tesselation_order = tesselation_choice([[0, 1], [1, 0]], steps, [1 - shift_prob, shift_prob])
-            tesselation_orders_list.append(tesselation_order)
+        shift_tesselation_orders = []
+        for sample_idx in range(samples):
+            if shift_prob == 0:
+                # No noise case - use fixed tesselation order
+                shift_tesselation_orders.append([[0, 1]] * steps)
+            else:
+                # Noisy tesselation order - generate different random sequence for each sample
+                tesselation_order = tesselation_choice([[0, 1], [1, 0]], steps, [1 - shift_prob, shift_prob])
+                shift_tesselation_orders.append(tesselation_order)
+        tesselation_orders_list.append(shift_tesselation_orders)
 
-    print(f"Running experiment for {len(shift_probs)} different tesselation shift probabilities...")
+    print(f"Running experiment for {len(shift_probs)} different tesselation shift probabilities with {samples} samples each...")
     print(f"Shift probabilities: {shift_probs}")
 
+    # Use the new smart loading function instead of the old approach
+    print("Using smart loading (probabilities → samples → create)...")
     results_list = load_or_create_experiment(
         graph_func=nx.cycle_graph,
         tesselation_func=even_line_two_tesselation,
         N=N,
         steps=steps,
         tesselation_orders_list=tesselation_orders_list,
-        angles=angles,
+        angles=angles,  # Fixed angles for all experiments
         initial_state_func=uniform_initial_state,
         initial_state_kwargs=initial_state_kwargs,
         shift_probs=shift_probs
     )
 
-    print(f"Got results for {len(results_list)} walks")
+    print(f"Got results for {len(results_list)} tesselation experiments")
 
-    # Calculate statistics for plotting
+    # Calculate statistics for plotting using mean results (probability distributions)
     domain = np.arange(N)
     stds = []
-    for i, walk_states in enumerate(results_list):
-        if walk_states and len(walk_states) > 0 and all(state is not None for state in walk_states):
-            std_values = states2std(walk_states, domain)
+    for i, mean_prob_dists in enumerate(results_list):
+        if mean_prob_dists and len(mean_prob_dists) > 0 and all(state is not None for state in mean_prob_dists):
+            # These should be probability distributions from smart loading
+            std_values = prob_distributions2std(mean_prob_dists, domain)
             stds.append(std_values)
-            print(f"Walk {i} (shift_prob={shift_probs[i]:.3f}): {len(std_values)} std values")
+            print(f"Tesselation {i} (shift_prob={shift_probs[i]:.3f}): {len(std_values)} std values")
         else:
-            print(f"Walk {i} (shift_prob={shift_probs[i]:.3f}): No valid states")
+            print(f"Tesselation {i} (shift_prob={shift_probs[i]:.3f}): No valid mean probability distributions")
             stds.append([])
 
-    # Plot all walks in a single figure
-    plot_std_vs_time_qwak(stds, shift_probs, title_prefix="Tesselation shift", parameter_name="prob")
+    # Plot all tesselation shifts in a single figure
+    plot_std_vs_time_qwak(stds, shift_probs, title_prefix="Tesselation shift (mean)", parameter_name="prob")
 
-    # Plot probability distributions at specific timesteps
-    timestep_to_plot = steps // 2  # Middle timestep
-    print(f"\nPlotting distributions at timestep {timestep_to_plot}")
-    plot_single_timestep_qwak(results_list, shift_probs, timestep_to_plot, domain, "Tesselation shift", "prob")
+    # # Plot probability distributions at specific timesteps
+    # timestep_to_plot = steps // 2  # Middle timestep
+    # print(f"\nPlotting distributions at timestep {timestep_to_plot}")
+    # plot_single_timestep_qwak(results_list, shift_probs, timestep_to_plot, domain, "Tesselation shift", "prob")
 
-    # Plot distributions at multiple timesteps
-    timesteps_to_plot = [0, steps//4, steps//2, 3*steps//4, steps-1]
-    print(f"\nPlotting distributions at timesteps {timesteps_to_plot}")
-    plot_multiple_timesteps_qwak(results_list, shift_probs, timesteps_to_plot, domain, "Tesselation shift", "prob")
+    # # Plot distributions at multiple timesteps
+    # timesteps_to_plot = [0, steps//4, steps//2, 3*steps//4, steps-1]
+    # print(f"\nPlotting distributions at timesteps {timesteps_to_plot}")
+    # plot_multiple_timesteps_qwak(results_list, shift_probs, timesteps_to_plot, domain, "Tesselation shift", "prob")

@@ -24,7 +24,8 @@ from jaime_scripts import (
     load_mean_probability_distributions,
     check_mean_probability_distributions_exist,
     load_or_create_mean_probability_distributions,
-    prob_distributions2std
+    prob_distributions2std,
+    smart_load_or_create_experiment  # New intelligent loading function
 )
 
 def run_command(cmd, check=True, capture_output=False):
@@ -219,41 +220,30 @@ def run_experiment():
     # Start timing the main experiment
     start_time = time.time()
 
-    # Run the main experiment using shared functions
-    results_list = load_or_create_experiment_samples(
+    # Use the new smart loading function that follows the hierarchy:
+    # 1. Try probability distributions first (fastest)
+    # 2. Try samples if probabilities don't exist
+    # 3. Create new experiment if nothing exists
+    mean_results = smart_load_or_create_experiment(
         graph_func=nx.cycle_graph,
         tesselation_func=even_line_two_tesselation,
         N=N,
         steps=steps,
-        angles_list_list=angles_list_list,
-        tesselation_order=tesselation_order,
+        angles_or_angles_list=angles_list_list,
+        tesselation_order_or_list=tesselation_order,
         initial_state_func=uniform_initial_state,
         initial_state_kwargs=initial_state_kwargs,
-        devs=devs,
+        parameter_list=devs,
         samples=samples,
-        base_dir="experiments_data_samples"
+        noise_type="angle",
+        parameter_name="angle_dev",
+        samples_base_dir="experiments_data_samples",
+        probdist_base_dir="experiments_data_samples_probDist"
     )
 
     experiment_time = time.time() - start_time
-    print(f"Main experiment completed in {experiment_time:.2f} seconds")
+    print(f"Smart loading completed in {experiment_time:.2f} seconds")
     print(f"Processed {len(devs)} deviations with {samples} samples each")
-
-    # Create or load mean probability distributions
-    print("Creating or loading mean probability distributions...")
-    prob_start_time = time.time()
-    
-    mean_results = load_or_create_mean_probability_distributions(
-        tesselation_func=even_line_two_tesselation,
-        N=N,
-        steps=steps,
-        devs=devs,
-        samples=samples,
-        source_base_dir="experiments_data_samples",
-        target_base_dir="experiments_data_samples_probDist"
-    )
-    
-    prob_time = time.time() - prob_start_time
-    print(f"Probability distributions processing completed in {prob_time:.2f} seconds")
 
     # Calculate statistics for verification (but skip plotting on cluster)
     domain = np.arange(N) - N//2  # Center domain around 0

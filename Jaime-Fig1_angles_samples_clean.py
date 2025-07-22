@@ -22,7 +22,8 @@ from jaime_scripts import (
     load_mean_probability_distributions,
     check_mean_probability_distributions_exist,
     load_or_create_mean_probability_distributions,
-    prob_distributions2std
+    prob_distributions2std,
+    smart_load_or_create_experiment  # New intelligent loading function
 )
 
 import networkx as nx
@@ -58,32 +59,23 @@ if __name__ == "__main__":
     print(f"Running experiment for {len(devs)} different angle noise deviations with {samples} samples each...")
     print(f"Angle devs: {devs}")
 
-    results_list = load_or_create_experiment_samples(
+    # Use the new smart loading function instead of the old approach
+    print("Using smart loading (probabilities → samples → create)...")
+    mean_results = smart_load_or_create_experiment(
         graph_func=nx.cycle_graph,
         tesselation_func=even_line_two_tesselation,
         N=N,
         steps=steps,
-        angles_list_list=angles_list_list,
-        tesselation_order=tesselation_order,
+        angles_or_angles_list=angles_list_list,
+        tesselation_order_or_list=tesselation_order,
         initial_state_func=uniform_initial_state,
         initial_state_kwargs=initial_state_kwargs,
-        devs=devs,
+        parameter_list=devs,
         samples=samples,
-        base_dir="experiments_data_samples"
-    )
-
-    print(f"Got results for {len(results_list)} devs with {samples} samples each")
-
-    # Create or load mean probability distributions
-    print("Creating or loading mean probability distributions...")
-    mean_results = load_or_create_mean_probability_distributions(
-        tesselation_func=even_line_two_tesselation,
-        N=N,
-        steps=steps,
-        devs=devs,
-        samples=samples,
-        source_base_dir="experiments_data_samples",
-        target_base_dir="experiments_data_samples_probDist"
+        noise_type="angle",
+        parameter_name="angle_dev",
+        samples_base_dir="experiments_data_samples",
+        probdist_base_dir="experiments_data_samples_probDist"
     )
 
     # Calculate statistics for plotting using mean results
