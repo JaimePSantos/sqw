@@ -3,7 +3,7 @@ import networkx as nx
 from matplotlib import pyplot as plt
 from collections import Counter
 import math
-from utils.plotTools import plot_qwak
+# from utils.plotTools import plot_qwak
 import os
 import ast
 import numpy as np
