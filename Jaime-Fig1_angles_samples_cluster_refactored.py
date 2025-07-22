@@ -53,7 +53,8 @@ def setup_virtual_environment(venv_path):
         "numpy",
         "scipy", 
         "networkx",
-        "matplotlib"
+        "matplotlib",
+        "qwak-sim"
     ]
     
     for package in packages:
