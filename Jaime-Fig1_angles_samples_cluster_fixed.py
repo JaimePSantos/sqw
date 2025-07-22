@@ -9,117 +9,7 @@ import sys
 import os
 import subprocess
 import tarfile
-import logging
-import signal
-import time
-import traceback
-import atexit
 from pathlib import Path
-from datetime import datetime
-
-# Setup comprehensive logging
-def setup_logging():
-    """Setup comprehensive logging to file and console."""
-    log_filename = f"quantum_walk_experiment_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
-    
-    # Configure logging with both file and console handlers
-    # Remove all handlers associated with the root logger object (avoid duplicate logs)
-    for handler in logging.root.handlers[:]:
-        logging.root.removeHandler(handler)
-    # Set up file handler and console handler
-    file_handler = logging.FileHandler(log_filename, mode='w')
-    file_handler.setLevel(logging.DEBUG)
-    file_formatter = logging.Formatter('%(asctime)s - %(levelname)s - PID:%(process)d - %(message)s')
-    file_handler.setFormatter(file_formatter)
-
-    console_handler = logging.StreamHandler(sys.stdout)
-    console_handler.setLevel(logging.INFO)
-    console_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
-    console_handler.setFormatter(console_formatter)
-
-    logger = logging.getLogger(__name__)
-    logger.setLevel(logging.DEBUG)
-    logger.addHandler(file_handler)
-    logger.addHandler(console_handler)
-
-    logger.info(f"=== Quantum Walk Experiment Started ===")
-    logger.info(f"Log file: {log_filename}")
-    logger.info(f"Python version: {sys.version}")
-    logger.info(f"Command line args: {sys.argv}")
-    logger.info(f"Working directory: {os.getcwd()}")
-    logger.info(f"Process ID: {os.getpid()}")
-    logger.info(f"Environment variables:")
-    for key in ['SHELL', 'TERM', 'SSH_CLIENT', 'SSH_TTY', 'DISPLAY', 'TMUX', 'STY']:
-        logger.info(f"  {key}: {os.environ.get(key, 'Not set')}")
-
-    # Setup heartbeat logging
-    def heartbeat():
-        """Log a heartbeat message periodically."""
-        while True:
-            time.sleep(300)  # Every 5 minutes
-            logger.info(f">>> HEARTBEAT: Process {os.getpid()} still alive at {datetime.now()}")
-
-    import threading
-    heartbeat_thread = threading.Thread(target=heartbeat, daemon=True)
-    heartbeat_thread.start()
-    logger.info("Heartbeat thread started - will log every 5 minutes")
-
-    return logger, log_filename
-
-# Setup signal handlers to catch termination signals
-def setup_signal_handlers(logger):
-    """Setup signal handlers to log when the process receives termination signals."""
-    
-    def signal_handler(signum, frame):
-        logger.error(f"!!! RECEIVED SIGNAL {signum} ({signal.Signals(signum).name}) !!!")
-        logger.error(f"Signal received at frame: {frame}")
-        logger.error(f"Stack trace:")
-        for line in traceback.format_stack(frame):
-            logger.error(f"  {line.strip()}")
-        
-        if signum in [signal.SIGTERM, signal.SIGINT, signal.SIGHUP]:
-            logger.error(f"Process being terminated by signal {signum}")
-            logger.error("This might indicate:")
-            logger.error("- SSH connection timeout")
-            logger.error("- Job scheduler timeout")
-            logger.error("- Manual termination")
-            logger.error("- System shutdown")
-        
-        # Cleanup and exit
-        logger.error("Performing emergency cleanup...")
-        try:
-            # Try to save any partial results
-            if os.path.exists("experiments_data_samples"):
-                zip_results("experiments_data_samples", "experiments_data_samples_probDist")
-                logger.error("Emergency archive created")
-        except Exception as e:
-            logger.error(f"Emergency cleanup failed: {e}")
-        
-        logger.error(f"Process {os.getpid()} exiting due to signal {signum}")
-        sys.exit(128 + signum)
-    
-    # Register handlers for common termination signals
-    signal.signal(signal.SIGTERM, signal_handler)  # Termination request
-    signal.signal(signal.SIGINT, signal_handler)   # Interrupt (Ctrl+C)
-    signal.signal(signal.SIGHUP, signal_handler)   # Hangup (terminal closed)
-    
-    logger.info("Signal handlers registered for SIGTERM, SIGINT, SIGHUP")
-
-def setup_exit_handler(logger):
-    """Setup exit handler to log when process exits normally."""
-    
-    def exit_handler():
-        logger.info("=== Process exiting normally ===")
-        logger.info(f"Exit time: {datetime.now()}")
-        logger.info("Normal exit - experiment completed or finished setup")
-    
-    atexit.register(exit_handler)
-    logger.info("Exit handler registered")
-
-# Initialize logging and signal handling
-logger, log_filename = setup_logging()
-setup_signal_handlers(logger)
-setup_exit_handler(logger)
 
 def get_experiment_dir(
     tesselation_func,
@@ -160,43 +50,20 @@ def get_experiment_dir(
     
 def run_command(cmd, check=True, capture_output=False):
     """Run a shell command and return the result."""
-    logger.info(f"Running command: {cmd}")
-    start_time = time.time()
-    
-    try:
-        if capture_output:
-            result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
-            duration = time.time() - start_time
-            logger.info(f"Command completed in {duration:.2f}s with return code {result.returncode}")
-            
-            if result.stdout:
-                logger.debug(f"STDOUT: {result.stdout}")
-            if result.stderr:
-                logger.debug(f"STDERR: {result.stderr}")
-                
-            if check and result.returncode != 0:
-                logger.error(f"Command failed: {cmd}")
-                logger.error(f"Return code: {result.returncode}")
-                logger.error(f"Error: {result.stderr}")
-                sys.exit(1)
-            return result
-        else:
-            result = subprocess.run(cmd, shell=True)
-            duration = time.time() - start_time
-            logger.info(f"Command completed in {duration:.2f}s with return code {result.returncode}")
-            
-            if check and result.returncode != 0:
-                logger.error(f"Command failed: {cmd}")
-                logger.error(f"Return code: {result.returncode}")
-                sys.exit(1)
-            return result
-    except Exception as e:
-        duration = time.time() - start_time
-        logger.error(f"Exception running command after {duration:.2f}s: {e}")
-        logger.error(f"Command was: {cmd}")
-        if check:
-            raise
-        return None
+    print(f"Running: {cmd}")
+    if capture_output:
+        result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+        if check and result.returncode != 0:
+            print(f"Command failed: {cmd}")
+            print(f"Error: {result.stderr}")
+            sys.exit(1)
+        return result
+    else:
+        result = subprocess.run(cmd, shell=True)
+        if check and result.returncode != 0:
+            print(f"Command failed: {cmd}")
+            sys.exit(1)
+        return result
 
 def check_python_version():
     """Check if Python version is compatible."""
@@ -291,144 +158,119 @@ def zip_results(results_dir="experiments_data_samples", probdist_dir="experiment
 
 def main():
     """Main execution function for cluster environment."""
-    logger.info("=== Starting Main Function ===")
+    print("=== Fixed Cluster Quantum Walk Experiment ===")
     
-    try:
-        logger.info("=== Fixed Cluster Quantum Walk Experiment ===")
+    # Check Python version
+    check_python_version()
+    
+    # Setup paths
+    work_dir = Path.cwd()
+    venv_path = work_dir / "qw_venv"
+    
+    # Check if we need to setup virtual environment
+    missing_deps = check_dependencies()
+    python_executable = sys.executable
+    
+    if missing_deps:
+        print(f"Missing dependencies: {missing_deps}")
+        print("Setting up virtual environment...")
+        python_executable = setup_virtual_environment(venv_path)
         
-        # Check Python version
-        logger.info("Checking Python version...")
-        check_python_version()
+        # Re-execute this script with the virtual environment Python
+        script_path = __file__
+        print(f"Re-executing with virtual environment Python: {python_executable}")
+        run_command(f"{python_executable} {script_path} --venv-ready")
         
-        # Setup paths
-        work_dir = Path.cwd()
-        venv_path = work_dir / "qw_venv"
-        logger.info(f"Work directory: {work_dir}")
-        logger.info(f"Virtual environment path: {venv_path}")
-        
-        # Check if we need to setup virtual environment
-        logger.info("Checking dependencies...")
-        missing_deps = check_dependencies()
-        python_executable = sys.executable
-        logger.info(f"Python executable: {python_executable}")
-        logger.info(f"Missing dependencies: {missing_deps}")
-        
-        if missing_deps:
-            logger.warning(f"Missing dependencies: {missing_deps}")
-            logger.info("Setting up virtual environment...")
-            python_executable = setup_virtual_environment(venv_path)
-            
-            # Re-execute this script with the virtual environment Python
-            script_path = __file__
-            logger.info(f"Re-executing with virtual environment Python: {python_executable}")
-            logger.info(f"Script path: {script_path}")
-            run_command(f"{python_executable} {script_path} --venv-ready")
-            
-            # Bundle results and exit
-            logger.info("Bundling results after virtual environment execution...")
-            zip_results()
-            logger.info("=== Experiment completed ===")
-            return
-        
-        # If we reach here, dependencies are available - run the experiment
-        logger.info("Dependencies available, running experiment...")
-        run_experiment()
-        
-    except Exception as e:
-        logger.error(f"!!! EXCEPTION IN MAIN FUNCTION !!!")
-        logger.error(f"Exception type: {type(e).__name__}")
-        logger.error(f"Exception message: {str(e)}")
-        logger.error(f"Full traceback:")
-        for line in traceback.format_exc().split('\n'):
-            logger.error(f"  {line}")
-        raise
+        # Bundle results and exit
+        zip_results()
+        print("=== Experiment completed ===")
+        return
+    
+    # If we reach here, dependencies are available - run the experiment
+    print("Dependencies available, running experiment...")
+    run_experiment()
 
 def run_experiment():
     """Run the actual quantum walk experiment using the exact original functions."""
-    logger.info("=== Starting run_experiment function ===")
-    
+    # Import the exact modules and functions from the original file
     try:
-        # Import the exact modules and functions from the original file
-        logger.info("Importing required modules...")
         from sqw.tesselations import even_line_two_tesselation
         from sqw.experiments_expanded import running
         from sqw.states import uniform_initial_state, amp2prob
         from sqw.utils import random_angle_deviation
-        logger.info("Successfully imported all required modules")
+        print("Successfully imported all required modules")
     except ImportError as e:
-        logger.error(f"Error: Could not import required modules: {e}")
-        logger.error("Make sure you're running this script from the correct directory with all dependencies available")
+        print(f"Error: Could not import required modules: {e}")
+        print("Make sure you're running this script from the correct directory with all dependencies available")
         sys.exit(1)
-        
-        import networkx as nx
-        import numpy as np
-        import os
+    
+    import networkx as nx
+    import numpy as np
+    import os
+    import pickle
+    import time
+
+    # Import all the exact functions from the original Jaime-Fig1_angles_samples.py
+    # We'll define them here exactly as they are in the original file
+    
+    def run_and_save_experiment_generic_samples(
+        graph_func,
+        tesselation_func,
+        N,
+        steps,
+        samples,
+        parameter_list,  # List of varying deviations for each walk
+        angles_or_angles_list,  # Either fixed angles or list of angles for each walk
+        tesselation_order_or_list,  # Either fixed tesselation_order or list for each walk
+        initial_state_func,
+        initial_state_kwargs,
+        noise_params_list,  # List of noise parameters for each walk
+        noise_type="angle",  # "angle" or "tesselation_order"
+        parameter_name="dev",  # Name of the parameter for logging
+        base_dir="experiments_data"
+    ):
+        """
+        Generic function to run and save experiments for different parameter values.
+        """
+        from sqw.experiments_expanded import running
         import pickle
-        import time
-
-        logger.info("All standard modules imported successfully")
-
-        # Import all the exact functions from the original Jaime-Fig1_angles_samples.py
-        # We'll define them here exactly as they are in the original file
         
-        def run_and_save_experiment_generic_samples(
-            graph_func,
-            tesselation_func,
-            N,
-            steps,
-            samples,
-            parameter_list,  # List of varying deviations for each walk
-            angles_or_angles_list,  # Either fixed angles or list of angles for each walk
-            tesselation_order_or_list,  # Either fixed tesselation_order or list for each walk
-            initial_state_func,
-            initial_state_kwargs,
-            noise_params_list,  # List of noise parameters for each walk
-            noise_type="angle",  # "angle" or "tesselation_order"
-            parameter_name="dev",  # Name of the parameter for logging
-            base_dir="experiments_data"
-        ):
-            """
-            Generic function to run and save experiments for different parameter values.
-            """
-            from sqw.experiments_expanded import running
-            import pickle
-            
-            results = []
-            for i, (param, noise_params) in enumerate(zip(parameter_list, noise_params_list)):
-                has_noise = any(p > 0 for p in noise_params) if isinstance(noise_params, list) else noise_params > 0
-                exp_dir = get_experiment_dir(tesselation_func, has_noise, N, noise_params=noise_params, noise_type=noise_type, base_dir=base_dir)
-                os.makedirs(exp_dir, exist_ok=True)
-                print(f"[run_and_save_experiment] Saving results to {exp_dir} for {parameter_name}={param:.3f}")
+        results = []
+        for i, (param, noise_params) in enumerate(zip(parameter_list, noise_params_list)):
+            has_noise = any(p > 0 for p in noise_params) if isinstance(noise_params, list) else noise_params > 0
+            exp_dir = get_experiment_dir(tesselation_func, has_noise, N, noise_params=noise_params, noise_type=noise_type, base_dir=base_dir)
+            os.makedirs(exp_dir, exist_ok=True)
+            print(f"[run_and_save_experiment] Saving results to {exp_dir} for {parameter_name}={param:.3f}")
 
-                G = graph_func(N)
-                T = tesselation_func(N)
-                initial_state = initial_state_func(N, **initial_state_kwargs)
+            G = graph_func(N)
+            T = tesselation_func(N)
+            initial_state = initial_state_func(N, **initial_state_kwargs)
 
-                # Get the appropriate angles and tesselation_order for this walk
-                if isinstance(angles_or_angles_list[0], list) and len(angles_or_angles_list) == len(parameter_list):
-                    angles = angles_or_angles_list[i]
-                else:
-                    angles = angles_or_angles_list
+            # Get the appropriate angles and tesselation_order for this walk
+            if isinstance(angles_or_angles_list[0], list) and len(angles_or_angles_list) == len(parameter_list):
+                angles = angles_or_angles_list[i]
+            else:
+                angles = angles_or_angles_list
 
-                if isinstance(tesselation_order_or_list[0], list) and len(tesselation_order_or_list) == len(parameter_list):
-                    tesselation_order = tesselation_order_or_list[i]
-                else:
-                    tesselation_order = tesselation_order_or_list
+            if isinstance(tesselation_order_or_list[0], list) and len(tesselation_order_or_list) == len(parameter_list):
+                tesselation_order = tesselation_order_or_list[i]
+            else:
+                tesselation_order = tesselation_order_or_list
 
-                print("[run_and_save_experiment] Running walk...")
-                final_states = running(
-                    G, T, steps,
-                    initial_state,
-                    angles=angles,
-                    tesselation_order=tesselation_order
-                )
-                for j, state in enumerate(final_states):
-                    filename = f"final_state_step_{j}.pkl"
-                    with open(os.path.join(exp_dir, filename), "wb") as f:
-                        pickle.dump(state, f)
-                print(f"[run_and_save_experiment] Saved {len(final_states)} states for {parameter_name}={param:.3f}.")
-                results.append(final_states)
-            return results
+            print("[run_and_save_experiment] Running walk...")
+            final_states = running(
+                G, T, steps,
+                initial_state,
+                angles=angles,
+                tesselation_order=tesselation_order
+            )
+            for j, state in enumerate(final_states):
+                filename = f"final_state_step_{j}.pkl"
+                with open(os.path.join(exp_dir, filename), "wb") as f:
+                    pickle.dump(state, f)
+            print(f"[run_and_save_experiment] Saved {len(final_states)} states for {parameter_name}={param:.3f}.")
+            results.append(final_states)
+        return results
 
     def run_and_save_experiment(
         graph_func,
@@ -516,7 +358,6 @@ def run_experiment():
                 angles = angles_list_list[dev_idx][sample_idx]
                 
                 print(f"[run_and_save_experiment] Running walk for dev={dev:.3f}, sample={sample_idx+1}/{samples}...")
-                logger.info(f"Running quantum walk for dev={dev:.3f}, sample={sample_idx+1}/{samples}")
                 
                 # Time each sample execution
                 sample_start_time = time.time()
@@ -830,7 +671,7 @@ def run_experiment():
         return std_values
 
     # Run the experiment with cluster-optimized parameters
-    logger.info("=== Starting quantum walk experiment ===")
+    print("Starting quantum walk experiment...")
     
     # Optimized parameters for better cluster performance
     N = 2000  # Reduced system size for faster computation
@@ -844,14 +685,10 @@ def run_experiment():
     devs = [0, (np.pi/3)/2.5, (np.pi/3)*2]  # Reduced from 6 to 3 deviations
     angles_list_list = []  # [dev][sample] -> angles
     
-    logger.info(f"Cluster-optimized parameters: N={N}, steps={steps}, samples={samples}")
-    logger.info(f"Number of deviations: {len(devs)}, devs: {devs}")
-    logger.info(f"Total expected quantum walks: {len(devs) * samples}")
-    logger.info("This will significantly reduce computation time while preserving the experiment structure.")
+    print(f"Cluster-optimized parameters: N={N}, steps={steps}, samples={samples}")
+    print(f"This will significantly reduce computation time while preserving the experiment structure.")
     
-    logger.info("Generating angle lists for each deviation and sample...")
-    for dev_idx, dev in enumerate(devs):
-        logger.debug(f"Generating angles for deviation {dev_idx}: {dev}")
+    for dev in devs:
         dev_angles_list = []
         for sample_idx in range(samples):
             if dev == 0:
@@ -860,17 +697,14 @@ def run_experiment():
             else:
                 dev_angles_list.append(random_angle_deviation([np.pi/3, np.pi/3], [dev, dev], steps))
         angles_list_list.append(dev_angles_list)
-        logger.debug(f"Generated {len(dev_angles_list)} angle sets for deviation {dev}")
 
-    logger.info(f"Running experiment for {len(devs)} different angle noise deviations with {samples} samples each...")
-    logger.info(f"Angle devs: {devs}")
+    print(f"Running experiment for {len(devs)} different angle noise deviations with {samples} samples each...")
+    print(f"Angle devs: {devs}")
     
     # Start timing the main experiment
     start_time = time.time()
-    logger.info(f"Main experiment start time: {datetime.now()}")
 
     # Run the main experiment
-    logger.info("Calling load_or_create_experiment...")
     results_list = load_or_create_experiment(
         graph_func=nx.cycle_graph,
         tesselation_func=even_line_two_tesselation,
@@ -886,11 +720,11 @@ def run_experiment():
     )
 
     experiment_time = time.time() - start_time
-    logger.info(f"Main experiment completed in {experiment_time:.2f} seconds")
-    logger.info(f"Got results for {len(results_list)} devs with {samples} samples each")
+    print(f"Main experiment completed in {experiment_time:.2f} seconds")
+    print(f"Got results for {len(results_list)} devs with {samples} samples each")
 
     # Create or load mean probability distributions
-    logger.info("Creating or loading mean probability distributions...")
+    print("Creating or loading mean probability distributions...")
     prob_start_time = time.time()
     
     mean_results = load_or_create_mean_probability_distributions(
@@ -904,105 +738,60 @@ def run_experiment():
     )
     
     prob_time = time.time() - prob_start_time
-    logger.info(f"Probability distributions processing completed in {prob_time:.2f} seconds")
+    print(f"Probability distributions processing completed in {prob_time:.2f} seconds")
 
     # Calculate statistics for verification (but skip plotting on cluster)
-    logger.info("Calculating standard deviations...")
     domain = np.arange(N)
     stds = []
     for i, dev_mean_prob_dists in enumerate(mean_results):
         if dev_mean_prob_dists and len(dev_mean_prob_dists) > 0 and all(state is not None for state in dev_mean_prob_dists):
             std_values = prob_distributions2std(dev_mean_prob_dists, domain)
             stds.append(std_values)
-            logger.info(f"Dev {i} (angle_dev={devs[i]:.2f}): {len(std_values)} std values")
+            print(f"Dev {i} (angle_dev={devs[i]:.2f}): {len(std_values)} std values")
         else:
-            logger.warning(f"Dev {i} (angle_dev={devs[i]:.2f}): No valid mean probability distributions")
+            print(f"Dev {i} (angle_dev={devs[i]:.2f}): No valid mean probability distributions")
             stds.append([])
 
-    logger.info("Experiment completed successfully!")
+    print("Experiment completed successfully!")
     total_time = time.time() - start_time
-    logger.info(f"Total execution time: {total_time:.2f} seconds")
-    logger.info(f"Raw results saved in experiments_data_samples/")
-    logger.info(f"Mean probability distributions saved in experiments_data_samples_probDist/")
+    print(f"Total execution time: {total_time:.2f} seconds")
+    print(f"Raw results saved in experiments_data_samples/")
+    print(f"Mean probability distributions saved in experiments_data_samples_probDist/")
     
-    logger.info("=== Performance Summary ===")
-    logger.info(f"System size (N): {N}")
-    logger.info(f"Time steps: {steps}")
-    logger.info(f"Samples per deviation: {samples}")
-    logger.info(f"Number of deviations: {len(devs)}")
-    logger.info(f"Total quantum walks computed: {len(devs) * samples}")
-    logger.info(f"Average time per quantum walk: {experiment_time / (len(devs) * samples):.3f} seconds")
+    print("\n=== Performance Summary ===")
+    print(f"System size (N): {N}")
+    print(f"Time steps: {steps}")
+    print(f"Samples per deviation: {samples}")
+    print(f"Number of deviations: {len(devs)}")
+    print(f"Total quantum walks computed: {len(devs) * samples}")
+    print(f"Average time per quantum walk: {experiment_time / (len(devs) * samples):.3f} seconds")
+    
+    print("\n=== Scaling Note ===")
+    print("For production runs, you can scale up the parameters:")
+    print("- Increase N to 2000 for higher resolution")
+    print("- Increase steps to N//4 for longer evolution")
+    print("- Increase samples to 10+ for better statistics")
+    print("- Add more deviation values as needed")
     
     # Create TAR archive of results
-    logger.info("Creating TAR archive of results...")
+    print("Creating TAR archive of results...")
     archive_filename = zip_results("experiments_data_samples", "experiments_data_samples_probDist", N, samples)
     
-    logger.info("=== Analysis Instructions ===")
+    print("=== Analysis Instructions ===")
     if archive_filename:
-        logger.info(f"Results archived in: {archive_filename}")
-    logger.info("To analyze the results, transfer the tar file and extract it, then use:")
-    logger.info("- experiments_data_samples/ contains the raw quantum states for each sample")
-    logger.info("- experiments_data_samples_probDist/ contains the mean probability distributions")
-    logger.info("Both directories maintain the same folder structure for easy analysis.")
-    logger.info("=== run_experiment function completed successfully ===")
-
-    return  # End of try block
-
-    # except block must be at the same indentation as try, inside the function
-    # (this is a placeholder, actual except block is below)
-
-except_block_placeholder = None
-    
-    # except block for the try above
-    # (this is the correct place for the except block)
-    # The following except block should be at the same indentation as try
-    # and before the function ends
-    #
-    # except Exception as e:
-    #     logger.error(f"!!! EXCEPTION IN run_experiment FUNCTION !!!")
-    #     logger.error(f"Exception type: {type(e).__name__}")
-    #     logger.error(f"Exception message: {str(e)}")
-    #     logger.error(f"Full traceback:")
-    #     for line in traceback.format_exc().split('\n'):
-    #         logger.error(f"  {line}")
-    #     # Try to save any partial results before crashing
-    #     logger.error("Attempting to save partial results...")
-    #     try:
-    #         if os.path.exists("experiments_data_samples"):
-    #             zip_results("experiments_data_samples", "experiments_data_samples_probDist")
-    #             logger.error("Partial results saved to archive")
-    #     except Exception as save_e:
-    #         logger.error(f"Failed to save partial results: {save_e}")
-    #     raise
+        print(f"Results archived in: {archive_filename}")
+    print("To analyze the results, transfer the tar file and extract it, then use:")
+    print("- experiments_data_samples/ contains the raw quantum states for each sample")
+    print("- experiments_data_samples_probDist/ contains the mean probability distributions")
+    print("Both directories maintain the same folder structure for easy analysis.")
 
 if __name__ == "__main__":
-    try:
-        # Check for virtual environment flag
-        if len(sys.argv) > 1 and sys.argv[1] == "--venv-ready":
-            # We're running in virtual environment, just run experiment
-            logger.info("=== Running in virtual environment mode ===")
-            run_experiment()
-            logger.info("=== Experiment completed in virtual environment ===")
-        else:
-            # Run main setup function
-            logger.info("=== Running main setup function ===")
-            main()
-    except Exception as e:
-        logger.error(f"!!! FATAL EXCEPTION IN MAIN EXECUTION !!!")
-        logger.error(f"Exception type: {type(e).__name__}")
-        logger.error(f"Exception message: {str(e)}")
-        logger.error(f"Full traceback:")
-        for line in traceback.format_exc().split('\n'):
-            logger.error(f"  {line}")
-        
-        # Final emergency cleanup
-        logger.error("Performing final emergency cleanup...")
-        try:
-            if os.path.exists("experiments_data_samples"):
-                zip_results("experiments_data_samples", "experiments_data_samples_probDist")
-                logger.error("Emergency archive created in main")
-        except Exception as cleanup_e:
-            logger.error(f"Final cleanup failed: {cleanup_e}")
-        
-        logger.error(f"Process {os.getpid()} terminating with exception")
-        sys.exit(1)
+    # Check for virtual environment flag
+    if len(sys.argv) > 1 and sys.argv[1] == "--venv-ready":
+        # We're running in virtual environment, just run experiment
+        run_experiment()
+        # zip_results("experiments_data_samples", "experiments_data_samples_probDist")
+        print("=== Experiment completed in virtual environment ===")
+    else:
+        # Run main setup function
+        main()
