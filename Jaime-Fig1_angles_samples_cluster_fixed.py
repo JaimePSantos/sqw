@@ -396,8 +396,9 @@ def run_experiment():
                     with open(filepath, "wb") as f:
                         pickle.dump(state, f, protocol=pickle.HIGHEST_PROTOCOL)
                 
-                dev_results.append(final_states)
+                # Do not append final_states to dev_results; just save to file and free memory
                 print(f"[run_and_save_experiment] Saved {len(final_states)} states for dev={dev:.3f}, sample={sample_idx}.")
+                final_states = None
             
             # Summary for this deviation
             dev_total_time = time.time() - dev_start_time
@@ -453,9 +454,10 @@ def run_experiment():
                     else:
                         print(f"Warning: File not found: {filepath}")
                         sample_states.append(None)
-                dev_results.append(sample_states)
-            results.append(dev_results)
-        return results
+            # Do not append sample_states to dev_results; just load for consistency, then free
+            # Do not append dev_results to results; just process for statistics if needed
+        # Return None or summary statistics if needed, but not the full states
+        return None
 
     def load_or_create_experiment(
         graph_func,
