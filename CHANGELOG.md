@@ -40,6 +40,18 @@
   - Enhanced `prob_distributions2std()` - Improved standard deviation calculation
 - **Features**: Memory optimization, progress tracking, ETA calculations, detailed logging, unified noise type handling
 
+#### 4. **Cluster Deployment Implementation**
+- **Angle Cluster**: `Jaime-Fig1_angles_samples_cluster_refactored.py` - Complete cluster-compatible angle experiments
+- **Tesselation Cluster**: `Jaime-Fig1_tesselation_clean_samples_cluster.py` - Complete cluster-compatible tesselation experiments
+- **Features**: 
+  - Virtual environment management and dependency checking
+  - Native Linux TAR bundling (no compression for speed)
+  - Self-contained execution with fallback methods
+  - Cross-platform compatibility (Linux cluster + Windows development)
+  - Smart loading hierarchy integration
+  - Cluster-optimized parameters (N=2000, samples=10)
+  - Automatic results bundling and analysis instructions
+
 #### 2. **Complete File Refactoring**
 
 ##### Created New Clean Files
@@ -48,6 +60,19 @@
 - **`Jaime-Fig1_angles.py`** - Lightweight wrappers + imports (was 172 lines → ~100 lines)
 - **`Jaime-Fig1_tesselation.py`** - Lightweight wrappers + imports (was 175 lines → ~100 lines)
 - **`Jaime-Fig1_tesselation_clean.py`** - NEW tesselation experiments with sample support and smart loading
+- **`Jaime-Fig1_tesselation_clean_samples.py`** - NEW tesselation sample experiments with configurable parameters
+- **`Jaime-Fig1_tesselation_clean_samples_cluster.py`** - NEW cluster-compatible tesselation experiments
+
+##### Cluster Deployment Capabilities
+```python
+# Both angle and tesselation experiments now support cluster deployment:
+- Virtual environment auto-setup with dependency management
+- Native Linux TAR bundling for fast result transfer
+- Self-contained execution (no external dependencies)
+- Cross-platform compatibility (Linux cluster + Windows development)
+- Cluster-optimized parameters (N=2000, steps=500, samples=10)
+- Automatic results archiving with descriptive filenames
+```
 
 ##### Updated Existing Files
 - **`analyze_probdist_std.py`** - Now imports `prob_distributions2std` from shared module
@@ -72,7 +97,26 @@ create_mean_probability_distributions(...)
 return load_mean_probability_distributions(...)
 ```
 
-#### 5. **Directory Structure Unification**
+#### 5. **Cluster Architecture Integration**
+Both angle and tesselation experiments now support full cluster deployment:
+
+```python
+# Cluster deployment features for both experiment types:
+def main():
+    check_python_version()
+    missing_deps = check_dependencies()
+    if missing_deps:
+        python_executable = setup_virtual_environment(venv_path)
+        re_execute_with_venv(python_executable)
+    run_experiment()  # Uses smart_load_or_create_experiment
+    zip_results()     # Creates TAR archive
+
+# Results bundling:
+- angle_results_N2000_samples10.tar     # Angle experiments
+- tesselation_results_N2000_samples10.tar  # Tesselation experiments
+```
+
+#### 6. **Directory Structure Unification**
 Fixed directory structure mismatches between angle and tesselation experiments:
 
 ```python
@@ -89,7 +133,7 @@ else:  # tesselation_order
     param_name = "prob"
 ```
 
-#### 6. **Progress Tracking Implementation**
+#### 7. **Progress Tracking Implementation**
 Added comprehensive progress tracking to all loading functions:
 
 ```python
@@ -108,7 +152,7 @@ Loading mean probability distributions for 3 devs, 500 steps each...
 All mean probability distributions loaded in 0.4s
 ```
 
-#### 4. **Memory Optimization Strategy**
+#### 8. **Memory Optimization Strategy**
 - **Problem**: Original script tried to load 15,000+ individual sample files into memory, causing hanging
 - **Solution**: Implemented smart 3-tier loading hierarchy to avoid raw sample loading
 - **Tier 1**: Pre-computed mean probability distributions (fastest ~0.4s)
@@ -116,7 +160,7 @@ All mean probability distributions loaded in 0.4s
 - **Tier 3**: Generate new experiments (slowest, only when needed)
 - **Result**: Load time reduced from "hanging indefinitely" to sub-second for existing data
 
-#### 7. **Tesselation Experiments Integration**
+#### 9. **Tesselation Experiments Integration**
 Complete tesselation support matching the angle experiments pattern:
 
 ```python
@@ -216,11 +260,18 @@ for step_idx in range(steps):
 #### New Files Created
 - ✅ `Jaime-Fig1_angles_samples_cluster_refactored.py` - **Clean cluster version**
 - ✅ `Jaime-Fig1_tesselation_clean.py` - **NEW tesselation experiments with smart loading**
+- ✅ `Jaime-Fig1_tesselation_clean_samples.py` - **NEW tesselation sample experiments with smart loading**
+- ✅ `Jaime-Fig1_tesselation_clean_samples_cluster.py` - **NEW cluster-compatible tesselation experiments**
 
 #### Enhanced Smart Loading
 - ✅ `smart_load_or_create_experiment()` - **3-tier intelligent loading hierarchy**
 - ✅ `run_and_save_experiment_samples_tesselation()` - **Tesselation sample support**
 - ✅ **Unified noise type handling** - Both angle and tesselation experiments use same functions
+
+#### Cluster Deployment Files
+- ✅ `Jaime-Fig1_angles_samples_cluster_refactored.py` - **Angle experiments cluster version**
+- ✅ `Jaime-Fig1_tesselation_clean_samples_cluster.py` - **Tesselation experiments cluster version**
+- ✅ **Unified cluster architecture** - Both use same deployment and bundling framework
 
 #### Backup Files Preserved
 - 📁 `Jaime-Fig1_angles_samples_backup.py` - Original version preserved
@@ -261,6 +312,25 @@ python Jaime-Fig1_angles_samples.py  # ❌ Hangs indefinitely
 python Jaime-Fig1_angles_samples.py      # ✅ Tier 1: ~0.4s (existing probabilities)
 python Jaime-Fig1_tesselation_clean.py   # ✅ Tier 2: ~10s (samples → probabilities)
 # New experiments automatically use Tier 3  # ✅ Tier 3: Full generation when needed
+```
+
+#### Cluster Deployment Success
+```bash
+# Both experiment types now support full cluster deployment
+python3 Jaime-Fig1_angles_samples_cluster_refactored.py
+python3 Jaime-Fig1_tesselation_clean_samples_cluster.py
+
+# Automatic results bundling:
+angle_results_N2000_samples10.tar         # Created automatically
+tesselation_results_N2000_samples10.tar   # Created automatically
+
+# Cluster deployment features:
+✅ Virtual environment auto-setup
+✅ Dependency checking and installation  
+✅ Native Linux TAR bundling (fast, no compression)
+✅ Cross-platform compatibility
+✅ Smart loading hierarchy integration
+✅ Cluster-optimized parameters (N=2000, samples=10)
 ```
 
 #### Tesselation Integration Success
@@ -309,6 +379,7 @@ Dev 2 (angle_dev=2.09): 500 std values
 - **Reduced maintenance** - No more syncing changes across multiple files
 - **Better testing** - Centralized functions easier to test
 - **Intelligent loading** - 3-tier hierarchy eliminates hanging issues permanently
+- **Cluster deployment** - Ready-to-run cluster versions for both experiment types
 
 #### For Experiments
 - **Reliable execution** - Memory-optimized functions prevent crashes
@@ -316,11 +387,14 @@ Dev 2 (angle_dev=2.09): 500 std values
 - **Faster analysis** - Sub-second loading of pre-computed results
 - **Consistent behavior** - Same logic used across all experiment types (angles + tesselation)
 - **Unified interface** - Same smart loading system for all experiment types
+- **Cluster scalability** - Production-ready cluster deployment with automatic bundling
 
 #### Performance Improvements
 - **Load times**: From "hanging indefinitely" → 0.4s (existing data) / 10s (sample conversion)
 - **Memory usage**: Constant memory regardless of dataset size
 - **User experience**: Progress tracking, ETA calculations, intelligent caching
+- **Cluster deployment**: Self-contained execution with automatic environment setup
+- **Results transfer**: TAR bundling for efficient cluster-to-local transfer
 
 ### 💡 **Future Benefits**
 - **Easy extensibility** - New experiment types can reuse the smart loading hierarchy
@@ -328,10 +402,11 @@ Dev 2 (angle_dev=2.09): 500 std values
 - **Maintainable codebase** - Changes only needed in shared module
 - **Scalable architecture** - Memory-optimized design supports unlimited dataset sizes
 - **Unified noise handling** - Framework supports any number of noise types and parameters
+- **Cluster-ready framework** - Template established for deploying any quantum walk experiment to clusters
 
 ---
 
-*Mission accomplished: Code is now "super readable and simpler" with 90% duplicate code elimination, intelligent 3-tier loading hierarchy, and complete tesselation sample support.*
+*Mission accomplished: Code is now "super readable and simpler" with 90% duplicate code elimination, intelligent 3-tier loading hierarchy, complete tesselation sample support, and production-ready cluster deployment capabilities.*
 
 ---
 

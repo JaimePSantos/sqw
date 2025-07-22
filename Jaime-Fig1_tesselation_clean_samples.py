@@ -62,9 +62,9 @@ def load_or_create_experiment(graph_func, tesselation_func, N, steps, tesselatio
     )
 
 if __name__ == "__main__":
-    N = 300
+    N = 100
     steps = N//4
-    samples = 1  # Number of samples per shift probability
+    samples = 10  # Number of samples per shift probability
     angles = [[np.pi/3, np.pi/3]] * steps  # Fixed angles, no noise
     initial_state_kwargs = {"nodes": [N//2]}
 
