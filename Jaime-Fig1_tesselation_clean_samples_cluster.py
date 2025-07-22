@@ -9,24 +9,7 @@ import os
 import subprocess
 import tarfile
 import time
-import numpy as np
-import networkx as nx
-import pickle
 from pathlib import Path
-
-# Import shared functions from jaime_scripts
-from jaime_scripts import (
-    get_experiment_dir,
-    run_and_save_experiment_samples,
-    load_experiment_results_samples,
-    load_or_create_experiment_samples,
-    create_mean_probability_distributions,
-    load_mean_probability_distributions,
-    check_mean_probability_distributions_exist,
-    load_or_create_mean_probability_distributions,
-    prob_distributions2std,
-    smart_load_or_create_experiment  # New intelligent loading function
-)
 
 def run_command(cmd, check=True, capture_output=False):
     """Run a shell command and return the result."""
@@ -146,7 +129,7 @@ def main():
     
     # Setup paths
     work_dir = Path.cwd()
-    venv_path = work_dir / "qw_tesselation_venv"
+    venv_path = work_dir / "qw_venv"
     
     # Check if we need to setup virtual environment
     missing_deps = check_dependencies()
@@ -175,10 +158,29 @@ def run_experiment():
     """Run the actual tesselation quantum walk experiment using shared functions."""
     # Import the exact modules and functions from the original file
     try:
+        import numpy as np
+        import networkx as nx
+        import pickle
+        
         from sqw.tesselations import even_line_two_tesselation
         from sqw.experiments_expanded import running
         from sqw.states import uniform_initial_state, amp2prob
         from sqw.utils import tesselation_choice
+        
+        # Import shared functions from jaime_scripts after dependencies are confirmed
+        from jaime_scripts import (
+            get_experiment_dir,
+            run_and_save_experiment_samples,
+            load_experiment_results_samples,
+            load_or_create_experiment_samples,
+            create_mean_probability_distributions,
+            load_mean_probability_distributions,
+            check_mean_probability_distributions_exist,
+            load_or_create_mean_probability_distributions,
+            prob_distributions2std,
+            smart_load_or_create_experiment  # New intelligent loading function
+        )
+        
         print("Successfully imported all required modules")
     except ImportError as e:
         print(f"Error: Could not import required modules: {e}")
