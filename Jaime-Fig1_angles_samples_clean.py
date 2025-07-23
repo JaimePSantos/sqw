@@ -94,9 +94,9 @@ if __name__ == "__main__":
     plot_std_vs_time_qwak(stds, devs, title_prefix="Angle noise (mean)", parameter_name="dev")
 
     # # Plot probability distributions at specific timesteps
-    # timestep_to_plot = steps // 2  # Middle timestep
-    # print(f"\nPlotting mean distributions at timestep {timestep_to_plot}")
-    # plot_single_timestep_qwak(mean_results, devs, timestep_to_plot, domain, "Angle noise (mean)", "dev")
+    timestep_to_plot = steps  # Middle timestep
+    print(f"\nPlotting mean distributions at timestep {timestep_to_plot}")
+    plot_single_timestep_qwak(mean_results, devs, timestep_to_plot, domain, "Angle noise (mean)", "dev")
 
     # # Plot distributions at multiple timesteps
     # timesteps_to_plot = [0, steps//4, steps//2, 3*steps//4, steps-1]
