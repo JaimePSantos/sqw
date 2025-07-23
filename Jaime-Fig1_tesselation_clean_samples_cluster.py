@@ -192,7 +192,7 @@ def run_experiment():
     print("Starting tesselation quantum walk experiment...")
     
     # Optimized parameters for better cluster performance
-    N = 1000  # System size
+    N = 2000  # System size
     steps = N//4  # Time steps
     samples = 10  # Samples per shift probability
     angles = [[np.pi/3, np.pi/3]] * steps  # Fixed angles, no noise
