@@ -156,7 +156,7 @@ def main():
     run_experiment()
 
 def run_experiment():
-    """Run the actual tesselation quantum walk experiment using shared functions."""
+    """Run the actual tesselation quantum walk experiment using cluster-optimized immediate saving."""
     # Import the exact modules and functions from the original file
     try:
         import numpy as np
@@ -192,7 +192,7 @@ def run_experiment():
     print("Starting tesselation quantum walk experiment...")
     
     # Optimized parameters for better cluster performance
-    N = 2000  # System size
+    N = 1000  # System size
     steps = N//4  # Time steps
     samples = 10  # Samples per shift probability
     angles = [[np.pi/3, np.pi/3]] * steps  # Fixed angles, no noise
@@ -200,54 +200,123 @@ def run_experiment():
 
     # List of tesselation shift probabilities
     shift_probs = [0, 0.2, 0.5]
-    tesselation_orders_list = []  # [shift_prob][sample] -> tesselation_order
     
     print(f"Cluster-optimized parameters: N={N}, steps={steps}, samples={samples}")
     print(f"This will significantly reduce computation time while preserving the experiment structure.")
-    
-    # Generate tesselation orders for each shift probability and sample
-    for shift_prob in shift_probs:
-        shift_tesselation_orders = []
-        for sample_idx in range(samples):
-            if shift_prob == 0:
-                # No noise case - use fixed tesselation order
-                shift_tesselation_orders.append([[0, 1]] * steps)
-            else:
-                # Noisy tesselation order - generate different random sequence for each sample
-                tesselation_order = tesselation_choice([[0, 1], [1, 0]], steps, [1 - shift_prob, shift_prob])
-                shift_tesselation_orders.append(tesselation_order)
-        tesselation_orders_list.append(shift_tesselation_orders)
-
-    print(f"Running experiment for {len(shift_probs)} different tesselation shift probabilities with {samples} samples each...")
-    print(f"Shift probabilities: {shift_probs}")
+    print("🚀 IMMEDIATE SAVE MODE: Each sample will be saved as soon as it's computed!")
     
     # Start timing the main experiment
     start_time = time.time()
+    total_samples = len(shift_probs) * samples
+    completed_samples = 0
 
-    # Use the new smart loading function that follows the hierarchy:
-    # 1. Try probability distributions first (fastest)
-    # 2. Try samples if probabilities don't exist
-    # 3. Create new experiment if nothing exists
-    mean_results = smart_load_or_create_experiment(
-        graph_func=nx.cycle_graph,
-        tesselation_func=even_line_two_tesselation,
-        N=N,
-        steps=steps,
-        angles_or_angles_list=angles,  # Fixed angles for all experiments
-        tesselation_order_or_list=tesselation_orders_list,  # 2D list [shift_prob][sample] -> tesselation_order
-        initial_state_func=uniform_initial_state,
-        initial_state_kwargs=initial_state_kwargs,
-        parameter_list=shift_probs,
-        samples=samples,
-        noise_type="tesselation_order",
-        parameter_name="prob",
-        samples_base_dir="experiments_data_samples",
-        probdist_base_dir="experiments_data_samples_probDist"
-    )
+    # Run experiments with immediate saving for each sample
+    for shift_prob_idx, shift_prob in enumerate(shift_probs):
+        print(f"\n=== Processing shift probability {shift_prob:.3f} ({shift_prob_idx+1}/{len(shift_probs)}) ===")
+        
+        # Setup experiment directory
+        has_noise = shift_prob > 0
+        noise_params = [shift_prob] if has_noise else [0]
+        exp_dir = get_experiment_dir(even_line_two_tesselation, has_noise, N, noise_params=noise_params, noise_type="tesselation_order", base_dir="experiments_data_samples")
+        os.makedirs(exp_dir, exist_ok=True)
+        
+        shift_start_time = time.time()
+        shift_computed_samples = 0
+        
+        for sample_idx in range(samples):
+            sample_start_time = time.time()
+            
+            # Check if this sample already exists (all step files)
+            sample_exists = True
+            for step_idx in range(steps):
+                step_dir = os.path.join(exp_dir, f"step_{step_idx}")
+                filename = f"final_step_{step_idx}_sample{sample_idx}.pkl"
+                filepath = os.path.join(step_dir, filename)
+                if not os.path.exists(filepath):
+                    sample_exists = False
+                    break
+            
+            if sample_exists:
+                print(f"  ✅ Sample {sample_idx+1}/{samples} already exists, skipping")
+                completed_samples += 1
+                continue
+            
+            print(f"  🔄 Computing sample {sample_idx+1}/{samples}...")
+            
+            # Generate tesselation order for this sample
+            if shift_prob == 0:
+                # No noise case - use fixed tesselation order
+                tesselation_order = [[0, 1]] * steps
+            else:
+                # Noisy tesselation order - generate different random sequence for each sample
+                tesselation_order = tesselation_choice([[0, 1], [1, 0]], steps, [1 - shift_prob, shift_prob])
+            
+            # Run the quantum walk experiment for this sample
+            graph = nx.cycle_graph(N)
+            tesselation = even_line_two_tesselation(N)
+            initial_state = uniform_initial_state(N, **initial_state_kwargs)
+            
+            # Run the walk - note the correct parameter order
+            walk_result = running(
+                graph, tesselation, steps,
+                initial_state,
+                angles=angles,
+                tesselation_order=tesselation_order
+            )
+            
+            # Save each step immediately
+            for step_idx in range(steps):
+                step_dir = os.path.join(exp_dir, f"step_{step_idx}")
+                os.makedirs(step_dir, exist_ok=True)
+                
+                filename = f"final_step_{step_idx}_sample{sample_idx}.pkl"
+                filepath = os.path.join(step_dir, filename)
+                
+                with open(filepath, 'wb') as f:
+                    pickle.dump(walk_result[step_idx], f)
+            
+            shift_computed_samples += 1
+            completed_samples += 1
+            sample_time = time.time() - sample_start_time
+            
+            # Progress report
+            progress_pct = (completed_samples / total_samples) * 100
+            elapsed_time = time.time() - start_time
+            estimated_total_time = elapsed_time * total_samples / completed_samples if completed_samples > 0 else 0
+            remaining_time = estimated_total_time - elapsed_time if estimated_total_time > elapsed_time else 0
+            
+            print(f"  ✅ Sample {sample_idx+1}/{samples} saved in {sample_time:.1f}s")
+            print(f"     Progress: {completed_samples}/{total_samples} ({progress_pct:.1f}%)")
+            print(f"     Elapsed: {elapsed_time:.1f}s, Remaining: ~{remaining_time:.1f}s")
+        
+        shift_time = time.time() - shift_start_time
+        print(f"✅ Shift probability {shift_prob:.3f} completed: {shift_computed_samples} new samples in {shift_time:.1f}s")
 
     experiment_time = time.time() - start_time
-    print(f"Smart loading completed in {experiment_time:.2f} seconds")
-    print(f"Processed {len(shift_probs)} shift probabilities with {samples} samples each")
+    print(f"\n🎉 All samples completed in {experiment_time:.2f} seconds")
+    print(f"Total samples computed: {completed_samples}")
+    
+    # Now create mean probability distributions
+    print("\n📊 Creating mean probability distributions from saved samples...")
+    try:
+        create_mean_probability_distributions(
+            even_line_two_tesselation, N, steps, shift_probs, samples, 
+            "experiments_data_samples", "experiments_data_samples_probDist", "tesselation_order"
+        )
+        print("✅ Mean probability distributions created successfully!")
+    except Exception as e:
+        print(f"⚠️  Warning: Could not create mean probability distributions: {e}")
+        print("   You can create them later using the saved sample data.")
+    
+    # Load the mean results for statistics
+    try:
+        mean_results = load_mean_probability_distributions(
+            even_line_two_tesselation, N, steps, shift_probs, "experiments_data_samples_probDist", "tesselation_order"
+        )
+        print("✅ Mean probability distributions loaded for analysis")
+    except Exception as e:
+        print(f"⚠️  Warning: Could not load mean probability distributions: {e}")
+        mean_results = [[] for _ in shift_probs]
 
     # Calculate statistics for verification (but skip plotting on cluster)
     domain = np.arange(N)  # Use full domain for tesselation experiments
@@ -303,8 +372,8 @@ def run_experiment():
     print("- experiments_data_samples_probDist/ contains the mean probability distributions")
     print("Both directories maintain the tesselation_order directory structure for easy analysis.")
     print("\nDirectory structure:")
-    print("experiments_data_samples/even_line_two_tesselation_tesselation_order_nonoise/N_2000/")
-    print("experiments_data_samples/even_line_two_tesselation_tesselation_order_noise/tesselation_shift_prob_X.XXX/N_2000/")
+    print("experiments_data_samples/even_line_two_tesselation_tesselation_order_nonoise/N_1000/")
+    print("experiments_data_samples/even_line_two_tesselation_tesselation_order_noise/tesselation_shift_prob_X.XXX/N_1000/")
 
 if __name__ == "__main__":
     # Check for virtual environment flag

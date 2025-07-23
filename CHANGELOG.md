@@ -1,6 +1,56 @@
 # CHANGELOG
 
-## [Latest Session] - July 22, 2025 - Code Deduplication & Refactoring
+## [Latest Session] - July 23, 2025 - Cluster Resilience Enhancement
+
+### 🚨 **CRITICAL CLUSTER IMPROVEMENT: Immediate Sample Saving**
+
+### 🛡️ **Problem Solved: Experiment Interruption Recovery**
+- **Issue**: Previous cluster files used bulk processing - if experiments were interrupted, ALL work was lost
+- **Solution**: Implemented **immediate sample saving** - each quantum walk sample is saved to disk as soon as it's computed
+- **Impact**: Experiments can now be safely resumed from interruption points without losing work
+
+### 🔧 **Critical Bug Fixes**
+
+#### **Fixed Function Parameter Order**
+- **Issue**: Incorrect parameter order in `running()` and `uniform_initial_state()` function calls
+- **Root Cause**: Immediate save implementation didn't follow the exact calling pattern from working bulk functions
+- **Specific Fixes**:
+  - `uniform_initial_state(N, **kwargs)` instead of `uniform_initial_state(graph, **kwargs)`
+  - `running(graph, tesselation, steps, initial_state, angles=angles, tesselation_order=tesselation_order)` instead of incorrect positional arguments
+  - Restored `nx.cycle_graph(N)` to match original working files
+- **Files**: Both cluster files now use identical calling patterns to `jaime_scripts.py` bulk functions
+
+### 🔧 **Technical Enhancements**
+
+#### 1. **Immediate Save Implementation**
+- **Files**: `Jaime-Fig1_angles_samples_cluster_refactored.py`, `Jaime-Fig1_tesselation_clean_samples_cluster.py`
+- **Feature**: Each sample is saved immediately after computation with full step-by-step progress tracking
+- **Benefits**:
+  - ✅ **Zero work loss** on interruption 
+  - ✅ **Resume capability** - skips already computed samples automatically
+  - ✅ **Real-time progress** - ETA updates, completion percentages
+  - ✅ **Granular recovery** - sample-level checkpointing instead of bulk processing
+
+#### 2. **Enhanced Progress Monitoring**
+- **Real-time Statistics**: Progress percentage, elapsed time, estimated remaining time
+- **Sample-level Tracking**: Individual sample computation times and success status
+- **Parameter Progress**: Clear indication of which parameters are complete vs in-progress
+- **Directory Verification**: Automatic checking for existing samples to avoid recomputation
+
+#### 3. **Robust Error Handling**
+- **Graceful Fallbacks**: If mean probability distribution creation fails, samples are still preserved
+- **Recovery Instructions**: Clear guidance on how to process saved samples after interruption
+- **Warning System**: Non-critical errors don't stop the main experiment pipeline
+
+### 🎯 **User Experience Improvements**
+- **🚀 IMMEDIATE SAVE MODE** notification on startup
+- **✅ Sample X/Y saved** confirmation for each completed sample
+- **📊 Progress tracking** with completion percentages and time estimates
+- **⚠️ Warning system** for non-critical issues that don't interrupt computation
+
+---
+
+## [Previous Session] - July 22, 2025 - Code Deduplication & Refactoring
 
 ### 🎯 **Mission Accomplished: "Make the code super readable and simpler"**
 
