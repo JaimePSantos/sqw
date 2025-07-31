@@ -33,6 +33,7 @@ import time
 import functools
 from datetime import datetime, timedelta
 from typing import Optional, Callable, Any
+from .config import get_config, get_advanced_config
 
 
 class CrashSafeLogger:
@@ -40,11 +41,11 @@ class CrashSafeLogger:
     A comprehensive crash-safe logging system that runs logging in a separate process.
     """
     
-    def __init__(self, log_file_prefix: str = "execution", heartbeat_interval: float = 10.0, 
-                 log_level: int = logging.DEBUG):
-        self.log_file_prefix = log_file_prefix
-        self.heartbeat_interval = heartbeat_interval
-        self.log_level = log_level
+    def __init__(self, log_file_prefix: str = None, heartbeat_interval: float = None, 
+                 log_level: int = None):
+        self.log_file_prefix = log_file_prefix or get_config("log_file_prefix")
+        self.heartbeat_interval = heartbeat_interval or get_config("heartbeat_interval")
+        self.log_level = log_level or get_config("log_level")
         self.logger = None
         self.log_queue = None
         self.log_process = None
@@ -54,8 +55,7 @@ class CrashSafeLogger:
         self._setup_complete = False
     
     @staticmethod
-    def logging_process(log_queue: multiprocessing.Queue, log_file: str, 
-                       shutdown_event: multiprocessing.Event):
+    def logging_process(log_queue, log_file: str, shutdown_event):
         """
         Separate process for logging that runs concurrently with main code.
         This ensures logging continues even if main process crashes.
@@ -73,7 +73,7 @@ class CrashSafeLogger:
         console_handler.setLevel(logging.INFO)
         
         # Create formatter
-        formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+        formatter = logging.Formatter(get_config("log_format"))
         file_handler.setFormatter(formatter)
         console_handler.setFormatter(formatter)
         
@@ -96,14 +96,17 @@ class CrashSafeLogger:
         try:
             while not shutdown_event.is_set():
                 try:
-                    # Get message from queue with timeout
-                    record = log_queue.get(timeout=0.5)
+                    # Get message from queue with shorter timeout for responsiveness
+                    record = log_queue.get(timeout=0.5)  # Shorter timeout
                     if record is None:  # Sentinel to stop logging process
                         logger.info("Received shutdown sentinel")
                         break
                     logger.handle(record)
                     file_handler.flush()  # Force immediate write
                 except queue.Empty:
+                    # Check shutdown event more frequently
+                    if shutdown_event.is_set():
+                        break
                     continue
                 except Exception as e:
                     # Log any errors in the logging process itself
@@ -131,11 +134,11 @@ class CrashSafeLogger:
             
         # Create organized log directory structure
         now = datetime.now()
-        date_str = now.strftime("%Y-%m-%d")  # YYYY-MM-DD format
-        time_str = now.strftime("%H-%M-%S")  # HH-MM-SS format (24h)
+        date_str = now.strftime(get_config("date_format"))
+        time_str = now.strftime(get_config("time_format"))
         
         # Create logs directory structure: logs/YYYY-MM-DD/
-        logs_dir = os.path.join("logs", date_str)
+        logs_dir = os.path.join(get_config("logs_base_directory"), date_str)
         os.makedirs(logs_dir, exist_ok=True)
         
         # Create log file with readable time format
@@ -281,27 +284,33 @@ class CrashSafeLogger:
         if self.shutdown_event:
             self.shutdown_event.set()
         
-        # Give some time for all log messages to be processed
-        time.sleep(0.5)
+        # Give minimal time for log messages to be processed
+        time.sleep(0.1)
         
         try:
             # Send sentinel to stop logging process
             if self.log_queue:
                 self.log_queue.put(None)
             
-            # Wait for logging process to finish with timeout
+            # Wait for logging process to finish with short timeout
             if self.log_process:
-                self.log_process.join(timeout=3)
+                # Use shorter timeout to prevent hanging
+                self.log_process.join(timeout=1)
                 
                 if self.log_process.is_alive():
                     print("Warning: Logging process did not terminate gracefully, forcing termination")
                     self.log_process.terminate()
-                    self.log_process.join(timeout=2)
+                    # Don't wait long for termination
+                    self.log_process.join(timeout=0.5)
                     
                     if self.log_process.is_alive():
                         print("Error: Logging process still alive after terminate, killing forcefully")
-                        self.log_process.kill()
-                        self.log_process.join()
+                        try:
+                            self.log_process.kill()
+                            self.log_process.join(timeout=0.5)
+                        except:
+                            # On Windows, sometimes kill() can fail, just continue
+                            pass
         except Exception as e:
             print(f"Error during logging cleanup: {e}")
         
@@ -318,8 +327,8 @@ class CrashSafeLogger:
             print("WARNING: Logging process is still running after cleanup")
 
 
-def crash_safe_log(log_file_prefix: str = "execution", heartbeat_interval: float = 10.0, 
-                   log_level: int = logging.DEBUG, log_system_info: bool = True):
+def crash_safe_log(log_file_prefix: str = None, heartbeat_interval: float = None, 
+                   log_level: int = None, log_system_info: bool = None):
     """
     Decorator that adds crash-safe logging to any function.
     
@@ -345,6 +354,9 @@ def crash_safe_log(log_file_prefix: str = "execution", heartbeat_interval: float
                 log_level=log_level
             )
             
+            # Use config default for log_system_info if not specified
+            should_log_system_info = log_system_info if log_system_info is not None else get_config("log_system_info")
+            
             try:
                 # Set up logging
                 logger = crash_logger.setup()
@@ -353,7 +365,7 @@ def crash_safe_log(log_file_prefix: str = "execution", heartbeat_interval: float
                 logger.info(f"=== STARTING EXECUTION OF {func.__name__.upper()} ===")
                 
                 # Log system information if requested
-                if log_system_info:
+                if should_log_system_info:
                     crash_logger.log_system_info()
                 
                 # Check if logging process is still alive
@@ -402,8 +414,8 @@ def crash_safe_log(log_file_prefix: str = "execution", heartbeat_interval: float
     return decorator
 
 
-def setup_logging(log_file_prefix: str = "execution", heartbeat_interval: float = 10.0, 
-                  log_level: int = logging.DEBUG) -> tuple[logging.Logger, CrashSafeLogger]:
+def setup_logging(log_file_prefix: str = None, heartbeat_interval: float = None, 
+                  log_level: int = None) -> tuple[logging.Logger, CrashSafeLogger]:
     """
     Set up crash-safe logging manually (alternative to using the decorator).
     
@@ -438,7 +450,7 @@ def list_log_files(days_back: int = 7) -> dict:
     Returns:
         dict: Dictionary with date as key and list of log files as value
     """
-    logs_dir = "logs"
+    logs_dir = get_config("logs_base_directory")
     if not os.path.exists(logs_dir):
         return {}
     
@@ -447,7 +459,7 @@ def list_log_files(days_back: int = 7) -> dict:
     
     for i in range(days_back):
         date = now - timedelta(days=i)
-        date_str = date.strftime("%Y-%m-%d")
+        date_str = date.strftime(get_config("date_format"))
         date_dir = os.path.join(logs_dir, date_str)
         
         if os.path.exists(date_dir):
@@ -465,7 +477,7 @@ def get_latest_log_file() -> Optional[str]:
     Returns:
         str: Path to the latest log file, or None if no logs found
     """
-    logs_dir = "logs"
+    logs_dir = get_config("logs_base_directory")
     if not os.path.exists(logs_dir):
         return None
     
@@ -502,7 +514,7 @@ def print_log_summary():
     for date, files in sorted(log_files.items(), reverse=True):
         print(f"\n📅 {date} ({len(files)} files):")
         for file in files:
-            file_path = os.path.join("logs", date, file)
+            file_path = os.path.join(get_config("logs_base_directory"), date, file)
             file_size = os.path.getsize(file_path)
             file_time = file.split('_')[-1].replace('.log', '').replace('-', ':')
             print(f"   ⏰ {file_time} - {file} ({file_size} bytes)")

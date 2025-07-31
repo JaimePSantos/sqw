@@ -10,13 +10,14 @@ import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-# Import the crash-safe logging decorator
+# Import the crash-safe logging decorator from the logging module
 from logging_module import crash_safe_log
 
-@crash_safe_log(log_file_prefix="sqw_execution", heartbeat_interval=10.0)
+@crash_safe_log(log_file_prefix="sqw_execution_base", heartbeat_interval=10.0)
 def main_computation():
     """
-    Main computation with crash-safe logging via decorator.
+    Main computation with crash-safe logging via decorator from logging module.
+    This replaces the original complex logging implementation with a simple decorator.
     """
     N = 200
     T = even_cycle_two_tesselation(N)
@@ -40,6 +41,6 @@ def main_computation():
     return final_dist
 
 if __name__ == "__main__":
-    # Simply call the decorated function - all logging is handled automatically
+    # Simply call the decorated function - all logging is handled automatically by the module
     result = main_computation()
     print(f"Computation completed successfully. Result length: {len(result) if result else 'None'}")
