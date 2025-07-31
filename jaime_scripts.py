@@ -3,7 +3,14 @@ import networkx as nx
 from matplotlib import pyplot as plt
 from collections import Counter
 import math
-from utils.plotTools import plot_qwak
+# from utils.plotTools import plot_qwak  # Commented out - module doesn't exist
+
+# Simple placeholder for plot_qwak to avoid import errors
+def plot_qwak(*args, **kwargs):
+    """Placeholder function - plotting functionality not available"""
+    print("Warning: plot_qwak functionality not available (utils.plotTools module missing)")
+    pass
+
 import os
 import ast
 import numpy as np
