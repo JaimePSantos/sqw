@@ -10,13 +10,13 @@ from cluster_module import cluster_deploy
 from logging_module.crash_safe_logging import crash_safe_log
 
 # Experiment parameters - shared between decorator and function
-N = 3000
+N = 10000
 samples = 1
 steps = N//4
 
 @crash_safe_log(
     log_file_prefix="angle_experiment",
-    heartbeat_interval=30.0,  # Longer intervals for cluster runs
+    heartbeat_interval=90.0,  # Longer intervals for cluster runs
     log_system_info=True
 )
 @cluster_deploy(

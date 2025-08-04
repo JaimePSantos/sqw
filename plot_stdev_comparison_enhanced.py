@@ -20,7 +20,79 @@ from jaime_scripts import (
     plot_std_vs_time_qwak
 )
 
-def save_plot_data(angle_stds, angle_devs, tesselation_stds, shift_probs, output_dir="plot_outputs"):
+# =============================================================================
+# CONFIGURATION PARAMETERS
+# =============================================================================
+
+# Experiment parameters
+N = 3000  # System size
+DEFAULT_STEPS = None  # If None, will be calculated as N // 4
+SAMPLES = 1  # Number of samples used in experiments
+BASE_DIR = "experiments_data_samples_probDist"  # Directory containing experiment data
+OUTPUT_DIR = "plot_outputs"  # Directory for saving plots and data
+
+# Angle noise experiment parameters
+ANGLE_DEVIATIONS = [0, (np.pi/3)/2.5, (np.pi/3) * 2]
+
+# Tesselation order noise experiment parameters  
+SHIFT_PROBABILITIES = [0, 0.2, 0.5]
+
+# Plot styling parameters
+PLOT_COLORS = ['blue', 'orange', 'green', 'red', 'purple']
+FIGURE_SIZE_COMBINED = (15, 6)
+FIGURE_SIZE_INDIVIDUAL = (10, 6)
+DPI = 300
+MARKER_SIZE = 2
+LINE_WIDTH = 1.5
+
+# Grid and axis parameters
+GRID_ALPHA = 0.3
+AXIS_MARGIN_FACTOR = 0.1  # For regular plots
+LOG_AXIS_MARGIN_FACTOR_TIME = 0.2  # For log-log plots (time axis)
+LOG_AXIS_MARGIN_FACTOR_STD = 0.5   # For log-log plots (std axis)
+
+# =============================================================================
+# CONFIGURATION GUIDE
+# =============================================================================
+"""
+CONFIGURATION GUIDE:
+
+To modify the script behavior, edit the configuration parameters above:
+
+EXPERIMENT PARAMETERS:
+- N: System size (default: 2000)
+- DEFAULT_STEPS: Number of time steps (default: N//4)
+- SAMPLES: Number of samples used in experiments (default: 1)
+- BASE_DIR: Directory containing experiment data
+- OUTPUT_DIR: Directory for saving plots and data
+
+NOISE PARAMETERS:
+- ANGLE_DEVIATIONS: List of angle deviation values to analyze
+- SHIFT_PROBABILITIES: List of shift probabilities for tesselation order noise
+
+PLOT STYLING:
+- PLOT_COLORS: Colors for different data series
+- FIGURE_SIZE_COMBINED: Size for combined plots (width, height)
+- FIGURE_SIZE_INDIVIDUAL: Size for individual plots (width, height) 
+- DPI: Resolution for saved plots
+- MARKER_SIZE: Size of markers in plots
+- LINE_WIDTH: Width of lines in plots
+
+AXIS AND GRID:
+- GRID_ALPHA: Transparency of grid lines (0-1)
+- AXIS_MARGIN_FACTOR: Margin around data for regular plots
+- LOG_AXIS_MARGIN_FACTOR_TIME: Margin for time axis in log-log plots
+- LOG_AXIS_MARGIN_FACTOR_STD: Margin for std axis in log-log plots
+
+USAGE EXAMPLES:
+1. Change system size: N = 3000
+2. Add more angle deviations: ANGLE_DEVIATIONS = [0, 0.1, 0.2, 0.5, 1.0]
+3. Change number of samples: SAMPLES = 10
+4. Higher resolution plots: DPI = 600
+5. Larger figures: FIGURE_SIZE_COMBINED = (20, 8)
+"""
+
+def save_plot_data(angle_stds, angle_devs, tesselation_stds, shift_probs, N, samples=SAMPLES, output_dir=OUTPUT_DIR):
     """
     Save the plot data to files for later analysis.
     """
@@ -33,13 +105,15 @@ def save_plot_data(angle_stds, angle_devs, tesselation_stds, shift_probs, output
             'std_values': angle_stds,
             'timesteps': [list(range(len(std))) for std in angle_stds],
             'experiment_type': 'angle_noise',
-            'N': 2000,
+            'N': N,
+            'samples': samples,
             'steps': len(angle_stds[0]) if angle_stds and len(angle_stds[0]) > 0 else 0
         }
         import json
-        with open(os.path.join(output_dir, 'angle_noise_std_data.json'), 'w') as f:
+        filename = f'angle_noise_std_data_N{N}_samples{samples}.json'
+        with open(os.path.join(output_dir, filename), 'w') as f:
             json.dump(angle_data, f, indent=2)
-        print(f"✅ Saved angle noise data to {output_dir}/angle_noise_std_data.json")
+        print(f"✅ Saved angle noise data to {output_dir}/{filename}")
     
     # Save tesselation data
     if tesselation_stds and shift_probs:
@@ -48,22 +122,21 @@ def save_plot_data(angle_stds, angle_devs, tesselation_stds, shift_probs, output
             'std_values': tesselation_stds,
             'timesteps': [list(range(len(std))) for std in tesselation_stds],
             'experiment_type': 'tesselation_order_noise',
-            'N': 2000,
+            'N': N,
+            'samples': samples,
             'steps': len(tesselation_stds[0]) if tesselation_stds and len(tesselation_stds[0]) > 0 else 0
         }
-        with open(os.path.join(output_dir, 'tesselation_order_std_data.json'), 'w') as f:
+        filename = f'tesselation_order_std_data_N{N}_samples{samples}.json'
+        with open(os.path.join(output_dir, filename), 'w') as f:
             json.dump(tesselation_data, f, indent=2)
-        print(f"✅ Saved tesselation order data to {output_dir}/tesselation_order_std_data.json")
+        print(f"✅ Saved tesselation order data to {output_dir}/{filename}")
 
-def load_and_plot_angle_experiments(N=2000, steps=None, base_dir="experiments_data_samples_probDist"):
+def load_and_plot_angle_experiments(N=N, steps=DEFAULT_STEPS, devs=ANGLE_DEVIATIONS, base_dir=BASE_DIR):
     """
     Load angle noise experiments and calculate standard deviations.
     """
     if steps is None:
         steps = N // 4
-    
-    # Parameters from the angle experiments
-    devs = [0, (np.pi/3)/2.5, (np.pi/3) * 2]
     
     print(f"Loading angle noise experiments for N={N}, steps={steps}")
     print(f"Angle deviations: {devs}")
@@ -96,15 +169,12 @@ def load_and_plot_angle_experiments(N=2000, steps=None, base_dir="experiments_da
     
     return stds, devs
 
-def load_and_plot_tesselation_experiments(N=2000, steps=None, base_dir="experiments_data_samples_probDist"):
+def load_and_plot_tesselation_experiments(N=N, steps=DEFAULT_STEPS, shift_probs=SHIFT_PROBABILITIES, base_dir=BASE_DIR):
     """
     Load tesselation order noise experiments and calculate standard deviations.
     """
     if steps is None:
         steps = N // 4
-    
-    # Parameters from the tesselation experiments
-    shift_probs = [0, 0.2, 0.5]
     
     print(f"Loading tesselation order experiments for N={N}, steps={steps}")
     print(f"Shift probabilities: {shift_probs}")
@@ -137,27 +207,30 @@ def load_and_plot_tesselation_experiments(N=2000, steps=None, base_dir="experime
     
     return stds, shift_probs
 
-def plot_and_save_combined_comparison(angle_stds, angle_devs, tesselation_stds, shift_probs, output_dir="plot_outputs"):
+def plot_and_save_combined_comparison(angle_stds, angle_devs, tesselation_stds, shift_probs, 
+                                     colors=PLOT_COLORS, figsize=FIGURE_SIZE_COMBINED, 
+                                     marker_size=MARKER_SIZE, line_width=LINE_WIDTH, 
+                                     grid_alpha=GRID_ALPHA, axis_margin=AXIS_MARGIN_FACTOR,
+                                     N=N, samples=SAMPLES, output_dir=OUTPUT_DIR, dpi=DPI):
     """
     Plot both angle and tesselation experiments in a combined figure and save to file.
     """
     os.makedirs(output_dir, exist_ok=True)
     
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6))
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=figsize)
     
     # Plot angle noise results
     if angle_stds and any(len(std) > 0 for std in angle_stds):
         ax1.set_title('Standard Deviation vs Time - Angle Noise', fontsize=14, fontweight='bold')
         ax1.set_xlabel('Time Step', fontsize=12)
         ax1.set_ylabel('Standard Deviation', fontsize=12)
-        ax1.grid(True, alpha=0.3)
+        ax1.grid(True, alpha=grid_alpha)
         
-        colors = ['blue', 'orange', 'green', 'red', 'purple']
         for i, (std_values, dev) in enumerate(zip(angle_stds, angle_devs)):
             if len(std_values) > 0:
                 timesteps = list(range(len(std_values)))
-                ax1.plot(timesteps, std_values, marker='o', markersize=2, 
-                        color=colors[i % len(colors)], linewidth=1.5,
+                ax1.plot(timesteps, std_values, marker='o', markersize=marker_size, 
+                        color=colors[i % len(colors)], linewidth=line_width,
                         label=f'angle_dev={dev:.3f}')
         
         ax1.legend()
@@ -172,7 +245,8 @@ def plot_and_save_combined_comparison(angle_stds, angle_devs, tesselation_stds, 
             if all_stds:
                 min_std = np.min(all_stds)
                 max_std = np.max(all_stds)
-                ax1.set_ylim(min_std * 0.9, max_std * 1.1)
+                margin = (max_std - min_std) * axis_margin
+                ax1.set_ylim(min_std - margin, max_std + margin)
     else:
         ax1.text(0.5, 0.5, 'No angle noise data available', 
                 horizontalalignment='center', verticalalignment='center', transform=ax1.transAxes)
@@ -183,14 +257,13 @@ def plot_and_save_combined_comparison(angle_stds, angle_devs, tesselation_stds, 
         ax2.set_title('Standard Deviation vs Time - Tesselation Order Noise', fontsize=14, fontweight='bold')
         ax2.set_xlabel('Time Step', fontsize=12)
         ax2.set_ylabel('Standard Deviation', fontsize=12)
-        ax2.grid(True, alpha=0.3)
+        ax2.grid(True, alpha=grid_alpha)
         
-        colors = ['blue', 'orange', 'green', 'red', 'purple']
         for i, (std_values, prob) in enumerate(zip(tesselation_stds, shift_probs)):
             if len(std_values) > 0:
                 timesteps = list(range(len(std_values)))
-                ax2.plot(timesteps, std_values, marker='s', markersize=2, 
-                        color=colors[i % len(colors)], linewidth=1.5,
+                ax2.plot(timesteps, std_values, marker='s', markersize=marker_size, 
+                        color=colors[i % len(colors)], linewidth=line_width,
                         label=f'shift_prob={prob:.3f}')
         
         ax2.legend()
@@ -205,7 +278,8 @@ def plot_and_save_combined_comparison(angle_stds, angle_devs, tesselation_stds, 
             if all_stds:
                 min_std = np.min(all_stds)
                 max_std = np.max(all_stds)
-                ax2.set_ylim(min_std * 0.9, max_std * 1.1)
+                margin = (max_std - min_std) * axis_margin
+                ax2.set_ylim(min_std - margin, max_std + margin)
     else:
         ax2.text(0.5, 0.5, 'No tesselation order data available', 
                 horizontalalignment='center', verticalalignment='center', transform=ax2.transAxes)
@@ -214,33 +288,37 @@ def plot_and_save_combined_comparison(angle_stds, angle_devs, tesselation_stds, 
     plt.tight_layout()
     
     # Save the plot
-    output_file = os.path.join(output_dir, 'std_comparison_combined.png')
-    plt.savefig(output_file, dpi=300, bbox_inches='tight')
+    output_file = os.path.join(output_dir, f'std_comparison_combined_N{N}_samples{samples}.png')
+    plt.savefig(output_file, dpi=dpi, bbox_inches='tight')
     print(f"✅ Saved combined plot to {output_file}")
     
     # Also save as PDF
-    output_file_pdf = os.path.join(output_dir, 'std_comparison_combined.pdf')
+    output_file_pdf = os.path.join(output_dir, f'std_comparison_combined_N{N}_samples{samples}.pdf')
     plt.savefig(output_file_pdf, bbox_inches='tight')
     print(f"✅ Saved combined plot to {output_file_pdf}")
     
     plt.show()
 
-def plot_and_save_combined_comparison_loglog(angle_stds, angle_devs, tesselation_stds, shift_probs, output_dir="plot_outputs"):
+def plot_and_save_combined_comparison_loglog(angle_stds, angle_devs, tesselation_stds, shift_probs, 
+                                           colors=PLOT_COLORS, figsize=FIGURE_SIZE_COMBINED, 
+                                           marker_size=MARKER_SIZE, line_width=LINE_WIDTH, 
+                                           grid_alpha=GRID_ALPHA, time_margin=LOG_AXIS_MARGIN_FACTOR_TIME,
+                                           std_margin=LOG_AXIS_MARGIN_FACTOR_STD, N=N, samples=SAMPLES, 
+                                           output_dir=OUTPUT_DIR, dpi=DPI):
     """
     Plot both angle and tesselation experiments in log-log scale to reveal scaling behavior.
     """
     os.makedirs(output_dir, exist_ok=True)
     
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6))
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=figsize)
     
     # Plot angle noise results (log-log)
     if angle_stds and any(len(std) > 0 for std in angle_stds):
         ax1.set_title('Standard Deviation vs Time - Angle Noise (Log-Log)', fontsize=14, fontweight='bold')
         ax1.set_xlabel('Time Step (log scale)', fontsize=12)
         ax1.set_ylabel('Standard Deviation (log scale)', fontsize=12)
-        ax1.grid(True, alpha=0.3)
+        ax1.grid(True, alpha=grid_alpha)
         
-        colors = ['blue', 'orange', 'green', 'red', 'purple']
         for i, (std_values, dev) in enumerate(zip(angle_stds, angle_devs)):
             if len(std_values) > 0:
                 # Filter out zero values and start from timestep 1 for log scale
@@ -251,8 +329,8 @@ def plot_and_save_combined_comparison_loglog(angle_stds, angle_devs, tesselation
                 valid_mask = std_array > 0
                 if np.any(valid_mask):
                     ax1.loglog(timesteps[valid_mask], std_array[valid_mask], 
-                              marker='o', markersize=2, color=colors[i % len(colors)], 
-                              linewidth=1.5, label=f'angle_dev={dev:.3f}')
+                              marker='o', markersize=marker_size, color=colors[i % len(colors)], 
+                              linewidth=line_width, label=f'angle_dev={dev:.3f}')
         
         ax1.legend()
         
@@ -273,8 +351,8 @@ def plot_and_save_combined_comparison_loglog(angle_stds, angle_devs, tesselation
                 max_std = np.max(all_stds)
                 min_time = np.min(all_timesteps)
                 max_time = np.max(all_timesteps)
-                ax1.set_xlim(min_time * 0.8, max_time * 1.2)
-                ax1.set_ylim(min_std * 0.5, max_std * 2)
+                ax1.set_xlim(min_time * (1 - time_margin), max_time * (1 + time_margin))
+                ax1.set_ylim(min_std * (1 - std_margin), max_std * (1 + std_margin))
     else:
         ax1.text(0.5, 0.5, 'No angle noise data available', 
                 horizontalalignment='center', verticalalignment='center', transform=ax1.transAxes)
@@ -285,9 +363,8 @@ def plot_and_save_combined_comparison_loglog(angle_stds, angle_devs, tesselation
         ax2.set_title('Standard Deviation vs Time - Tesselation Order Noise (Log-Log)', fontsize=14, fontweight='bold')
         ax2.set_xlabel('Time Step (log scale)', fontsize=12)
         ax2.set_ylabel('Standard Deviation (log scale)', fontsize=12)
-        ax2.grid(True, alpha=0.3)
+        ax2.grid(True, alpha=grid_alpha)
         
-        colors = ['blue', 'orange', 'green', 'red', 'purple']
         for i, (std_values, prob) in enumerate(zip(tesselation_stds, shift_probs)):
             if len(std_values) > 0:
                 # Filter out zero values and start from timestep 1 for log scale
@@ -298,8 +375,8 @@ def plot_and_save_combined_comparison_loglog(angle_stds, angle_devs, tesselation
                 valid_mask = std_array > 0
                 if np.any(valid_mask):
                     ax2.loglog(timesteps[valid_mask], std_array[valid_mask], 
-                              marker='s', markersize=2, color=colors[i % len(colors)], 
-                              linewidth=1.5, label=f'shift_prob={prob:.3f}')
+                              marker='s', markersize=marker_size, color=colors[i % len(colors)], 
+                              linewidth=line_width, label=f'shift_prob={prob:.3f}')
         
         ax2.legend()
         
@@ -320,8 +397,8 @@ def plot_and_save_combined_comparison_loglog(angle_stds, angle_devs, tesselation
                 max_std = np.max(all_stds)
                 min_time = np.min(all_timesteps)
                 max_time = np.max(all_timesteps)
-                ax2.set_xlim(min_time * 0.8, max_time * 1.2)
-                ax2.set_ylim(min_std * 0.5, max_std * 2)
+                ax2.set_xlim(min_time * (1 - time_margin), max_time * (1 + time_margin))
+                ax2.set_ylim(min_std * (1 - std_margin), max_std * (1 + std_margin))
     else:
         ax2.text(0.5, 0.5, 'No tesselation order data available', 
                 horizontalalignment='center', verticalalignment='center', transform=ax2.transAxes)
@@ -330,18 +407,22 @@ def plot_and_save_combined_comparison_loglog(angle_stds, angle_devs, tesselation
     plt.tight_layout()
     
     # Save the log-log plot
-    output_file = os.path.join(output_dir, 'std_comparison_combined_loglog.png')
-    plt.savefig(output_file, dpi=300, bbox_inches='tight')
+    output_file = os.path.join(output_dir, f'std_comparison_combined_loglog_N{N}_samples{samples}.png')
+    plt.savefig(output_file, dpi=dpi, bbox_inches='tight')
     print(f"✅ Saved combined log-log plot to {output_file}")
     
     # Also save as PDF
-    output_file_pdf = os.path.join(output_dir, 'std_comparison_combined_loglog.pdf')
+    output_file_pdf = os.path.join(output_dir, f'std_comparison_combined_loglog_N{N}_samples{samples}.pdf')
     plt.savefig(output_file_pdf, bbox_inches='tight')
     print(f"✅ Saved combined log-log plot to {output_file_pdf}")
     
     plt.show()
 
-def plot_individual_experiments_with_save(angle_stds, angle_devs, tesselation_stds, shift_probs, output_dir="plot_outputs"):
+def plot_individual_experiments_with_save(angle_stds, angle_devs, tesselation_stds, shift_probs, 
+                                         colors=PLOT_COLORS, figsize=FIGURE_SIZE_INDIVIDUAL, 
+                                         marker_size=MARKER_SIZE, line_width=LINE_WIDTH, 
+                                         grid_alpha=GRID_ALPHA, axis_margin=AXIS_MARGIN_FACTOR,
+                                         N=N, samples=SAMPLES, output_dir=OUTPUT_DIR, dpi=DPI):
     """
     Plot angle and tesselation experiments separately and save them.
     """
@@ -355,22 +436,20 @@ def plot_individual_experiments_with_save(angle_stds, angle_devs, tesselation_st
     if angle_stds and any(len(std) > 0 for std in angle_stds):
         print("\nPlotting angle noise experiments...")
         
-        # Use the original plotting function but capture it
-        plt.figure(figsize=(10, 6))
+        plt.figure(figsize=figsize)
         
-        colors = ['blue', 'orange', 'green', 'red', 'purple']
         for i, (std_values, dev) in enumerate(zip(angle_stds, angle_devs)):
             if len(std_values) > 0:
                 timesteps = list(range(len(std_values)))
-                plt.plot(timesteps, std_values, marker='o', markersize=2, 
-                        color=colors[i % len(colors)], linewidth=1.5,
+                plt.plot(timesteps, std_values, marker='o', markersize=marker_size, 
+                        color=colors[i % len(colors)], linewidth=line_width,
                         label=f'angle_dev={dev:.3f}')
         
         plt.xlabel('Time Step', fontsize=12)
         plt.ylabel('Standard Deviation', fontsize=12)
         plt.title('Standard Deviation vs Time for Different Angle Noise Values', fontsize=14, fontweight='bold')
         plt.legend()
-        plt.grid(True, alpha=0.3)
+        plt.grid(True, alpha=grid_alpha)
         
         # Set Y-axis limits based on data range for angle noise
         all_stds = []
@@ -380,16 +459,17 @@ def plot_individual_experiments_with_save(angle_stds, angle_devs, tesselation_st
         if all_stds:
             min_std = np.min(all_stds)
             max_std = np.max(all_stds)
-            plt.ylim(min_std * 0.9, max_std * 1.1)
+            margin = (max_std - min_std) * axis_margin
+            plt.ylim(min_std - margin, max_std + margin)
         
         plt.tight_layout()
         
         # Save angle plot
-        angle_output = os.path.join(output_dir, 'std_angle_noise.png')
-        plt.savefig(angle_output, dpi=300, bbox_inches='tight')
+        angle_output = os.path.join(output_dir, f'std_angle_noise_N{N}_samples{samples}.png')
+        plt.savefig(angle_output, dpi=dpi, bbox_inches='tight')
         print(f"✅ Saved angle noise plot to {angle_output}")
         
-        angle_output_pdf = os.path.join(output_dir, 'std_angle_noise.pdf')
+        angle_output_pdf = os.path.join(output_dir, f'std_angle_noise_N{N}_samples{samples}.pdf')
         plt.savefig(angle_output_pdf, bbox_inches='tight')
         print(f"✅ Saved angle noise plot to {angle_output_pdf}")
         
@@ -402,21 +482,20 @@ def plot_individual_experiments_with_save(angle_stds, angle_devs, tesselation_st
     if tesselation_stds and any(len(std) > 0 for std in tesselation_stds):
         print("\nPlotting tesselation order experiments...")
         
-        plt.figure(figsize=(10, 6))
+        plt.figure(figsize=figsize)
         
-        colors = ['blue', 'orange', 'green', 'red', 'purple']
         for i, (std_values, prob) in enumerate(zip(tesselation_stds, shift_probs)):
             if len(std_values) > 0:
                 timesteps = list(range(len(std_values)))
-                plt.plot(timesteps, std_values, marker='s', markersize=2, 
-                        color=colors[i % len(colors)], linewidth=1.5,
+                plt.plot(timesteps, std_values, marker='s', markersize=marker_size, 
+                        color=colors[i % len(colors)], linewidth=line_width,
                         label=f'shift_prob={prob:.3f}')
         
         plt.xlabel('Time Step', fontsize=12)
         plt.ylabel('Standard Deviation', fontsize=12)
         plt.title('Standard Deviation vs Time for Different Tesselation Shift Probabilities', fontsize=14, fontweight='bold')
         plt.legend()
-        plt.grid(True, alpha=0.3)
+        plt.grid(True, alpha=grid_alpha)
         
         # Set Y-axis limits based on data range for tesselation noise
         all_stds = []
@@ -426,16 +505,17 @@ def plot_individual_experiments_with_save(angle_stds, angle_devs, tesselation_st
         if all_stds:
             min_std = np.min(all_stds)
             max_std = np.max(all_stds)
-            plt.ylim(min_std * 0.9, max_std * 1.1)
+            margin = (max_std - min_std) * axis_margin
+            plt.ylim(min_std - margin, max_std + margin)
         
         plt.tight_layout()
         
         # Save tesselation plot
-        tess_output = os.path.join(output_dir, 'std_tesselation_order.png')
-        plt.savefig(tess_output, dpi=300, bbox_inches='tight')
+        tess_output = os.path.join(output_dir, f'std_tesselation_order_N{N}_samples{samples}.png')
+        plt.savefig(tess_output, dpi=dpi, bbox_inches='tight')
         print(f"✅ Saved tesselation order plot to {tess_output}")
         
-        tess_output_pdf = os.path.join(output_dir, 'std_tesselation_order.pdf')
+        tess_output_pdf = os.path.join(output_dir, f'std_tesselation_order_N{N}_samples{samples}.pdf')
         plt.savefig(tess_output_pdf, bbox_inches='tight')
         print(f"✅ Saved tesselation order plot to {tess_output_pdf}")
         
@@ -443,7 +523,12 @@ def plot_individual_experiments_with_save(angle_stds, angle_devs, tesselation_st
     else:
         print("\nNo tesselation order data to plot.")
 
-def plot_individual_experiments_with_save_loglog(angle_stds, angle_devs, tesselation_stds, shift_probs, output_dir="plot_outputs"):
+def plot_individual_experiments_with_save_loglog(angle_stds, angle_devs, tesselation_stds, shift_probs, 
+                                               colors=PLOT_COLORS, figsize=FIGURE_SIZE_INDIVIDUAL, 
+                                               marker_size=MARKER_SIZE, line_width=LINE_WIDTH, 
+                                               grid_alpha=GRID_ALPHA, time_margin=LOG_AXIS_MARGIN_FACTOR_TIME,
+                                               std_margin=LOG_AXIS_MARGIN_FACTOR_STD, N=N, samples=SAMPLES,
+                                               output_dir=OUTPUT_DIR, dpi=DPI):
     """
     Plot angle and tesselation experiments separately in log-log scale and save them.
     """
@@ -457,9 +542,8 @@ def plot_individual_experiments_with_save_loglog(angle_stds, angle_devs, tessela
     if angle_stds and any(len(std) > 0 for std in angle_stds):
         print("\nPlotting angle noise experiments (log-log)...")
         
-        plt.figure(figsize=(10, 6))
+        plt.figure(figsize=figsize)
         
-        colors = ['blue', 'orange', 'green', 'red', 'purple']
         for i, (std_values, dev) in enumerate(zip(angle_stds, angle_devs)):
             if len(std_values) > 0:
                 # Filter out zero values and start from timestep 1 for log scale
@@ -470,14 +554,14 @@ def plot_individual_experiments_with_save_loglog(angle_stds, angle_devs, tessela
                 valid_mask = std_array > 0
                 if np.any(valid_mask):
                     plt.loglog(timesteps[valid_mask], std_array[valid_mask], 
-                              marker='o', markersize=2, color=colors[i % len(colors)], 
-                              linewidth=1.5, label=f'angle_dev={dev:.3f}')
+                              marker='o', markersize=marker_size, color=colors[i % len(colors)], 
+                              linewidth=line_width, label=f'angle_dev={dev:.3f}')
         
         plt.xlabel('Time Step (log scale)', fontsize=12)
         plt.ylabel('Standard Deviation (log scale)', fontsize=12)
         plt.title('Standard Deviation vs Time - Angle Noise (Log-Log Scale)', fontsize=14, fontweight='bold')
         plt.legend()
-        plt.grid(True, alpha=0.3)
+        plt.grid(True, alpha=grid_alpha)
         
         # Set axis limits based on data range for angle noise (log-log)
         all_stds = []
@@ -495,16 +579,16 @@ def plot_individual_experiments_with_save_loglog(angle_stds, angle_devs, tessela
             max_std = np.max(all_stds)
             min_time = np.min(all_timesteps)
             max_time = np.max(all_timesteps)
-            plt.xlim(min_time * 0.8, max_time * 1.2)
-            plt.ylim(min_std * 0.5, max_std * 2)
+            plt.xlim(min_time * (1 - time_margin), max_time * (1 + time_margin))
+            plt.ylim(min_std * (1 - std_margin), max_std * (1 + std_margin))
         plt.tight_layout()
         
         # Save angle log-log plot
-        angle_output = os.path.join(output_dir, 'std_angle_noise_loglog.png')
-        plt.savefig(angle_output, dpi=300, bbox_inches='tight')
+        angle_output = os.path.join(output_dir, f'std_angle_noise_loglog_N{N}_samples{samples}.png')
+        plt.savefig(angle_output, dpi=dpi, bbox_inches='tight')
         print(f"✅ Saved angle noise log-log plot to {angle_output}")
         
-        angle_output_pdf = os.path.join(output_dir, 'std_angle_noise_loglog.pdf')
+        angle_output_pdf = os.path.join(output_dir, f'std_angle_noise_loglog_N{N}_samples{samples}.pdf')
         plt.savefig(angle_output_pdf, bbox_inches='tight')
         print(f"✅ Saved angle noise log-log plot to {angle_output_pdf}")
         
@@ -517,9 +601,8 @@ def plot_individual_experiments_with_save_loglog(angle_stds, angle_devs, tessela
     if tesselation_stds and any(len(std) > 0 for std in tesselation_stds):
         print("\nPlotting tesselation order experiments (log-log)...")
         
-        plt.figure(figsize=(10, 6))
+        plt.figure(figsize=figsize)
         
-        colors = ['blue', 'orange', 'green', 'red', 'purple']
         for i, (std_values, prob) in enumerate(zip(tesselation_stds, shift_probs)):
             if len(std_values) > 0:
                 # Filter out zero values and start from timestep 1 for log scale
@@ -530,14 +613,14 @@ def plot_individual_experiments_with_save_loglog(angle_stds, angle_devs, tessela
                 valid_mask = std_array > 0
                 if np.any(valid_mask):
                     plt.loglog(timesteps[valid_mask], std_array[valid_mask], 
-                              marker='s', markersize=2, color=colors[i % len(colors)], 
-                              linewidth=1.5, label=f'shift_prob={prob:.3f}')
+                              marker='s', markersize=marker_size, color=colors[i % len(colors)], 
+                              linewidth=line_width, label=f'shift_prob={prob:.3f}')
         
         plt.xlabel('Time Step (log scale)', fontsize=12)
         plt.ylabel('Standard Deviation (log scale)', fontsize=12)
         plt.title('Standard Deviation vs Time - Tesselation Order Noise (Log-Log Scale)', fontsize=14, fontweight='bold')
         plt.legend()
-        plt.grid(True, alpha=0.3)
+        plt.grid(True, alpha=grid_alpha)
         
         # Set axis limits based on data range for tesselation noise (log-log)
         all_stds = []
@@ -555,17 +638,17 @@ def plot_individual_experiments_with_save_loglog(angle_stds, angle_devs, tessela
             max_std = np.max(all_stds)
             min_time = np.min(all_timesteps)
             max_time = np.max(all_timesteps)
-            plt.xlim(min_time * 0.8, max_time * 1.2)
-            plt.ylim(min_std * 0.5, max_std * 2)
+            plt.xlim(min_time * (1 - time_margin), max_time * (1 + time_margin))
+            plt.ylim(min_std * (1 - std_margin), max_std * (1 + std_margin))
         
         plt.tight_layout()
         
         # Save tesselation log-log plot
-        tess_output = os.path.join(output_dir, 'std_tesselation_order_loglog.png')
-        plt.savefig(tess_output, dpi=300, bbox_inches='tight')
+        tess_output = os.path.join(output_dir, f'std_tesselation_order_loglog_N{N}_samples{samples}.png')
+        plt.savefig(tess_output, dpi=dpi, bbox_inches='tight')
         print(f"✅ Saved tesselation order log-log plot to {tess_output}")
         
-        tess_output_pdf = os.path.join(output_dir, 'std_tesselation_order_loglog.pdf')
+        tess_output_pdf = os.path.join(output_dir, f'std_tesselation_order_loglog_N{N}_samples{samples}.pdf')
         plt.savefig(tess_output_pdf, bbox_inches='tight')
         print(f"✅ Saved tesselation order log-log plot to {tess_output_pdf}")
         
@@ -604,31 +687,37 @@ def analyze_and_print_statistics(angle_stds, angle_devs, tesselation_stds, shift
 def main():
     """
     Main function to load experiments and create plots.
+    Uses global configuration variables defined at the top of the file.
     """
     print("="*60)
     print("ENHANCED STANDARD DEVIATION COMPARISON")
     print("="*60)
+    print(f"Using configuration:")
+    print(f"  N = {N}")
+    print(f"  Steps = {N//4 if DEFAULT_STEPS is None else DEFAULT_STEPS}")
+    print(f"  Samples = {SAMPLES}")
+    print(f"  Base directory = {BASE_DIR}")
+    print(f"  Output directory = {OUTPUT_DIR}")
+    print(f"  Angle deviations = {ANGLE_DEVIATIONS}")
+    print(f"  Shift probabilities = {SHIFT_PROBABILITIES}")
     
-    base_dir = "experiments_data_samples_probDist"
-    output_dir = "plot_outputs"
-    
-    # Load angle noise experiments (N=2000)
+    # Load angle noise experiments
     print("\n" + "-"*40)
     print("LOADING ANGLE NOISE EXPERIMENTS")
     print("-"*40)
-    angle_stds, angle_devs = load_and_plot_angle_experiments(N=2000, base_dir=base_dir)
+    angle_stds, angle_devs = load_and_plot_angle_experiments()
     
-    # Load tesselation order experiments (N=2000)
+    # Load tesselation order experiments
     print("\n" + "-"*40)
     print("LOADING TESSELATION ORDER EXPERIMENTS")
     print("-"*40)
-    tesselation_stds, shift_probs = load_and_plot_tesselation_experiments(N=2000, base_dir=base_dir)
+    tesselation_stds, shift_probs = load_and_plot_tesselation_experiments()
     
     # Save data for later analysis
     print("\n" + "-"*40)
     print("SAVING DATA")
     print("-"*40)
-    save_plot_data(angle_stds, angle_devs, tesselation_stds, shift_probs, output_dir)
+    save_plot_data(angle_stds, angle_devs, tesselation_stds, shift_probs, N, SAMPLES)
     
     # Create plots
     print("\n" + "-"*40)
@@ -637,17 +726,17 @@ def main():
     
     # Combined comparison plot
     print("\nCreating combined comparison plot...")
-    plot_and_save_combined_comparison(angle_stds, angle_devs, tesselation_stds, shift_probs, output_dir)
+    plot_and_save_combined_comparison(angle_stds, angle_devs, tesselation_stds, shift_probs, N=N, samples=SAMPLES)
     
     # Combined comparison plot (log-log scale)
     print("\nCreating combined comparison plot (log-log scale)...")
-    plot_and_save_combined_comparison_loglog(angle_stds, angle_devs, tesselation_stds, shift_probs, output_dir)
+    plot_and_save_combined_comparison_loglog(angle_stds, angle_devs, tesselation_stds, shift_probs, N=N, samples=SAMPLES)
     
     # Individual plots with save functionality
-    plot_individual_experiments_with_save(angle_stds, angle_devs, tesselation_stds, shift_probs, output_dir)
+    plot_individual_experiments_with_save(angle_stds, angle_devs, tesselation_stds, shift_probs, N=N, samples=SAMPLES)
     
     # Individual plots with save functionality (log-log scale)
-    plot_individual_experiments_with_save_loglog(angle_stds, angle_devs, tesselation_stds, shift_probs, output_dir)
+    plot_individual_experiments_with_save_loglog(angle_stds, angle_devs, tesselation_stds, shift_probs, N=N, samples=SAMPLES)
     
     # Statistical analysis
     analyze_and_print_statistics(angle_stds, angle_devs, tesselation_stds, shift_probs)
@@ -655,7 +744,7 @@ def main():
     print("\n" + "="*60)
     print("ANALYSIS COMPLETE")
     print("="*60)
-    print(f"All plots and data saved to: {output_dir}/")
+    print(f"All plots and data saved to: {OUTPUT_DIR}/")
 
 if __name__ == "__main__":
     main()
