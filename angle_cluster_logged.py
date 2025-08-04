@@ -22,7 +22,7 @@ from logging_module.crash_safe_logging import crash_safe_log
     samples=10,
     venv_name="qw_venv",  # Custom environment name
     check_existing_env=True,           # Check for existing environment
-    create_tar_archive=False,          # Disable TAR archiving for faster development
+    create_tar_archive=True,          # Disable TAR archiving for faster development
     use_compression=False              # No compression needed since no TAR
 )
 def run_angle_experiment():
