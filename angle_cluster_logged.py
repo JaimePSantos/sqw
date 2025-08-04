@@ -6,9 +6,15 @@ to provide both cluster optimization and comprehensive logging without extra cod
 """
 
 import time
+import numpy as np
 from cluster_module import cluster_deploy
 from logging_module.crash_safe_logging import crash_safe_log
 
+# Experiment parameters - shared between decorator and function
+N = 3000
+samples = 1
+steps = N//4
+devs = [0, (np.pi/3)/2.5, (np.pi/3)*2]
 
 @crash_safe_log(
     log_file_prefix="angle_experiment",
@@ -18,8 +24,8 @@ from logging_module.crash_safe_logging import crash_safe_log
 @cluster_deploy(
     experiment_name="angle_noise",
     noise_type="angle",
-    N=2000,
-    samples=10,
+    N=N,
+    samples=samples,
     venv_name="qw_venv",  # Custom environment name
     check_existing_env=True,           # Check for existing environment
     create_tar_archive=True,          # Disable TAR archiving for faster development
@@ -29,7 +35,6 @@ def run_angle_experiment():
     """Run the angle noise quantum walk experiment with cluster deployment and crash-safe logging."""
     
     # Import after cluster environment is set up
-    import numpy as np
     import networkx as nx
     
     from sqw.tesselations import even_line_two_tesselation
@@ -43,12 +48,6 @@ def run_angle_experiment():
     from jaime_scripts import prob_distributions2std
 
     print("Starting angle noise experiment with smart loading...")
-    
-    # Parameters
-    N = 3000
-    steps = N//4
-    samples = 1
-    devs = [0, (np.pi/3)/2.5, (np.pi/3)*2]
     
     # Fixed parameters for all experiments
     base_angles = [[np.pi/3, np.pi/3]] * steps
