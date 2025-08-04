@@ -16,6 +16,10 @@ def cluster_deploy(
     config: Optional[ClusterConfig] = None,
     experiment_name: str = "quantum_walk",
     noise_type: str = "angle",
+    venv_name: str = "qw_venv",
+    check_existing_env: bool = True,
+    create_tar_archive: bool = True,
+    use_compression: bool = False,
     **config_kwargs
 ):
     """
@@ -24,18 +28,27 @@ def cluster_deploy(
     This decorator handles:
     - Python version checking
     - Dependency management 
-    - Virtual environment setup
+    - Virtual environment setup (with existing environment checking)
     - Experiment execution
-    - Result bundling
+    - Result bundling (optional)
     
     Args:
         config: ClusterConfig instance (optional, will create default if None)
         experiment_name: Name for the experiment (used in archive naming)
         noise_type: Type of noise experiment ("angle" or "tesselation_order")
+        venv_name: Name of the virtual environment to create/check
+        check_existing_env: Whether to check for and reuse existing virtual environments
+        create_tar_archive: Whether to create tar archives of results
+        use_compression: Whether to compress tar archives (gzip)
         **config_kwargs: Additional configuration parameters
     
     Usage:
-        @cluster_deploy(experiment_name="angle_noise", noise_type="angle")
+        @cluster_deploy(
+            experiment_name="angle_noise", 
+            noise_type="angle",
+            venv_name="my_custom_env",
+            create_tar_archive=False
+        )
         def run_angle_experiment():
             # Your experiment code here
             pass
@@ -45,13 +58,24 @@ def cluster_deploy(
         def wrapper(*args, **kwargs):
             # Create config if not provided
             if config is None:
-                cluster_config = ClusterConfig(**config_kwargs)
+                cluster_config = ClusterConfig(
+                    venv_name=venv_name,
+                    check_existing_env=check_existing_env,
+                    create_tar_archive=create_tar_archive,
+                    use_compression=use_compression,
+                    **config_kwargs
+                )
                 # Update archive prefix with experiment name
                 cluster_config.archive_prefix = f"{experiment_name}_results"
             else:
                 cluster_config = config
             
             print(f"=== {experiment_name.title()} Cluster Deployment ===")
+            print(f"Virtual environment: {cluster_config.venv_name}")
+            print(f"Check existing env: {cluster_config.check_existing_env}")
+            print(f"Create TAR archive: {cluster_config.create_tar_archive}")
+            if cluster_config.create_tar_archive:
+                print(f"Use compression: {cluster_config.use_compression}")
             
             # Check for virtual environment flag
             if len(sys.argv) > 1 and sys.argv[1] == "--venv-ready":
@@ -70,7 +94,11 @@ def cluster_deploy(
                 re_execute_with_venv(python_executable, script_path)
                 
                 # Bundle results and exit
-                bundle_results(cluster_config, cluster_config.N, cluster_config.samples)
+                if cluster_config.create_tar_archive:
+                    print("Creating TAR archive of results...")
+                    bundle_results(cluster_config, cluster_config.N, cluster_config.samples)
+                else:
+                    bundle_results(cluster_config, cluster_config.N, cluster_config.samples)  # Will just report directories
                 print(f"=== {experiment_name.title()} Experiment completed ===")
                 return None
             
@@ -79,13 +107,18 @@ def cluster_deploy(
             result = experiment_func(*args, **kwargs)
             
             # Bundle results after successful execution
-            print("Creating TAR archive of results...")
-            archive_filename = bundle_results(cluster_config, cluster_config.N, cluster_config.samples)
+            if cluster_config.create_tar_archive:
+                print("Creating TAR archive of results...")
+                archive_filename = bundle_results(cluster_config, cluster_config.N, cluster_config.samples)
+            else:
+                archive_filename = bundle_results(cluster_config, cluster_config.N, cluster_config.samples)  # Will just report directories
             
             print("=== Analysis Instructions ===")
             if archive_filename:
                 print(f"Results archived in: {archive_filename}")
-            print("To analyze the results, transfer the tar file and extract it, then use:")
+                print("To analyze the results, transfer the tar file and extract it, then use:")
+            else:
+                print("Results are available in the following directories:")
             print("- experiments_data_samples/ contains the raw quantum states for each sample")
             print("- experiments_data_samples_probDist/ contains the mean probability distributions")
             print(f"Both directories maintain the {noise_type} directory structure for easy analysis.")
@@ -100,7 +133,11 @@ def cluster_experiment(
     N: int = 2000,
     samples: int = 10,
     experiment_name: str = "quantum_walk",
-    noise_type: str = "angle"
+    noise_type: str = "angle",
+    venv_name: str = "qw_venv",
+    check_existing_env: bool = True,
+    create_tar_archive: bool = True,
+    use_compression: bool = False
 ):
     """
     Simplified cluster deployment decorator with common parameters.
@@ -110,10 +147,18 @@ def cluster_experiment(
         samples: Number of samples per parameter
         experiment_name: Name for the experiment
         noise_type: Type of noise experiment
+        venv_name: Name of the virtual environment to create/check
+        check_existing_env: Whether to check for and reuse existing virtual environments
+        create_tar_archive: Whether to create tar archives of results
+        use_compression: Whether to compress tar archives (gzip)
     """
     config = ClusterConfig(
         N=N,
         samples=samples,
+        venv_name=venv_name,
+        check_existing_env=check_existing_env,
+        create_tar_archive=create_tar_archive,
+        use_compression=use_compression,
         archive_prefix=f"{experiment_name}_results"
     )
     

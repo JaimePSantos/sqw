@@ -18,6 +18,7 @@ class ClusterConfig:
     # Virtual environment
     venv_name: str = "qw_venv"
     python_min_version: tuple = (3, 7)
+    check_existing_env: bool = True  # Check if environment already exists
     
     # Required packages
     required_packages: List[str] = None
@@ -27,6 +28,7 @@ class ClusterConfig:
     results_dirs: List[str] = None
     archive_prefix: str = "experiment_results"
     use_compression: bool = False
+    create_tar_archive: bool = True  # Control whether to create tar archives
     
     # Execution parameters
     cluster_optimized: bool = True
@@ -76,6 +78,64 @@ def check_python_version(min_version: tuple = (3, 7)):
     print(f"Python version: {sys.version}")
 
 
+def check_existing_virtual_environment(config: ClusterConfig) -> Optional[str]:
+    """Check if virtual environment already exists and has required packages."""
+    venv_path = Path.cwd() / config.venv_name
+    
+    if not venv_path.exists():
+        print(f"Virtual environment '{config.venv_name}' does not exist")
+        return None
+    
+    print(f"Found existing virtual environment: {venv_path}")
+    
+    # Check if virtual environment has required packages
+    python_executable = f"{venv_path}/bin/python"
+    pip_cmd = f"{venv_path}/bin/pip"
+    
+    # On Windows, adjust paths
+    if sys.platform.startswith("win"):
+        python_executable = f"{venv_path}/Scripts/python.exe"
+        pip_cmd = f"{venv_path}/Scripts/pip.exe"
+    
+    if not Path(python_executable).exists():
+        print(f"Python executable not found in virtual environment: {python_executable}")
+        return None
+    
+    # Check if required packages are installed
+    print("Checking required packages in existing environment...")
+    missing_packages = []
+    
+    for package in config.required_packages:
+        try:
+            # Use pip show to check if package is installed
+            result = subprocess.run(
+                [pip_cmd, "show", package], 
+                capture_output=True, 
+                text=True, 
+                check=False
+            )
+            if result.returncode != 0:
+                missing_packages.append(package)
+        except Exception as e:
+            print(f"Error checking package {package}: {e}")
+            missing_packages.append(package)
+    
+    if missing_packages:
+        print(f"Missing packages in existing environment: {missing_packages}")
+        print("Installing missing packages...")
+        
+        for package in missing_packages:
+            print(f"Installing {package}...")
+            try:
+                run_command(f"{pip_cmd} install {package}")
+            except Exception as e:
+                print(f"Failed to install {package}: {e}")
+                return None
+    
+    print("All required packages are available in existing environment")
+    return python_executable
+
+
 def setup_virtual_environment(config: ClusterConfig) -> str:
     """Create and setup virtual environment with required packages."""
     print("Setting up virtual environment...")
@@ -85,8 +145,13 @@ def setup_virtual_environment(config: ClusterConfig) -> str:
     # Create virtual environment
     run_command(f"python3 -m venv {venv_path}")
     
-    # Activate virtual environment and install packages
-    pip_cmd = f"{venv_path}/bin/pip"
+    # Get correct paths for different platforms
+    if sys.platform.startswith("win"):
+        pip_cmd = f"{venv_path}/Scripts/pip.exe"
+        python_executable = f"{venv_path}/Scripts/python.exe"
+    else:
+        pip_cmd = f"{venv_path}/bin/pip"
+        python_executable = f"{venv_path}/bin/python"
     
     # Upgrade pip first
     run_command(f"{pip_cmd} install --upgrade pip")
@@ -97,7 +162,7 @@ def setup_virtual_environment(config: ClusterConfig) -> str:
         run_command(f"{pip_cmd} install {package}")
     
     print("Virtual environment setup complete.")
-    return f"{venv_path}/bin/python"
+    return python_executable
 
 
 def check_dependencies(required_modules: List[str]) -> List[str]:
@@ -114,7 +179,23 @@ def check_dependencies(required_modules: List[str]) -> List[str]:
 
 
 def bundle_results(config: ClusterConfig, N: Optional[int] = None, samples: Optional[int] = None) -> Optional[str]:
-    """Bundle the results directories using tar."""
+    """Bundle the results directories using tar if enabled."""
+    
+    # Check if tar archiving is enabled
+    if not config.create_tar_archive:
+        print("TAR archiving disabled - results will remain in separate directories")
+        # Still check if directories exist for reporting
+        found_dirs = []
+        for results_dir in config.results_dirs:
+            if os.path.exists(results_dir):
+                found_dirs.append(results_dir)
+        
+        if found_dirs:
+            print("Results available in directories:")
+            for dir_name in found_dirs:
+                print(f"  - {dir_name}/")
+        return None
+    
     dirs_to_bundle = []
     
     for results_dir in config.results_dirs:
@@ -166,6 +247,13 @@ def setup_cluster_environment(config: ClusterConfig) -> str:
     
     # Check Python version
     check_python_version(config.python_min_version)
+    
+    # Check if we should look for existing virtual environment
+    if config.check_existing_env:
+        existing_python = check_existing_virtual_environment(config)
+        if existing_python:
+            print("Using existing virtual environment")
+            return existing_python
     
     # Check if we need to setup virtual environment
     missing_deps = check_dependencies(config.required_modules)
