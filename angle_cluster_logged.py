@@ -6,7 +6,6 @@ to provide both cluster optimization and comprehensive logging without extra cod
 """
 
 import time
-import numpy as np
 from cluster_module import cluster_deploy
 from logging_module.crash_safe_logging import crash_safe_log
 
@@ -14,7 +13,6 @@ from logging_module.crash_safe_logging import crash_safe_log
 N = 3000
 samples = 1
 steps = N//4
-devs = [0, (np.pi/3)/2.5, (np.pi/3)*2]
 
 @crash_safe_log(
     log_file_prefix="angle_experiment",
@@ -36,6 +34,7 @@ def run_angle_experiment():
     
     # Import after cluster environment is set up
     import networkx as nx
+    import numpy as np
     
     from sqw.tesselations import even_line_two_tesselation
     from sqw.states import uniform_initial_state
@@ -48,7 +47,7 @@ def run_angle_experiment():
     from jaime_scripts import prob_distributions2std
 
     print("Starting angle noise experiment with smart loading...")
-    
+    devs = [0, (np.pi/3)/2.5, (np.pi/3)*2]
     # Fixed parameters for all experiments
     base_angles = [[np.pi/3, np.pi/3]] * steps
     tesselation_order = [[0,1] for x in range(steps)]
