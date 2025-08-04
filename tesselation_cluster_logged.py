@@ -6,7 +6,6 @@ to provide both cluster optimization and comprehensive logging without extra cod
 """
 
 import time
-import numpy as np
 from cluster_module import cluster_deploy
 from logging_module.crash_safe_logging import crash_safe_log
 
