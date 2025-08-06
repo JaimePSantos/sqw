@@ -1,5 +1,37 @@
 # CHANGELOG
 
+## 📋 **COMPACT SUMMARY - Recent Major Achievements**
+
+### 🚀 **Enhanced Logging & Testing Framework** (August 6, 2025)
+- **Comprehensive Crash Detection**: Created test scripts for every crash scenario including memory OOM, import errors, computation failures, and cluster timeouts
+- **Realistic Test Environment**: Implemented crash injection during actual angle experiments with N=500 for authentic failure simulation
+- **Organized Test Structure**: Organized 15+ test files into logical subdirectories (basic_tests/, crash_tests/, setup_and_validation/, documentation/)
+- **Windows Compatibility**: Fixed Unicode emoji issues, resource module conflicts, and cross-platform file handling
+- **Production Ready**: Enhanced logging with psutil monitoring, heartbeat tracking, and cluster-aware detection
+
+### 🎯 **Dual-Decorator Experiment Framework** (August 4, 2025)  
+- **Production Infrastructure**: Combined crash-safe logging + cluster deployment + smart loading in single decorator lines
+- **Environment Optimization**: Added environment reuse (5-10x faster setup), custom naming, and intelligent caching
+- **Zero Code Duplication**: All experiment logic uses shared modules - single decorator replaces hundreds of lines
+- **Cross-Platform Ready**: Windows development + Linux cluster execution with automatic dependency management
+
+### 📊 **Advanced Visualization Suite** (July 23, 2025)
+- **Multi-Scale Analysis**: Publication-ready plots with linear, log-log, and log-linear scales for comprehensive data analysis
+- **Bug-Free Plotting**: Resolved critical array alignment issues in log-scale displays ensuring accurate scientific representation
+- **Automated Pipeline**: Complete visualization workflow from raw data to publication figures with adaptive scaling
+
+### 🛡️ **Crash-Safe Logging System** (July 30, 2025)
+- **Process Isolation**: Logging survives main process crashes with separate process architecture and signal handling
+- **Organized Structure**: Automatic date-based folders (logs/YYYY-MM-DD/) with readable time formats
+- **Reusable Decorator**: Simple @crash_safe_log() pattern works with any Python function
+
+### 🔧 **Smart Loading & Code Deduplication** (July 22, 2025)
+- **3-Tier Loading**: Intelligent hierarchy (probabilities → samples → new experiments) reduced load times from hanging to sub-second
+- **90% Code Reduction**: Consolidated duplicate functions across multiple files into shared jaime_scripts.py module
+- **Cluster Deployment**: Full Linux cluster compatibility with virtual environment management and automatic result bundling
+
+---
+
 ## [Latest Session] - August 4, 2025 - Enhanced Cluster Decorators with Smart Loading Integration
 
 ### 🚀 **Mission: Comprehensive Experiment Framework with Dual Decorators & Smart Loading**

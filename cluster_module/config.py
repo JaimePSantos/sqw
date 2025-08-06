@@ -42,11 +42,12 @@ class ClusterConfig:
                 "scipy", 
                 "networkx",
                 "matplotlib",
+                "psutil",  # Added for system monitoring
                 "qwak-sim"
             ]
         
         if self.required_modules is None:
-            self.required_modules = ["numpy", "scipy", "networkx", "matplotlib"]
+            self.required_modules = ["numpy", "scipy", "networkx", "matplotlib", "psutil"]
         
         if self.results_dirs is None:
             self.results_dirs = ["experiments_data_samples", "experiments_data_samples_probDist"]

@@ -1,10 +1,29 @@
 # Logging Module Tests
 
-This folder contains tests and examples for the logging module.
+This folder contains tests and examples for the enhanced crash-safe logging module.
 
 ## Test Files
 
-### `final_validation.py`
+### Crash Detection Tests (New!)
+
+#### `realistic_angle_crash_test.py` 🎯
+**Purpose**: Realistic crash scenarios that inject failures during actual angle experiments.
+- Tests 5 scenarios: Memory OOM, Import errors, Computation errors, Cluster timeouts, Successful completion
+- Simulates failures occurring DURING experiment execution (between dev runs)
+- Uses enhanced CrashSafeLogger with heartbeat monitoring
+- **Status**: ✅ Working with QWAK2 environment
+- **Use**: `.\run_crash_tests.bat` - Validates crash detection for quantum walk experiments
+
+#### `quick_crash_test.py` ⚡
+**Purpose**: Fast validation of core crash detection functionality.
+- Tests 4 basic scenarios: Normal execution, Exception handling, Resource monitoring, Logging output
+- Quick smoke test for logging system validation
+- **Status**: ✅ Working - completes in ~30 seconds
+- **Use**: `.\run_quick_tests.bat` - Quick verification of logging functionality
+
+### Legacy Tests
+
+#### `final_validation.py`
 **Purpose**: Final comprehensive validation test that confirms the logging module works correctly.
 - Tests basic functionality, loops, string operations, and list operations
 - Uses `@crash_safe_log(log_file_prefix="final_validation")` decorator

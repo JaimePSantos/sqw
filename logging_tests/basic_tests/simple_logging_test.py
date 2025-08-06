@@ -4,7 +4,7 @@ Simple test for the logging module to verify it works without hanging.
 
 import sys
 import os
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from logging_module import crash_safe_log
 import time
