@@ -196,3 +196,4 @@ qw_venv
 experiments_data*
 sqw/__pycache__
 **/*.logs
+**/logs/*
