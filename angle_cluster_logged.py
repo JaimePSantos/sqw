@@ -15,7 +15,7 @@ samples = 1
 steps = N//4
 
 @crash_safe_log(
-    log_file_prefix="angle_experiment",
+    log_file_prefix=f"angle_experiment_{N}_{samples}_{steps}",
     heartbeat_interval=90.0,  # More frequent heartbeats for better crash detection
     log_system_info=True
 )
