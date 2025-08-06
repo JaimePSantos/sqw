@@ -11,41 +11,41 @@ from pathlib import Path
 
 def check_requirements():
     """Check if all requirements are met."""
-    print("🔍 Checking requirements...")
+    print("[CHECK] Checking requirements...")
     
     # Check Python version
     if sys.version_info < (3, 7):
-        print("❌ Python 3.7+ required")
+        print("[FAIL] Python 3.7+ required")
         return False
-    print(f"✅ Python {sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}")
+    print(f"[PASS] Python {sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}")
     
     # Check for psutil
     try:
         import psutil
-        print("✅ psutil available")
+        print("[PASS] psutil available")
     except ImportError:
         print("⚠️  psutil not found - installing...")
         try:
             subprocess.run([sys.executable, "-m", "pip", "install", "psutil"], check=True)
-            print("✅ psutil installed")
+            print("[PASS] psutil installed")
         except subprocess.CalledProcessError:
-            print("❌ Failed to install psutil")
+            print("[FAIL] Failed to install psutil")
             return False
     
     # Check logging module
     try:
         sys.path.insert(0, os.path.dirname(__file__))
         from logging_module import crash_safe_log
-        print("✅ Enhanced logging module available")
+        print("[PASS] Enhanced logging module available")
     except ImportError as e:
-        print(f"❌ Enhanced logging module not found: {e}")
+        print(f"[FAIL] Enhanced logging module not found: {e}")
         return False
     
     return True
 
 def run_quick_test():
     """Run a quick test to verify everything works."""
-    print("\n🧪 Running quick test...")
+    print("\n[TEST] Running quick test...")
     
     try:
         from logging_module import crash_safe_log
@@ -68,42 +68,42 @@ def run_quick_test():
             return "quick_test_success"
         
         result = quick_test()
-        print(f"✅ Quick test passed: {result}")
+        print(f"[PASS] Quick test passed: {result}")
         return True
         
     except Exception as e:
-        print(f"❌ Quick test failed: {e}")
+        print(f"[FAIL] Quick test failed: {e}")
         return False
 
 def main():
     """Main setup and test function."""
-    print("🚀 CRASH-SAFE LOGGING QUICK SETUP & TEST")
+    print("[SETUP] CRASH-SAFE LOGGING QUICK SETUP & TEST")
     print("=" * 50)
     
     # Check requirements
     if not check_requirements():
-        print("\n❌ Requirements check failed")
+        print("\n[FAIL] Requirements check failed")
         return False
     
     # Run quick test
     if not run_quick_test():
-        print("\n❌ Quick test failed")
+        print("\n[FAIL] Quick test failed")
         return False
     
-    print("\n🎉 SETUP COMPLETE!")
+    print("\n[SUCCESS] SETUP COMPLETE!")
     print("=" * 50)
-    print("✅ Enhanced crash-safe logging is ready to use")
-    print("\n📚 Available test suites:")
-    print("  🔬 Comprehensive tests:     python comprehensive_crash_tests.py")
-    print("  🖥️  Cluster-specific tests: python cluster_specific_crash_tests.py")
-    print("  🎯 All tests:              python run_all_crash_tests.py")
-    print("  ⚡ Quick tests:            python run_all_crash_tests.py --quick")
+    print("[PASS] Enhanced crash-safe logging is ready to use")
+    print("\n[INFO] Available test suites:")
+    print("  [TEST] Comprehensive tests:     python comprehensive_crash_tests.py")
+    print("  [TEST] Cluster-specific tests: python cluster_specific_crash_tests.py")
+    print("  [TEST] All tests:              python run_all_crash_tests.py")
+    print("  [TEST] Quick tests:            python run_all_crash_tests.py --quick")
     
-    print("\n🔧 Diagnostic tools:")
-    print("  📊 Check for crashes:      python -m logging_module.crash_safe_logging --check-crashes")
-    print("  🛠️  Generate diagnostics:   python -m logging_module.crash_safe_logging --generate-diagnostics")
+    print("\n[INFO] Diagnostic tools:")
+    print("  [TOOL] Check for crashes:      python -m logging_module.crash_safe_logging --check-crashes")
+    print("  [TOOL] Generate diagnostics:   python -m logging_module.crash_safe_logging --generate-diagnostics")
     
-    print("\n📝 Usage in your experiments:")
+    print("\n[INFO] Usage in your experiments:")
     print("""
 from logging_module import crash_safe_log
 

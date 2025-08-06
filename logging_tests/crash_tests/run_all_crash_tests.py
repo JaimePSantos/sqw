@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Master test runner for all crash-safe logging tests.
-Runs comprehensive tests and analyzes results.
+Runs comprehensive tests and analyzes results across all test categories.
 """
 
 import sys
@@ -12,81 +12,146 @@ import argparse
 from pathlib import Path
 from datetime import datetime
 
-# Add current directory to path
-sys.path.insert(0, os.path.dirname(__file__))
+# Add current directory and parent directories to path for imports
+current_dir = os.path.dirname(__file__)
+parent_dir = os.path.dirname(current_dir)
+sqw_dir = os.path.dirname(parent_dir)
+sys.path.insert(0, current_dir)
+sys.path.insert(0, parent_dir)
+sys.path.insert(0, sqw_dir)
 
 from logging_module import crash_safe_log
 from logging_module.crash_safe_logging import check_for_crashed_processes, generate_cluster_diagnostic_script
 
 class TestRunner:
-    """Master test runner for all crash scenarios."""
+    """Master test runner for all crash scenarios across organized test structure."""
     
     def __init__(self):
         self.test_logs_base = Path("logs_test_master")
         self.test_logs_base.mkdir(exist_ok=True)
         
+        # Determine the correct base path for test files
+        current_file_dir = Path(__file__).parent.absolute()
+        logging_tests_dir = current_file_dir.parent
+        
+        # Test categories based on current directory structure
+        self.test_categories = {
+            "basic": {
+                "path": logging_tests_dir / "basic_tests",
+                "tests": ["simple_logging_test.py", "quick_setup_test.py", "integration_test.py"],
+                "passed": 0, "failed": 0, "total": 0
+            },
+            "crash": {
+                "path": current_file_dir,  # Current directory (crash_tests)
+                "tests": ["comprehensive_crash_tests.py", "cluster_specific_crash_tests.py", 
+                         "quick_crash_test.py", "realistic_angle_crash_test.py"],
+                "passed": 0, "failed": 0, "total": 0
+            },
+            "validation": {
+                "path": logging_tests_dir / "setup_and_validation", 
+                "tests": ["final_validation.py", "test_enhanced_logging.py", "install_enhanced_logging.py"],
+                "passed": 0, "failed": 0, "total": 0
+            }
+        }
+        
         self.results = {
-            "comprehensive": {"passed": 0, "failed": 0, "total": 0},
-            "cluster": {"passed": 0, "failed": 0, "total": 0},
             "analysis": {"crashes_detected": 0, "deadman_triggers": 0}
         }
     
-    def run_test_suite(self, test_script, suite_name):
-        """Run a test suite and capture results."""
-        print(f"\n[RUN] RUNNING {suite_name.upper()} TEST SUITE")
-        print("=" * 60)
+    def run_test_script(self, test_script_path, test_name):
+        """Run a single test script and capture results."""
+        print(f"\n[RUN] RUNNING TEST: {test_name}")
+        print("-" * 40)
         
         try:
             # Run the test script
             result = subprocess.run([
-                sys.executable, test_script
-            ], capture_output=True, text=True, timeout=600)  # 10 minute timeout
+                sys.executable, test_script_path
+            ], capture_output=True, text=True, timeout=300)  # 5 minute timeout per test
             
-            print(f"[DATA] {suite_name} Test Output:")
-            print("-" * 30)
-            print(result.stdout)
+            print(f"[DATA] {test_name} Output:")
+            print("-" * 20)
+            if result.stdout:
+                print(result.stdout)
             
             if result.stderr:
-                print(f"[WARN]  {suite_name} Test Errors:")
+                print(f"[WARN] {test_name} Errors:")
                 print(result.stderr)
             
-            # Parse results from output
-            output_lines = result.stdout.split('\n')
-            passed = 0
-            failed = 0
-            total = 0
+            # Consider test passed if it completed without error exit code
+            success = result.returncode == 0
+            print(f"[STATUS] {test_name}: {'PASS' if success else 'FAIL'} (exit code: {result.returncode})")
             
-            for line in output_lines:
-                if "Total tests:" in line or "Total cluster tests:" in line:
-                    total = int(line.split(':')[1].strip())
-                elif "Passed:" in line:
-                    passed = int(line.split(':')[1].strip())
-                elif "Failed:" in line:
-                    failed = int(line.split(':')[1].strip())
-            
-            self.results[suite_name.lower()] = {
-                "passed": passed,
-                "failed": failed, 
-                "total": total,
-                "exit_code": result.returncode
-            }
-            
-            return result.returncode == 0
+            return success
             
         except subprocess.TimeoutExpired:
-            print(f"[FAIL] {suite_name} test suite timed out after 10 minutes")
+            print(f"[FAIL] {test_name} timed out after 5 minutes")
             return False
         except Exception as e:
-            print(f"[FAIL] Error running {suite_name} test suite: {e}")
+            print(f"[FAIL] Error running {test_name}: {e}")
             return False
     
+    def run_test_category(self, category_name, skip_on_error=False):
+        """Run all tests in a category."""
+        category = self.test_categories[category_name]
+        category_path = Path(category["path"])
+        
+        print(f"\n[CATEGORY] RUNNING {category_name.upper()} TESTS")
+        print("=" * 60)
+        print(f"[PATH] Looking for tests in: {category_path.absolute()}")
+        
+        passed = 0
+        failed = 0
+        total = 0
+        
+        for test_script in category["tests"]:
+            test_path = category_path / test_script
+            
+            # Check if test file exists
+            if not test_path.exists():
+                print(f"[SKIP] Test file not found: {test_path}")
+                print(f"       Absolute path: {test_path.absolute()}")
+                continue
+            
+            total += 1
+            test_name = f"{category_name}_{test_script.replace('.py', '')}"
+            
+            print(f"[FOUND] Running test: {test_path}")
+            
+            if self.run_test_script(str(test_path), test_name):
+                passed += 1
+            else:
+                failed += 1
+                if skip_on_error:
+                    print(f"[ABORT] Stopping {category_name} tests due to failure")
+                    break
+            
+            # Small delay between tests
+            time.sleep(1)
+        
+        # Update category results
+        category["passed"] = passed
+        category["failed"] = failed
+        category["total"] = total
+        
+        print(f"\n[SUMMARY] {category_name.upper()} CATEGORY RESULTS:")
+        print(f"   Total: {total}, Passed: {passed}, Failed: {failed}")
+        print(f"   Success Rate: {(passed/max(total,1))*100:.1f}%")
+        
+        return failed == 0
+    
     def analyze_crash_evidence(self):
-        """Analyze logs for crash evidence."""
+        """Analyze logs for crash evidence across all test directories."""
         print("\n[SEARCH] ANALYZING CRASH EVIDENCE")
         print("=" * 60)
         
         # Check for crashed processes in all test log directories
-        test_dirs = ["logs_test", "logs_test_cluster"]
+        test_dirs = [
+            "logs_test",           # Basic crash tests
+            "logs_test_cluster",   # Cluster tests  
+            "logs_test_basic",     # Basic tests
+            "logs_test_validation" # Validation tests
+        ]
         total_crashes = 0
         deadman_triggers = 0
         
@@ -106,7 +171,7 @@ class TestRunner:
                 
                 for log_file in log_files:
                     try:
-                        with open(log_file, 'r') as f:
+                        with open(log_file, 'r', encoding='utf-8') as f:
                             content = f.read()
                             
                         # Look for crash indicators
@@ -118,7 +183,11 @@ class TestRunner:
                             "SYSTEM MEMORY CRITICAL",
                             "DEADMAN'S SWITCH TRIGGERED",
                             "OOM",
-                            "CPU time limit exceeded"
+                            "CPU time limit exceeded",
+                            "SIMULATED CRASH",
+                            "FORCED TERMINATION",
+                            "IMPORT ERROR SIMULATION",
+                            "MEMORY ERROR SIMULATION"
                         ]
                         
                         found_indicators = []
@@ -131,9 +200,10 @@ class TestRunner:
                             print(f"   [FILE] {log_file.name}: {', '.join(found_indicators)}")
                     
                     except Exception as e:
-                        print(f"   [WARN]  Could not analyze {log_file.name}: {e}")
+                        print(f"   [WARN] Could not analyze {log_file.name}: {e}")
                 
                 total_crashes += crash_indicators
+                print(f"   [DATA] {test_dir}: {crash_indicators} files with crash evidence")
         
         self.results["analysis"] = {
             "crashes_detected": total_crashes,
@@ -156,21 +226,20 @@ class TestRunner:
             f.write("=" * 60 + "\n")
             f.write(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
             
-            # Comprehensive tests results
-            comp = self.results.get("comprehensive", {})
-            f.write("COMPREHENSIVE TESTS:\n")
-            f.write(f"  Total: {comp.get('total', 0)}\n")
-            f.write(f"  Passed: {comp.get('passed', 0)}\n")
-            f.write(f"  Failed: {comp.get('failed', 0)}\n")
-            f.write(f"  Success Rate: {(comp.get('passed', 0) / max(comp.get('total', 1), 1)) * 100:.1f}%\n\n")
+            # Test category results
+            total_tests = 0
+            total_passed = 0
             
-            # Cluster tests results
-            cluster = self.results.get("cluster", {})
-            f.write("CLUSTER-SPECIFIC TESTS:\n")
-            f.write(f"  Total: {cluster.get('total', 0)}\n")
-            f.write(f"  Passed: {cluster.get('passed', 0)}\n")
-            f.write(f"  Failed: {cluster.get('failed', 0)}\n")
-            f.write(f"  Success Rate: {(cluster.get('passed', 0) / max(cluster.get('total', 1), 1)) * 100:.1f}%\n\n")
+            for category_name, category in self.test_categories.items():
+                f.write(f"{category_name.upper()} TESTS:\n")
+                f.write(f"  Total: {category.get('total', 0)}\n")
+                f.write(f"  Passed: {category.get('passed', 0)}\n")
+                f.write(f"  Failed: {category.get('failed', 0)}\n")
+                f.write(f"  Success Rate: {(category.get('passed', 0) / max(category.get('total', 1), 1)) * 100:.1f}%\n")
+                f.write(f"  Tests Included: {', '.join(category['tests'])}\n\n")
+                
+                total_tests += category.get('total', 0)
+                total_passed += category.get('passed', 0)
             
             # Analysis results
             analysis = self.results.get("analysis", {})
@@ -179,8 +248,6 @@ class TestRunner:
             f.write(f"  Deadman switch triggers: {analysis.get('deadman_triggers', 0)}\n\n")
             
             # Overall assessment
-            total_tests = comp.get('total', 0) + cluster.get('total', 0)
-            total_passed = comp.get('passed', 0) + cluster.get('passed', 0)
             overall_success = (total_passed / max(total_tests, 1)) * 100
             
             f.write("OVERALL ASSESSMENT:\n")
@@ -190,8 +257,17 @@ class TestRunner:
             f.write(f"  Crash detection capability: {'PASS' if analysis.get('crashes_detected', 0) > 0 else 'FAIL'}\n")
             f.write(f"  Deadman switch functionality: {'PASS' if analysis.get('deadman_triggers', 0) > 0 else 'FAIL'}\n\n")
             
-            # Recommendations
-            f.write("RECOMMENDATIONS:\n")
+            # Category-specific recommendations
+            f.write("CATEGORY-SPECIFIC RECOMMENDATIONS:\n")
+            for category_name, category in self.test_categories.items():
+                success_rate = (category.get('passed', 0) / max(category.get('total', 1), 1)) * 100
+                if success_rate >= 80:
+                    f.write(f"  [PASS] {category_name.capitalize()} tests: Working well\n")
+                else:
+                    f.write(f"  [WARN] {category_name.capitalize()} tests: {category.get('failed', 0)} failures need review\n")
+            
+            # Overall recommendations
+            f.write("\nOVERALL RECOMMENDATIONS:\n")
             if overall_success >= 80:
                 f.write("  [PASS] Crash-safe logging system is working well\n")
             else:
@@ -212,6 +288,12 @@ class TestRunner:
             f.write("  2. Monitor logs during actual quantum walk experiments\n")
             f.write("  3. Use diagnostic tools to identify termination causes\n")
             f.write("  4. Implement checkpointing based on signal patterns\n")
+            
+            f.write("\nTEST DIRECTORY STRUCTURE:\n")
+            f.write("  basic_tests/     - Basic functionality validation\n")
+            f.write("  crash_tests/     - Comprehensive crash simulation\n")
+            f.write("  setup_and_validation/ - Installation and validation\n")
+            f.write("  documentation/   - README files and reports\n")
         
         print(f"\n[FILE] Comprehensive report saved: {report_file}")
         return report_file
@@ -228,33 +310,52 @@ def run_all_tests(args):
     print("[TEST] CRASH-SAFE LOGGING MASTER TEST SUITE")
     print("=" * 60)
     print("This will run comprehensive tests of all crash scenarios")
-    print("that could cause your quantum walk experiments to disappear.\n")
+    print("that could cause your quantum walk experiments to disappear.")
+    print("\nOrganized Test Structure:")
+    print("  [FOLDER] basic_tests/     - Basic functionality validation")
+    print("  [FOLDER] crash_tests/     - Comprehensive crash simulation") 
+    print("  [FOLDER] setup_and_validation/ - Installation and validation")
+    print("  [FOLDER] documentation/   - README files and reports\n")
+    
+    # Display current working directory and expected paths
+    current_dir = Path.cwd()
+    script_dir = Path(__file__).parent.absolute()
+    print(f"[INFO] Current working directory: {current_dir}")
+    print(f"[INFO] Script location: {script_dir}")
+    print(f"[INFO] Test runner can be run from any directory - using absolute paths\n")
     
     success = True
     
-    # Run comprehensive tests
-    if not args.skip_comprehensive:
-        print("Phase 1: Running comprehensive crash tests...")
-        if not runner.run_test_suite("comprehensive_crash_tests.py", "Comprehensive"):
+    # Run basic tests first
+    if not args.skip_basic:
+        print("Phase 1: Running basic functionality tests...")
+        if not runner.run_test_category("basic", skip_on_error=args.fail_fast):
             success = False
         time.sleep(2)
     
-    # Run cluster-specific tests
-    if not args.skip_cluster:
-        print("Phase 2: Running cluster-specific tests...")
-        if not runner.run_test_suite("cluster_specific_crash_tests.py", "Cluster"):
+    # Run comprehensive crash tests
+    if not args.skip_crash:
+        print("Phase 2: Running comprehensive crash tests...")
+        if not runner.run_test_category("crash", skip_on_error=args.fail_fast):
+            success = False
+        time.sleep(2)
+    
+    # Run validation tests
+    if not args.skip_validation:
+        print("Phase 3: Running setup and validation tests...")
+        if not runner.run_test_category("validation", skip_on_error=args.fail_fast):
             success = False
         time.sleep(2)
     
     # Analyze crash evidence
     if not args.skip_analysis:
-        print("Phase 3: Analyzing crash evidence...")
+        print("Phase 4: Analyzing crash evidence...")
         crashes, deadman = runner.analyze_crash_evidence()
         time.sleep(1)
     
     # Generate diagnostic script
     if not args.skip_diagnostics:
-        print("Phase 4: Generating cluster diagnostic tools...")
+        print("Phase 5: Generating cluster diagnostic tools...")
         generate_cluster_diagnostic_script("cluster_diagnostics.sh")
         print("[PASS] Cluster diagnostic script generated")
     
@@ -266,22 +367,20 @@ def run_all_tests(args):
     print("[FINISH] MASTER TEST SUITE COMPLETE")
     print("=" * 60)
     
-    comp = runner.results.get("comprehensive", {})
-    cluster = runner.results.get("cluster", {})
+    # Calculate totals across all categories
+    total_tests = sum(cat["total"] for cat in runner.test_categories.values())
+    total_passed = sum(cat["passed"] for cat in runner.test_categories.values())
     analysis = runner.results.get("analysis", {})
     
-    total_tests = comp.get('total', 0) + cluster.get('total', 0)
-    total_passed = comp.get('passed', 0) + cluster.get('passed', 0)
-    
     print(f"[DATA] FINAL RESULTS:")
-    print(f"   Comprehensive tests: {comp.get('passed', 0)}/{comp.get('total', 0)} passed")
-    print(f"   Cluster tests: {cluster.get('passed', 0)}/{cluster.get('total', 0)} passed")
+    for category_name, category in runner.test_categories.items():
+        print(f"   {category_name.capitalize()} tests: {category['passed']}/{category['total']} passed")
     print(f"   Overall: {total_passed}/{total_tests} ({(total_passed/max(total_tests,1))*100:.1f}%)")
     print(f"   Crash evidence: {analysis.get('crashes_detected', 0)} instances")
     print(f"   Deadman triggers: {analysis.get('deadman_triggers', 0)} instances")
     
     print(f"\n[FOLDER] TEST ARTIFACTS:")
-    print(f"   Test logs: logs_test/ and logs_test_cluster/")
+    print(f"   Test logs: logs_test_*, logs_test_basic/, logs_test_validation/")
     print(f"   Master logs: {runner.test_logs_base}/")
     print(f"   Report: {report_file}")
     print(f"   Diagnostics: cluster_diagnostics.sh")
@@ -293,37 +392,41 @@ def run_all_tests(args):
     print("   4. Deploy enhanced logging to your quantum walk experiments")
     
     if success and total_passed >= total_tests * 0.8:  # 80% success threshold
-        print("\n🎉 SUCCESS: Crash-safe logging system is ready for cluster deployment!")
+        print("\n[SUCCESS] Crash-safe logging system is ready for cluster deployment!")
     else:
-        print("\n[WARN]  WARNING: Some tests failed - review before cluster deployment")
+        print("\n[WARN] WARNING: Some tests failed - review before cluster deployment")
     
     return success
 
 def main():
     """Main entry point."""
     parser = argparse.ArgumentParser(description="Master test runner for crash-safe logging")
-    parser.add_argument("--skip-comprehensive", action="store_true", 
+    parser.add_argument("--skip-basic", action="store_true", 
+                       help="Skip basic functionality tests")
+    parser.add_argument("--skip-crash", action="store_true",
                        help="Skip comprehensive crash tests")
-    parser.add_argument("--skip-cluster", action="store_true",
-                       help="Skip cluster-specific tests")
+    parser.add_argument("--skip-validation", action="store_true",
+                       help="Skip setup and validation tests")
     parser.add_argument("--skip-analysis", action="store_true",
                        help="Skip crash evidence analysis")
     parser.add_argument("--skip-diagnostics", action="store_true",
                        help="Skip diagnostic script generation")
+    parser.add_argument("--fail-fast", action="store_true",
+                       help="Stop category testing on first failure")
     parser.add_argument("--quick", action="store_true",
-                       help="Run only essential tests (skips some time-consuming tests)")
+                       help="Run only essential tests (basic + validation)")
     
     args = parser.parse_args()
     
     if args.quick:
-        args.skip_comprehensive = False  # Keep comprehensive as they're essential
-        print("[RUN] Quick mode: Running essential tests only...")
+        args.skip_crash = True  # Skip the time-consuming crash tests
+        print("[RUN] Quick mode: Running basic and validation tests only...")
     
     try:
         success = run_all_tests(args)
         sys.exit(0 if success else 1)
     except KeyboardInterrupt:
-        print("\n[WARN]  Test suite interrupted by user")
+        print("\n[WARN] Test suite interrupted by user")
         sys.exit(130)
     except Exception as e:
         print(f"\n[FAIL] Test suite failed with error: {e}")

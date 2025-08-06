@@ -31,10 +31,10 @@ def check_python_version():
     print(f"Python version: {version.major}.{version.minor}.{version.micro}")
     
     if version < (3, 7):
-        print("❌ Error: Python 3.7 or higher is required")
+        print("[FAIL] Error: Python 3.7 or higher is required")
         return False
     else:
-        print("✅ Python version is compatible")
+        print("[PASS] Python version is compatible")
         return True
 
 def install_dependencies():
@@ -49,10 +49,10 @@ def install_dependencies():
     for package in packages:
         print(f"\nInstalling {package}...")
         if not run_command(f"{sys.executable} -m pip install {package}", f"Install {package}"):
-            print(f"❌ Failed to install {package}")
+            print(f"[FAIL] Failed to install {package}")
             success = False
         else:
-            print(f"✅ Successfully installed {package}")
+            print(f"[PASS] Successfully installed {package}")
     
     return success
 
@@ -67,21 +67,21 @@ def verify_installation():
         import multiprocessing
         import threading
         import signal
-        print("✅ Basic imports successful")
+        print("[PASS] Basic imports successful")
         
         # Test psutil import
         try:
             import psutil
-            print("✅ psutil import successful")
+            print("[PASS] psutil import successful")
             
             # Test basic psutil functionality
             process = psutil.Process()
             memory_info = process.memory_info()
-            print(f"✅ psutil functionality test: Memory usage = {memory_info.rss / 1024 / 1024:.1f} MB")
+            print(f"[PASS] psutil functionality test: Memory usage = {memory_info.rss / 1024 / 1024:.1f} MB")
         except ImportError:
-            print("⚠️  psutil not available - some monitoring features will be limited")
+            print("[WARN] psutil not available - some monitoring features will be limited")
         except Exception as e:
-            print(f"⚠️  psutil test failed: {e}")
+            print(f"[WARN] psutil test failed: {e}")
         
         # Test logging module
         current_dir = Path(__file__).parent
@@ -89,16 +89,16 @@ def verify_installation():
         
         try:
             from logging_module import crash_safe_log
-            print("✅ Enhanced logging module import successful")
+            print("[PASS] Enhanced logging module import successful")
         except ImportError as e:
-            print(f"❌ Failed to import logging module: {e}")
+            print(f"[FAIL] Failed to import logging module: {e}")
             return False
         
-        print("✅ All verifications passed!")
+        print("[PASS] All verifications passed!")
         return True
         
     except Exception as e:
-        print(f"❌ Verification failed: {e}")
+        print(f"[FAIL] Verification failed: {e}")
         return False
 
 def create_test_script():
@@ -142,11 +142,11 @@ if __name__ == "__main__":
         with open("test_logging_installation.py", "w") as f:
             f.write(test_script)
         os.chmod("test_logging_installation.py", 0o755)
-        print("✅ Test script created: test_logging_installation.py")
+        print("[PASS] Test script created: test_logging_installation.py")
         print("   Run with: python test_logging_installation.py")
         return True
     except Exception as e:
-        print(f"❌ Failed to create test script: {e}")
+        print(f"[FAIL] Failed to create test script: {e}")
         return False
 
 def print_usage_instructions():
@@ -178,7 +178,7 @@ def run_cluster_experiment():
     pass
 """)
     
-    print("\n🔧 DIAGNOSTIC TOOLS:")
+    print("\n[TOOL] DIAGNOSTIC TOOLS:")
     print("  Check for crashes:     python -m logging_module.crash_safe_logging --check-crashes")
     print("  Generate diagnostics:  python -m logging_module.crash_safe_logging --generate-diagnostics")
     print("  Test installation:     python test_logging_installation.py")
@@ -203,12 +203,12 @@ def main():
     
     # Install dependencies
     if not install_dependencies():
-        print("❌ Dependency installation failed")
+        print("[FAIL] Dependency installation failed")
         sys.exit(1)
     
     # Verify installation
     if not verify_installation():
-        print("❌ Installation verification failed")
+        print("[FAIL] Installation verification failed")
         sys.exit(1)
     
     # Create test script

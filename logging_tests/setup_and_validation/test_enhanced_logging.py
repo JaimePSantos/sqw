@@ -9,7 +9,12 @@ import sys
 import os
 
 # Add the parent directory to the path so we can import the logging module
-sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+current_dir = os.path.dirname(__file__)
+parent_dir = os.path.dirname(current_dir)
+sqw_dir = os.path.dirname(parent_dir)
+sys.path.insert(0, current_dir)
+sys.path.insert(0, parent_dir)
+sys.path.insert(0, sqw_dir)
 
 from logging_module import crash_safe_log
 

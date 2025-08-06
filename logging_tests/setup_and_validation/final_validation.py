@@ -51,10 +51,10 @@ def main():
     try:
         result = validation_test()
         print(f"\nValidation result: {result}")
-        print("✓ Logging module is working correctly!")
+        print("[PASS] Logging module is working correctly!")
         
     except Exception as e:
-        print(f"✗ Validation failed: {e}")
+        print(f"[FAIL] Validation failed: {e}")
         sys.exit(1)
 
 if __name__ == "__main__":

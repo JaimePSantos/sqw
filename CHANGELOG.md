@@ -6,6 +6,7 @@
 - **Comprehensive Crash Detection**: Created test scripts for every crash scenario including memory OOM, import errors, computation failures, and cluster timeouts
 - **Realistic Test Environment**: Implemented crash injection during actual angle experiments with N=500 for authentic failure simulation
 - **Organized Test Structure**: Organized 15+ test files into logical subdirectories (basic_tests/, crash_tests/, setup_and_validation/, documentation/)
+- **Master Test Runner**: Updated run_all_crash_tests.py to work with new directory structure and added integration test
 - **Windows Compatibility**: Fixed Unicode emoji issues, resource module conflicts, and cross-platform file handling
 - **Production Ready**: Enhanced logging with psutil monitoring, heartbeat tracking, and cluster-aware detection
 
