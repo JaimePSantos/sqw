@@ -202,33 +202,33 @@ def create_noisy_hamiltonians(red_graph, blue_graph, red_noise_list, blue_noise_
     Create noisy Hamiltonian matrices with individual noise parameters applied to each edge
     
     Parameters:
-    - red_graph: NetworkX graph for alpha tessellation
-    - blue_graph: NetworkX graph for beta tessellation  
+    - red_graph: NetworkX graph for red tessellation
+    - blue_graph: NetworkX graph for blue tessellation  
     - red_noise_list: list of theta values for red edges
     - blue_noise_list: list of theta values for blue edges
     
     Returns:
-    - Ha_noisy: Noisy alpha Hamiltonian matrix
-    - Hb_noisy: Noisy beta Hamiltonian matrix
+    - Hr_noisy: Noisy red Hamiltonian matrix
+    - Hb_noisy: Noisy blue Hamiltonian matrix
     """
     # Get base adjacency matrices
-    Ha = get_adjacency_matrix(red_graph)
+    Hr = get_adjacency_matrix(red_graph)
     Hb = get_adjacency_matrix(blue_graph)
     
     # Create noisy versions
-    Ha_noisy = Ha.copy().astype(float)
+    Hr_noisy = Hr.copy().astype(float)
     Hb_noisy = Hb.copy().astype(float)
     
-    # Apply red noise parameters to alpha Hamiltonian
+    # Apply red noise parameters to red Hamiltonian
     red_edge_list = list(red_graph.edges())
     for i, edge in enumerate(red_edge_list):
         if i < len(red_noise_list):
             x, y = edge
             # Apply noise parameter to both symmetric positions
-            Ha_noisy[x, y] *= red_noise_list[i]
-            Ha_noisy[y, x] *= red_noise_list[i]
+            Hr_noisy[x, y] *= red_noise_list[i]
+            Hr_noisy[y, x] *= red_noise_list[i]
     
-    # Apply blue noise parameters to beta Hamiltonian
+    # Apply blue noise parameters to blue Hamiltonian
     blue_edge_list = list(blue_graph.edges())
     for i, edge in enumerate(blue_edge_list):
         if i < len(blue_noise_list):
@@ -237,7 +237,7 @@ def create_noisy_hamiltonians(red_graph, blue_graph, red_noise_list, blue_noise_
             Hb_noisy[x, y] *= blue_noise_list[i]
             Hb_noisy[y, x] *= blue_noise_list[i]
     
-    return Ha_noisy, Hb_noisy
+    return Hr_noisy, Hb_noisy
 
 def get_adjacency_matrix(G):
     """Get adjacency matrix from NetworkX graph with nodes sorted naturally"""
@@ -245,23 +245,23 @@ def get_adjacency_matrix(G):
     nodes = sorted(G.nodes())
     return nx.adjacency_matrix(G, nodelist=nodes).todense()
 
-def ct_evo(Ha, Hb, theta_a, theta_b):
+def ct_evo(Hr, Hb, theta_r, theta_b):
     """Create time evolution operator for staggered quantum walk"""
-    A = linalg.expm(1j * theta_a * Ha)
+    R = linalg.expm(1j * theta_r * Hr)
     B = linalg.expm(1j * theta_b * Hb)
-    U = dot(B, A)
+    U = dot(B, R)
     return U
 
 def ct_evo_with_noise(red_graph, blue_graph, red_noise_list, blue_noise_list):
     """Create time evolution operator with individual noise parameters for each edge"""
     # Create noisy Hamiltonians
-    Ha_noisy, Hb_noisy = create_noisy_hamiltonians(red_graph, blue_graph, red_noise_list, blue_noise_list)
+    Hr_noisy, Hb_noisy = create_noisy_hamiltonians(red_graph, blue_graph, red_noise_list, blue_noise_list)
     
     # Create evolution operator using noisy Hamiltonians
-    A = linalg.expm(1j * Ha_noisy)
+    R = linalg.expm(1j * Hr_noisy)
     B = linalg.expm(1j * Hb_noisy)
-    U = dot(B, A)
-    return U, Ha_noisy, Hb_noisy
+    U = dot(B, R)
+    return U, Hr_noisy, Hb_noisy
 
 def final_state(Op, psi0, steps):
     """Evolve initial state through given number of steps"""
@@ -308,14 +308,14 @@ def staggered_qwalk_with_noise(N, theta, steps, init_nodes=[], deviation_range=0
     )
     
     # Create clean Hamiltonian matrices
-    Ha_clean = get_adjacency_matrix(red_graph)
+    Hr_clean = get_adjacency_matrix(red_graph)
     Hb_clean = get_adjacency_matrix(blue_graph)
     
     # Create initial state using your uniform_initial_state function
     psi0 = uniform_initial_state(N, init_nodes)
     
     # Create evolution operator and get noisy Hamiltonians
-    U, Ha_noisy, Hb_noisy = ct_evo_with_noise(red_graph, blue_graph, red_noise_list, blue_noise_list)
+    U, Hr_noisy, Hb_noisy = ct_evo_with_noise(red_graph, blue_graph, red_noise_list, blue_noise_list)
     
     # Evolve the state
     psiN = final_state(U, psi0, steps)
@@ -323,7 +323,7 @@ def staggered_qwalk_with_noise(N, theta, steps, init_nodes=[], deviation_range=0
     # Calculate probabilities
     probvec = prob_vec(psiN, N)
     
-    return probvec, Ha_clean, Hb_clean, Ha_noisy, Hb_noisy, red_noise_list, blue_noise_list
+    return probvec, Hr_clean, Hb_clean, Hr_noisy, Hb_noisy, red_noise_list, blue_noise_list
 
 def print_matrix_formatted(matrix, title, precision=3):
     """Print a matrix with nice formatting"""
@@ -365,7 +365,7 @@ if __name__ == "__main__":
     deviation_range = 0.1  # Small noise deviation
     
     # Run the quantum walk
-    probabilities, Ha_clean, Hb_clean, Ha_noisy, Hb_noisy, red_noise, blue_noise = staggered_qwalk_with_noise(
+    probabilities, Hr_clean, Hb_clean, Hr_noisy, Hb_noisy, red_noise, blue_noise = staggered_qwalk_with_noise(
         N, theta, steps, init_nodes, deviation_range
     )
     
@@ -381,12 +381,12 @@ if __name__ == "__main__":
     print(f"Initial state: localized at node {init_nodes}")
     
     # Print clean Hamiltonian matrices
-    print_matrix_formatted(Ha_clean, "Clean Alpha Hamiltonian (Ha)")
-    print_matrix_formatted(Hb_clean, "Clean Beta Hamiltonian (Hb)")
+    print_matrix_formatted(Hr_clean, "Clean Red Hamiltonian (Hr)")
+    print_matrix_formatted(Hb_clean, "Clean Blue Hamiltonian (Hb)")
     
     # Print noisy Hamiltonian matrices
-    print_matrix_formatted(Ha_noisy, "NOISY Alpha Hamiltonian (Ha_noisy)")
-    print_matrix_formatted(Hb_noisy, "NOISY Beta Hamiltonian (Hb_noisy)")
+    print_matrix_formatted(Hr_noisy, "NOISY Red Hamiltonian (Hr_noisy)")
+    print_matrix_formatted(Hb_noisy, "NOISY Blue Hamiltonian (Hb_noisy)")
     
     # Print final probabilities
     print("Final Probability Distribution:")
@@ -401,7 +401,7 @@ if __name__ == "__main__":
     print("Example: Uniform Superposition Initial State")
     print("="*60)
     
-    probabilities_uniform, _, _, Ha_noisy_uni, Hb_noisy_uni, red_noise_uni, blue_noise_uni = staggered_qwalk_with_noise(
+    probabilities_uniform, _, _, Hr_noisy_uni, Hb_noisy_uni, red_noise_uni, blue_noise_uni = staggered_qwalk_with_noise(
         N, theta, steps, [], deviation_range  # Empty list = uniform superposition
     )
     
@@ -409,8 +409,8 @@ if __name__ == "__main__":
     print(f"Blue noise parameters: {[f'{x:.3f}' for x in blue_noise_uni]}")
     print("Initial state: uniform superposition over all nodes")
     
-    print_matrix_formatted(Ha_noisy_uni, "NOISY Alpha Hamiltonian (Uniform case)")
-    print_matrix_formatted(Hb_noisy_uni, "NOISY Beta Hamiltonian (Uniform case)")
+    print_matrix_formatted(Hr_noisy_uni, "NOISY Red Hamiltonian (Uniform case)")
+    print_matrix_formatted(Hb_noisy_uni, "NOISY Blue Hamiltonian (Uniform case)")
     
     print("Final Probability Distribution (Uniform Start):")
     print("=" * 47)
@@ -424,12 +424,12 @@ if __name__ == "__main__":
     print("Comparison: Same walk WITHOUT noise (localized start)")
     print("="*60)
     
-    probabilities_no_noise, Ha_clean_no_noise, Hb_clean_no_noise, _, _, _, _ = staggered_qwalk_with_noise(
+    probabilities_no_noise, Hr_clean_no_noise, Hb_clean_no_noise, _, _, _, _ = staggered_qwalk_with_noise(
         N, theta, steps, [0], deviation_range=0.0
     )
     
-    print_matrix_formatted(Ha_clean_no_noise, "Clean Alpha Hamiltonian (No Noise)")
-    print_matrix_formatted(Hb_clean_no_noise, "Clean Beta Hamiltonian (No Noise)")
+    print_matrix_formatted(Hr_clean_no_noise, "Clean Red Hamiltonian (No Noise)")
+    print_matrix_formatted(Hb_clean_no_noise, "Clean Blue Hamiltonian (No Noise)")
     print("Initial state: localized at node [0]")
     
     print("Final Probability Distribution (No Noise):")
