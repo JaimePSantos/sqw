@@ -50,6 +50,17 @@ def get_experiment_dir(
             return os.path.join(base, shift_folder, f"N_{N}")
         else:
             return os.path.join(base, f"N_{N}")
+    elif noise_type == "static_noise":
+        noise_str = "static_noise" if has_noise else "static_noise_nonoise"
+        folder = f"{tesselation_name}_{noise_str}"
+        base = os.path.join(base_dir, folder)
+        if has_noise and noise_params is not None:
+            # Round each noise param to 3 decimal places for folder name
+            noise_suffix = "_".join(f"{float(x):.3f}" for x in noise_params)
+            dev_folder = f"dev_{noise_suffix}"
+            return os.path.join(base, dev_folder, f"N_{N}")
+        else:
+            return os.path.join(base, f"N_{N}")
     else:
         raise ValueError(f"Unknown noise_type: {noise_type}")
 
@@ -420,9 +431,12 @@ def create_mean_probability_distributions(
         if noise_type == "angle":
             noise_params = [dev, dev]
             param_name = "angle_dev"
-        else:  # tesselation_order
+        elif noise_type == "tesselation_order":
             noise_params = [dev]
             param_name = "prob"
+        else:  # static_noise
+            noise_params = [dev]
+            param_name = "static_dev"
         
         source_exp_dir = get_experiment_dir(tesselation_func, has_noise, N, noise_params=noise_params, noise_type=noise_type, base_dir=source_base_dir)
         target_exp_dir = get_experiment_dir(tesselation_func, has_noise, N, noise_params=noise_params, noise_type=noise_type, base_dir=target_base_dir)
@@ -505,9 +519,12 @@ def load_mean_probability_distributions(
         if noise_type == "angle":
             noise_params = [dev, dev]
             param_name = "angle_dev"
-        else:  # tesselation_order
+        elif noise_type == "tesselation_order":
             noise_params = [dev]
             param_name = "prob"
+        else:  # static_noise
+            noise_params = [dev]
+            param_name = "static_dev"
             
         exp_dir = get_experiment_dir(tesselation_func, has_noise, N, noise_params=noise_params, noise_type=noise_type, base_dir=base_dir)
         
@@ -557,9 +574,12 @@ def check_mean_probability_distributions_exist(
         if noise_type == "angle":
             noise_params = [dev, dev]
             param_name = "angle_dev"
-        else:  # tesselation_order
+        elif noise_type == "tesselation_order":
             noise_params = [dev]
             param_name = "prob"
+        else:  # static_noise
+            noise_params = [dev]
+            param_name = "static_dev"
             
         exp_dir = get_experiment_dir(tesselation_func, has_noise, N, noise_params=noise_params, noise_type=noise_type, base_dir=base_dir)
         

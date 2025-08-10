@@ -2,7 +2,14 @@
 
 ## 📋 **COMPACT SUMMARY - Recent Major Achievements**
 
-### 🚀 **Enhanced Logging & Testing Framework** (August 6, 2025)
+### � **Static Noise Refactoring & Deviation Ranges** (August 10, 2025)
+- **Improved Deviation Ranges**: Updated static noise system to support proper (min, max) tuples instead of symmetric ranges only
+- **Clean Refactored Interface**: Created `static_noise_clean_refactored.py` with in-code parameter configuration and simplified standard deviation plotting
+- **Backward Compatibility**: Maintained support for single deviation values while adding tuple format for exact range control
+- **Simplified Analysis**: Replaced complex multi-plot analysis with focused standard deviation vs time visualization
+- **⚠️ WARNING**: Static noise experiments still have data structure issues - standard deviations showing as 0.0, requires further debugging
+
+### �🚀 **Enhanced Logging & Testing Framework** (August 6, 2025)
 - **Comprehensive Crash Detection**: Created test scripts for every crash scenario including memory OOM, import errors, computation failures, and cluster timeouts
 - **Realistic Test Environment**: Implemented crash injection during actual angle experiments with N=500 for authentic failure simulation
 - **Organized Test Structure**: Organized 15+ test files into logical subdirectories (basic_tests/, crash_tests/, setup_and_validation/, documentation/)

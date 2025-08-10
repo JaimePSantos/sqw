@@ -7,6 +7,7 @@ from scipy import linalg
 import matplotlib.patches as mpatches
 from fractions import Fraction
 import random
+import multiprocessing
 
 rcParams['figure.figsize'] = 11, 8
 matplotlib.rcParams.update({'font.size': 15})
@@ -116,10 +117,6 @@ for edge in blue_graph.edges():
 print("Red tessellation:", red_tesselation)
 print("Blue tessellation:", blue_tesselation)
 
-
-# Example usage
-visualize_cycle_tessellations(4)
-
 def create_hamiltonian(red_graph, blue_graph, red_graph_noise=[], blue_graph_noise=[]):
     """
     Create Hamiltonian matrix from tessellation graphs with noise parameters
@@ -176,7 +173,7 @@ def create_noise_lists(theta, red_edge_list, blue_edge_list, deviation_range):
     - theta: base theta value
     - red_edge_list: list of edges in red tessellation
     - blue_edge_list: list of edges in blue tessellation
-    - deviation_range: maximum deviation value (applied as +/- range)
+    - deviation_range: either a single value (backward compatibility) or tuple (min, max) for deviation range
     
     Returns:
     - red_noise_list: list of theta values for red edges (theta + random_dev)
@@ -185,14 +182,21 @@ def create_noise_lists(theta, red_edge_list, blue_edge_list, deviation_range):
     red_noise_list = []
     blue_noise_list = []
     
+    # Handle both single value and tuple formats for deviation_range
+    if isinstance(deviation_range, (tuple, list)) and len(deviation_range) == 2:
+        dev_min, dev_max = deviation_range
+    else:
+        # Backward compatibility: single value means [-value, +value]
+        dev_min, dev_max = -abs(deviation_range), abs(deviation_range)
+    
     # Generate noise for red edges (theta + deviation)
     for _ in range(len(red_edge_list)):
-        deviation = random.uniform(-deviation_range, deviation_range)
+        deviation = random.uniform(dev_min, dev_max)
         red_noise_list.append(theta + deviation)
     
-    # Generate noise for blue edges (theta - deviation)
+    # Generate noise for blue edges (theta - deviation)  
     for _ in range(len(blue_edge_list)):
-        deviation = random.uniform(-deviation_range, deviation_range)
+        deviation = random.uniform(dev_min, dev_max)
         blue_noise_list.append(theta - deviation)
     
     return red_noise_list, blue_noise_list
@@ -353,16 +357,26 @@ def print_matrix_formatted(matrix, title, precision=3):
         print(row_str)
     print()
 
+def visualize_cycle_tessellations_process(N, figsize=(10, 6)):
+    """Wrapper function to run visualization in separate process"""
+    visualize_cycle_tessellations(N, figsize)
+
 # Usage example for N = 4
 if __name__ == "__main__":
     print("Staggered Quantum Walk with Static Noise - Example for N=4")
     print("=" * 60)
     
-    N = 4
+    N = 6
     theta = pi / 4
-    steps = 10
+    steps = 1
     init_nodes = [0]  # Start at node 0 only
     deviation_range = 0.1  # Small noise deviation
+    
+    # Visualize the tessellations in a separate process
+    print("Starting tessellation visualization in separate process...")
+    viz_process = multiprocessing.Process(target=visualize_cycle_tessellations_process, args=(N,))
+    viz_process.start()
+    print("Visualization process started. Continuing with calculations...")
     
     # Run the quantum walk
     probabilities, Hr_clean, Hb_clean, Hr_noisy, Hb_noisy, red_noise, blue_noise = staggered_qwalk_with_noise(
