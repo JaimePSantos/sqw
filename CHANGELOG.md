@@ -9,6 +9,13 @@
 - **Simplified Analysis**: Replaced complex multi-plot analysis with focused standard deviation vs time visualization
 - **⚠️ WARNING**: Static noise experiments still have data structure issues - standard deviations showing as 0.0, requires further debugging
 
+### 🎲 **Static Noise Quantum Walk Implementation** (August 8, 2025)
+- **New Module**: Created `StaggeredQW_static_noise.py` implementing staggered quantum walks with static tessellation noise
+- **Noise Model**: Each tessellation edge gets independent random noise parameters applied to theta values
+- **Flexible Initialization**: Support for both localized and uniform superposition initial states
+- **Matrix Visualization**: Added formatted printing functions for clean Hamiltonian matrix display
+- **Comprehensive Testing**: Includes demonstration examples and comparison between noisy vs clean evolution
+
 ### �🚀 **Enhanced Logging & Testing Framework** (August 6, 2025)
 - **Comprehensive Crash Detection**: Created test scripts for every crash scenario including memory OOM, import errors, computation failures, and cluster timeouts
 - **Realistic Test Environment**: Implemented crash injection during actual angle experiments with N=500 for authentic failure simulation
