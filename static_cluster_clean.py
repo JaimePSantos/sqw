@@ -6,7 +6,7 @@ Now uses smart loading from smart_loading_static module.
 """
 
 import time
-import numpy as np
+import math
 
 # ============================================================================
 # CONFIGURATION PARAMETERS
@@ -25,7 +25,7 @@ steps = N//4  # Time steps
 samples = 10  # Samples per deviation
 
 # Quantum walk parameters (for static noise, we only need theta)
-theta = np.pi/3  # Base theta parameter for static noise
+theta = math.pi/3  # Base theta parameter for static noise
 initial_state_kwargs = {"nodes": [N//2]}
 
 # List of static noise deviations
