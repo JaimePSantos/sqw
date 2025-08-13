@@ -509,75 +509,75 @@ def run_static_experiment():
             
             # Setup experiment directory
             has_noise = dev > 0
-        noise_params = [dev] if has_noise else [0]  # Static noise uses single parameter
-        exp_dir = get_experiment_dir(dummy_tesselation_func, has_noise, N, noise_params=noise_params, noise_type="static_noise", base_dir="experiments_data_samples")
-        os.makedirs(exp_dir, exist_ok=True)
-        
-        dev_start_time = time.time()
-        dev_computed_samples = 0
-        
-        for sample_idx in range(samples):
-            sample_start_time = time.time()
+            noise_params = [dev] if has_noise else [0]  # Static noise uses single parameter
+            exp_dir = get_experiment_dir(dummy_tesselation_func, has_noise, N, noise_params=noise_params, noise_type="static_noise", base_dir="experiments_data_samples")
+            os.makedirs(exp_dir, exist_ok=True)
             
-            # Check if this sample already exists (all step files)
-            sample_exists = True
-            for step_idx in range(steps):
-                step_dir = os.path.join(exp_dir, f"step_{step_idx}")
-                filename = f"final_step_{step_idx}_sample{sample_idx}.pkl"
-                filepath = os.path.join(step_dir, filename)
-                if not os.path.exists(filepath):
-                    sample_exists = False
-                    break
+            dev_start_time = time.time()
+            dev_computed_samples = 0
             
-            if sample_exists:
-                print(f"  [OK] Sample {sample_idx+1}/{samples} already exists, skipping")
+            for sample_idx in range(samples):
+                sample_start_time = time.time()
+                
+                # Check if this sample already exists (all step files)
+                sample_exists = True
+                for step_idx in range(steps):
+                    step_dir = os.path.join(exp_dir, f"step_{step_idx}")
+                    filename = f"final_step_{step_idx}_sample{sample_idx}.pkl"
+                    filepath = os.path.join(step_dir, filename)
+                    if not os.path.exists(filepath):
+                        sample_exists = False
+                        break
+                
+                if sample_exists:
+                    print(f"  [OK] Sample {sample_idx+1}/{samples} already exists, skipping")
+                    completed_samples += 1
+                    continue
+                
+                print(f"  [COMPUTING] Computing sample {sample_idx+1}/{samples}...")
+                
+                # For static noise, we don't need to generate angle sequences
+                # The noise is applied internally by the running function
+                deviation_range = dev
+                
+                # Extract initial nodes from initial_state_kwargs
+                initial_nodes = initial_state_kwargs.get('nodes', [])
+                
+                # Run the quantum walk experiment for this sample using static noise
+                walk_result = running(
+                    N, theta, steps,
+                    initial_nodes=initial_nodes,
+                    deviation_range=deviation_range,
+                    return_all_states=True
+                )
+                
+                # Save each step immediately
+                for step_idx in range(steps):
+                    step_dir = os.path.join(exp_dir, f"step_{step_idx}")
+                    os.makedirs(step_dir, exist_ok=True)
+                    
+                    filename = f"final_step_{step_idx}_sample{sample_idx}.pkl"
+                    filepath = os.path.join(step_dir, filename)
+                    
+                    with open(filepath, 'wb') as f:
+                        pickle.dump(walk_result[step_idx], f)
+                
+                dev_computed_samples += 1
                 completed_samples += 1
-                continue
-            
-            print(f"  [COMPUTING] Computing sample {sample_idx+1}/{samples}...")
-            
-            # For static noise, we don't need to generate angle sequences
-            # The noise is applied internally by the running function
-            deviation_range = dev
-            
-            # Extract initial nodes from initial_state_kwargs
-            initial_nodes = initial_state_kwargs.get('nodes', [])
-            
-            # Run the quantum walk experiment for this sample using static noise
-            walk_result = running(
-                N, theta, steps,
-                initial_nodes=initial_nodes,
-                deviation_range=deviation_range,
-                return_all_states=True
-            )
-            
-            # Save each step immediately
-            for step_idx in range(steps):
-                step_dir = os.path.join(exp_dir, f"step_{step_idx}")
-                os.makedirs(step_dir, exist_ok=True)
+                sample_time = time.time() - sample_start_time
                 
-                filename = f"final_step_{step_idx}_sample{sample_idx}.pkl"
-                filepath = os.path.join(step_dir, filename)
+                # Progress report
+                progress_pct = (completed_samples / total_samples) * 100
+                elapsed_time = time.time() - start_time
+                estimated_total_time = elapsed_time * total_samples / completed_samples if completed_samples > 0 else 0
+                remaining_time = estimated_total_time - elapsed_time if estimated_total_time > elapsed_time else 0
                 
-                with open(filepath, 'wb') as f:
-                    pickle.dump(walk_result[step_idx], f)
+                print(f"  [OK] Sample {sample_idx+1}/{samples} saved in {sample_time:.1f}s")
+                print(f"     Progress: {completed_samples}/{total_samples} ({progress_pct:.1f}%)")
+                print(f"     Elapsed: {elapsed_time:.1f}s, Remaining: ~{remaining_time:.1f}s")
             
-            dev_computed_samples += 1
-            completed_samples += 1
-            sample_time = time.time() - sample_start_time
-            
-            # Progress report
-            progress_pct = (completed_samples / total_samples) * 100
-            elapsed_time = time.time() - start_time
-            estimated_total_time = elapsed_time * total_samples / completed_samples if completed_samples > 0 else 0
-            remaining_time = estimated_total_time - elapsed_time if estimated_total_time > elapsed_time else 0
-            
-            print(f"  [OK] Sample {sample_idx+1}/{samples} saved in {sample_time:.1f}s")
-            print(f"     Progress: {completed_samples}/{total_samples} ({progress_pct:.1f}%)")
-            print(f"     Elapsed: {elapsed_time:.1f}s, Remaining: ~{remaining_time:.1f}s")
-        
-        dev_time = time.time() - dev_start_time
-        print(f"[OK] Static noise deviation {dev:.4f} completed: {dev_computed_samples} new samples in {dev_time:.1f}s")
+            dev_time = time.time() - dev_start_time
+            print(f"[OK] Static noise deviation {dev:.4f} completed: {dev_computed_samples} new samples in {dev_time:.1f}s")
 
         experiment_time = time.time() - start_time
         print(f"\n[COMPLETED] Sample computation completed in {experiment_time:.2f} seconds")
