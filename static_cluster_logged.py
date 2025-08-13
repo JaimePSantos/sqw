@@ -6,6 +6,17 @@ Static noise experiment for quantum walks.
 This script runs static noise experiments for quantum walks with configurable parameters.
 
 Now uses smart loading from smart_loading_static module.
+
+Execution Modes:
+1. Full Pipeline (default): Compute samples + analysis + plots + archive
+2. Samples Only: Set CALCULATE_SAMPLES_ONLY = True to only compute and save samples
+3. Analysis Only: Set SKIP_SAMPLE_COMPUTATION = True to skip sample computation
+4. Custom: Adjust individual toggles for plotting, archiving, etc.
+
+This modular approach allows you to:
+- Run expensive sample computation on cluster, then analysis locally
+- Recompute analysis with different parameters without recomputing samples
+- Split long computations into manageable chunks
 """
 
 import time
@@ -34,6 +45,10 @@ SAVE_FIGURES = False  # Set to False to disable saving figures to files
 # Archive switch
 CREATE_TAR_ARCHIVE = True  # Set to True to create tar archive of experiments_data_samples folder
 
+# Computation control switches
+CALCULATE_SAMPLES_ONLY = True  # Set to True to only compute and save samples (skip analysis)
+SKIP_SAMPLE_COMPUTATION = False  # Set to True to skip sample computation (analysis only)
+
 # Background execution switch - SAFER IMPLEMENTATION
 RUN_IN_BACKGROUND = True  # Set to True to automatically run the process in background
 
@@ -46,7 +61,7 @@ BACKGROUND_PID_FILE = "static_experiment.pid"  # PID file to track background pr
 # Experiment parameters
 N = 10000  # System size
 steps = N//4  # Time steps
-samples = 1  # Samples per deviation - increased for smoother curves
+samples = 20  # Samples per deviation - increased for smoother curves
 
 # Quantum walk parameters (for static noise, we only need theta)
 theta = math.pi/3  # Base theta parameter for static noise
@@ -207,7 +222,29 @@ def create_experiment_archive(N, samples):
 
 # @crash_safe_log(log_file_prefix="static_noise_experiment", heartbeat_interval=30.0)
 def run_static_experiment():
-    """Run the static noise quantum walk experiment with immediate saving."""
+    """Run the static noise quantum walk experiment with configurable execution modes."""
+    
+    # Validate configuration
+    if CALCULATE_SAMPLES_ONLY and SKIP_SAMPLE_COMPUTATION:
+        raise ValueError("Invalid configuration: Cannot set both CALCULATE_SAMPLES_ONLY=True and SKIP_SAMPLE_COMPUTATION=True")
+    
+    if SKIP_SAMPLE_COMPUTATION and not ENABLE_PLOTTING:
+        print("WARNING: Analysis-only mode with plotting disabled - limited output will be generated")
+    
+    # Configuration summary
+    print("=== EXECUTION CONFIGURATION ===")
+    mode_description = (
+        "Samples Only" if CALCULATE_SAMPLES_ONLY else
+        "Analysis Only" if SKIP_SAMPLE_COMPUTATION else
+        "Full Pipeline"
+    )
+    print(f"Execution mode: {mode_description}")
+    print(f"Sample computation: {'Enabled' if not SKIP_SAMPLE_COMPUTATION else 'Disabled'}")
+    print(f"Analysis phase: {'Enabled' if not CALCULATE_SAMPLES_ONLY else 'Disabled'}")
+    print(f"Plotting: {'Enabled' if ENABLE_PLOTTING else 'Disabled'}")
+    print(f"Archiving: {'Enabled' if CREATE_TAR_ARCHIVE else 'Disabled'}")
+    print(f"Background execution: {'Enabled' if RUN_IN_BACKGROUND else 'Disabled'}")
+    print("=" * 40)
     
     # Import required modules at the top
     import numpy as np
@@ -448,12 +485,20 @@ def run_static_experiment():
         """Dummy tessellation function for static noise (tessellations are built-in)"""
         return None
 
-    # Run experiments with immediate saving for each sample
-    for dev_idx, dev in enumerate(devs):
-        print(f"\n=== Processing static noise deviation {dev:.4f} ({dev_idx+1}/{len(devs)}) ===")
+    # Sample computation phase
+    experiment_time = 0
+    completed_samples = 0
+    
+    if not SKIP_SAMPLE_COMPUTATION:
+        print("=== SAMPLE COMPUTATION PHASE ===")
+        print("Computing and saving quantum walk samples...")
         
-        # Setup experiment directory
-        has_noise = dev > 0
+        # Run experiments with immediate saving for each sample
+        for dev_idx, dev in enumerate(devs):
+            print(f"\n=== Processing static noise deviation {dev:.4f} ({dev_idx+1}/{len(devs)}) ===")
+            
+            # Setup experiment directory
+            has_noise = dev > 0
         noise_params = [dev] if has_noise else [0]  # Static noise uses single parameter
         exp_dir = get_experiment_dir(dummy_tesselation_func, has_noise, N, noise_params=noise_params, noise_type="static_noise", base_dir="experiments_data_samples")
         os.makedirs(exp_dir, exist_ok=True)
@@ -524,10 +569,41 @@ def run_static_experiment():
         dev_time = time.time() - dev_start_time
         print(f"[OK] Static noise deviation {dev:.4f} completed: {dev_computed_samples} new samples in {dev_time:.1f}s")
 
-    experiment_time = time.time() - start_time
-    print(f"\n[COMPLETED] All samples completed in {experiment_time:.2f} seconds")
-    print(f"Total samples computed: {completed_samples}")
-    
+        experiment_time = time.time() - start_time
+        print(f"\n[COMPLETED] Sample computation completed in {experiment_time:.2f} seconds")
+        print(f"Total samples computed: {completed_samples}")
+    else:
+        print("=== SKIPPING SAMPLE COMPUTATION ===")
+        print("Sample computation disabled - proceeding to analysis phase")
+        experiment_time = 0
+        completed_samples = 0
+
+    # Early exit if only computing samples
+    if CALCULATE_SAMPLES_ONLY:
+        print("\n=== SAMPLES ONLY MODE - ANALYSIS SKIPPED ===")
+        print("Sample computation completed. Skipping analysis, plotting, and archiving.")
+        print("To run analysis on existing samples, set:")
+        print("  CALCULATE_SAMPLES_ONLY = False")
+        print("  SKIP_SAMPLE_COMPUTATION = True")
+        
+        total_time = time.time() - start_time
+        print(f"Total execution time: {total_time:.2f} seconds")
+        
+        return {
+            "mode": "samples_only",
+            "devs": devs,
+            "N": N,
+            "steps": steps,
+            "samples": samples,
+            "total_time": total_time,
+            "theta": theta,
+            "completed_samples": completed_samples
+        }
+
+    # Analysis phase
+    print("\n=== ANALYSIS PHASE ===")
+    print("Loading existing samples and computing analysis...")
+
     # Smart load or create mean probability distributions
     print("\n[DATA] Smart loading/creating mean probability distributions...")
     try:
@@ -697,13 +773,25 @@ def run_static_experiment():
     print(f"Total execution time: {total_time:.2f} seconds")
     
     print("\n=== Performance Summary ===")
+    print(f"Execution mode: {'Samples Only' if CALCULATE_SAMPLES_ONLY else 'Analysis Only' if SKIP_SAMPLE_COMPUTATION else 'Full Pipeline'}")
     print(f"System size (N): {N}")
     print(f"Time steps: {steps}")
     print(f"Samples per deviation: {samples}")
     print(f"Number of deviations: {len(devs)}")
-    print(f"Total quantum walks computed: {len(devs) * samples}")
-    if experiment_time > 0:
-        print(f"Average time per quantum walk: {experiment_time / (len(devs) * samples):.3f} seconds")
+    
+    if not SKIP_SAMPLE_COMPUTATION:
+        print(f"Total quantum walks computed: {completed_samples}")
+        if experiment_time > 0 and completed_samples > 0:
+            print(f"Average time per quantum walk: {experiment_time / completed_samples:.3f} seconds")
+    else:
+        print(f"Expected quantum walks: {len(devs) * samples} (sample computation skipped)")
+    
+    print("\n=== Execution Modes ===")
+    print("Available execution modes:")
+    print("1. Full Pipeline (default): Compute samples + analysis + plots + archive")
+    print("2. Samples Only: Set CALCULATE_SAMPLES_ONLY = True")
+    print("3. Analysis Only: Set SKIP_SAMPLE_COMPUTATION = True")
+    print("4. Custom: Adjust individual toggles for plotting, archiving, etc.")
     
     print("\n=== Static Noise Details ===")
     print("Static noise model:")
@@ -742,12 +830,18 @@ def run_static_experiment():
         print("- This selective archiving reduces file size compared to archiving all N values")
     
     return {
+        "mode": "full_pipeline",
         "devs": devs,
         "N": N,
         "steps": steps,
         "samples": samples,
         "total_time": total_time,
-        "theta": theta
+        "theta": theta,
+        "completed_samples": completed_samples,
+        "sample_computation_enabled": not SKIP_SAMPLE_COMPUTATION,
+        "analysis_enabled": not CALCULATE_SAMPLES_ONLY,
+        "plotting_enabled": ENABLE_PLOTTING,
+        "archiving_enabled": CREATE_TAR_ARCHIVE
     }
 
 if __name__ == "__main__":
