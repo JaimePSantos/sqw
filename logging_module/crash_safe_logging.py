@@ -33,7 +33,12 @@ import time
 import functools
 from datetime import datetime, timedelta
 from typing import Optional, Callable, Any
-from .config import get_config, get_advanced_config
+
+# Import config - handle both relative and absolute imports
+try:
+    from .config import get_config, get_advanced_config
+except ImportError:
+    from config import get_config, get_advanced_config
 
 # Try to import psutil, but handle gracefully if not available
 try:
@@ -83,12 +88,14 @@ class CrashSafeLogger:
         self.deadman_thread = None
         self._setup_complete = False
         self._last_heartbeat_time = None
+        self.main_process_pid = None
     
     @staticmethod
-    def logging_process(log_queue, log_file: str, shutdown_event):
+    def logging_process(log_queue, log_file: str, shutdown_event, main_process_pid: int = None):
         """
         Separate process for logging that runs concurrently with main code.
         This ensures logging continues even if main process crashes.
+        Now includes main process monitoring to stop when main process dies.
         """
         # Configure logger for the logging process
         logger = logging.getLogger('CrashSafeLogger')
@@ -122,10 +129,45 @@ class CrashSafeLogger:
         
         logger.info("=== LOGGING PROCESS STARTED ===")
         logger.info(f"Logging process PID: {os.getpid()}")
+        if main_process_pid:
+            logger.info(f"Monitoring main process PID: {main_process_pid}")
+        
+        # Process monitoring variables
+        last_process_check = time.time()
+        process_check_interval = 5.0  # Check main process every 5 seconds
+        main_process_missing_count = 0
+        max_missing_checks = 3  # Allow 3 consecutive failed checks before shutdown
         
         try:
             while not shutdown_event.is_set():
                 try:
+                    # Check if main process is still alive (if psutil available and PID provided)
+                    current_time = time.time()
+                    if (main_process_pid and PSUTIL_AVAILABLE and 
+                        current_time - last_process_check >= process_check_interval):
+                        
+                        try:
+                            main_process = psutil.Process(main_process_pid)
+                            if not main_process.is_running():
+                                main_process_missing_count += 1
+                                logger.warning(f"Main process {main_process_pid} not running - check {main_process_missing_count}/{max_missing_checks}")
+                            else:
+                                main_process_missing_count = 0  # Reset counter if process found
+                        except psutil.NoSuchProcess:
+                            main_process_missing_count += 1
+                            logger.warning(f"Main process {main_process_pid} not found - check {main_process_missing_count}/{max_missing_checks}")
+                        except Exception as e:
+                            logger.debug(f"Error checking main process: {e}")
+                        
+                        # If main process is consistently missing, shut down logging
+                        if main_process_missing_count >= max_missing_checks:
+                            logger.critical("=== MAIN PROCESS TERMINATED - SHUTTING DOWN LOGGING ===")
+                            logger.critical(f"Main process {main_process_pid} has been missing for {main_process_missing_count} consecutive checks")
+                            logger.critical("Logging process will now terminate to prevent orphaned logging")
+                            break
+                        
+                        last_process_check = current_time
+                    
                     # Get message from queue with shorter timeout for responsiveness
                     record = log_queue.get(timeout=0.5)  # Shorter timeout
                     if record is None:  # Sentinel to stop logging process
@@ -181,9 +223,11 @@ class CrashSafeLogger:
         self.shutdown_event = multiprocessing.Event()
         
         # Start logging process
+        main_pid = os.getpid()  # Get current process PID
+        self.main_process_pid = main_pid  # Store for reference
         self.log_process = multiprocessing.Process(
             target=self.logging_process, 
-            args=(self.log_queue, self.log_file, self.shutdown_event)
+            args=(self.log_queue, self.log_file, self.shutdown_event, main_pid)
         )
         self.log_process.start()
         
@@ -264,8 +308,8 @@ class CrashSafeLogger:
                     # Update last heartbeat time for deadman's switch
                     self._last_heartbeat_time = current_time
                     
-                    # Basic heartbeat
-                    self.logger.info(f"HEARTBEAT #{heartbeat_count} - Elapsed: {elapsed:.1f}s - Process alive")
+                    # Basic heartbeat with monitored process PID
+                    self.logger.info(f"HEARTBEAT #{heartbeat_count} - Elapsed: {elapsed:.1f}s - Process alive - PID: {self.main_process_pid}")
                     
                     # Periodic resource monitoring
                     if heartbeat_count - last_memory_check >= memory_check_interval:
@@ -499,6 +543,7 @@ class CrashSafeLogger:
         self.logger.info(f"Main process PID: {os.getpid()}")
         if self.log_process:
             self.logger.info(f"Logging process PID: {self.log_process.pid}")
+        self.logger.info(f"Process monitoring: {'ENABLED' if PSUTIL_AVAILABLE else 'DISABLED (psutil not available)'}")
         self.logger.info(f"Platform: {sys.platform}")
         self.logger.info(f"Heartbeat interval: {self.heartbeat_interval}s")
         
@@ -638,6 +683,35 @@ class CrashSafeLogger:
             self.logger.error(f"Traceback: {traceback.format_exc()}")
             raise
     
+    def check_process_monitoring_status(self) -> dict:
+        """
+        Check the status of process monitoring and return diagnostic information.
+        
+        Returns:
+            dict: Status information about process monitoring
+        """
+        status = {
+            'psutil_available': PSUTIL_AVAILABLE,
+            'main_process_pid': self.main_process_pid,
+            'logging_process_running': self.log_process.is_alive() if self.log_process else False,
+            'monitoring_enabled': PSUTIL_AVAILABLE and self.main_process_pid is not None,
+            'main_process_running': None
+        }
+        
+        if PSUTIL_AVAILABLE and self.main_process_pid:
+            try:
+                main_process = psutil.Process(self.main_process_pid)
+                status['main_process_running'] = main_process.is_running()
+                status['main_process_name'] = main_process.name()
+                status['main_process_status'] = main_process.status()
+            except psutil.NoSuchProcess:
+                status['main_process_running'] = False
+                status['error'] = f"Process {self.main_process_pid} not found"
+            except Exception as e:
+                status['error'] = f"Error checking process: {e}"
+        
+        return status
+
     def cleanup(self):
         """
         Clean shutdown of the logging system.
@@ -959,6 +1033,8 @@ def check_for_crashed_processes():
                                             print("   ✓ Keyboard interrupt logged")
                                         elif "SHUTDOWN SEQUENCE" in log_content:
                                             print("   ✓ Normal shutdown logged")
+                                        elif "MAIN PROCESS TERMINATED - SHUTTING DOWN LOGGING" in log_content:
+                                            print("   ✓ Main process death detected by logging monitor")
                                         else:
                                             print("   ❌ NO TERMINATION REASON LOGGED - LIKELY SUDDEN DEATH")
                                             if "HIGH MEMORY USAGE" in log_content:
