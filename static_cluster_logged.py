@@ -216,7 +216,8 @@ def run_static_experiment():
         
         try:
             script_path = os.path.abspath(__file__)
-            python_executable = r"C:\Users\jaime\anaconda3\envs\QWAK2\python.exe"
+            # Use sys.executable to get the current Python interpreter path
+            python_executable = sys.executable
             
             # Create environment for subprocess that prevents recursion
             env = os.environ.copy()
@@ -276,32 +277,61 @@ def run_static_experiment():
                 with open(pid_file_path, 'w') as pid_file:
                     pid_file.write(str(process.pid))
                 
-                print(f"Background process started safely (PID: {process.pid})")
+                # Give the process a moment to start and check if it's still running
+                time.sleep(0.5)
+                if process.poll() is None:
+                    print(f"Background process started safely (PID: {process.pid})")
+                else:
+                    print(f"Warning: Background process (PID: {process.pid}) may have exited immediately")
+                    print(f"Check log file for details: {log_file_path}")
                 
             else:  # Unix-like systems - SAFE METHOD
                 # Use nohup for proper background execution
                 with open(log_file_path, 'a') as log_file:
-                    process = subprocess.Popen(
-                        ["nohup", python_executable, "-u", script_path],  # -u for unbuffered output
-                        env=env,
-                        cwd=os.getcwd(),
-                        stdout=log_file,
-                        stderr=subprocess.STDOUT,
-                        preexec_fn=os.setsid  # Create new session
-                    )
+                    # First try with nohup for better detachment
+                    try:
+                        process = subprocess.Popen(
+                            ["nohup", python_executable, "-u", script_path],
+                            env=env,
+                            cwd=os.getcwd(),
+                            stdout=log_file,
+                            stderr=subprocess.STDOUT,
+                            preexec_fn=os.setsid,  # Create new session
+                            start_new_session=True  # Additional detachment on Python 3.7+
+                        )
+                    except TypeError:
+                        # Fallback for older Python versions without start_new_session
+                        process = subprocess.Popen(
+                            ["nohup", python_executable, "-u", script_path],
+                            env=env,
+                            cwd=os.getcwd(),
+                            stdout=log_file,
+                            stderr=subprocess.STDOUT,
+                            preexec_fn=os.setsid  # Create new session
+                        )
                 
                 # Save PID for cleanup
                 with open(pid_file_path, 'w') as pid_file:
                     pid_file.write(str(process.pid))
                 
-                print(f"Background process started safely (PID: {process.pid})")
+                # Give the process a moment to start and check if it's still running
+                time.sleep(0.5)
+                if process.poll() is None:
+                    print(f"Background process started safely (PID: {process.pid})")
+                else:
+                    print(f"Warning: Background process (PID: {process.pid}) may have exited immediately")
+                    print(f"Check log file for details: {log_file_path}")
             
             print(f"Output logged to: {log_file_path}")
             print(f"Process ID saved to: {pid_file_path}")
             print("\n" + "="*50)
             print("SAFE BACKGROUND PROCESS STARTED")
-            print("   Monitor with: Get-Content " + BACKGROUND_LOG_FILE + " -Wait")
-            print("   Kill with: taskkill /F /PID <pid>")
+            if os.name == 'nt':  # Windows
+                print("   Monitor with: Get-Content " + BACKGROUND_LOG_FILE + " -Wait")
+                print("   Kill with: taskkill /F /PID <pid>")
+            else:  # Unix-like (Linux/macOS)
+                print("   Monitor with: tail -f " + BACKGROUND_LOG_FILE)
+                print("   Kill with: kill <pid>")
             print("="*50)
             
             return  # Exit the foreground process
@@ -350,8 +380,27 @@ def run_static_experiment():
         
         print("Successfully imported all required modules")
     except ImportError as e:
-        print(f"Error: Could not import required modules: {e}")
+        error_msg = f"Error: Could not import required modules: {e}"
+        print(error_msg)
         print("Make sure you're running this script from the correct directory with all dependencies available")
+        
+        # If we're in background mode, write the error to the log file
+        if os.environ.get('IS_BACKGROUND_PROCESS'):
+            try:
+                with open(BACKGROUND_LOG_FILE, 'a') as f:
+                    f.write(f"\n{error_msg}\n")
+                    f.write("Script exiting due to import error\n")
+            except:
+                pass
+        
+        # Clean up PID file if we're the background process
+        if os.environ.get('IS_BACKGROUND_PROCESS'):
+            try:
+                if os.path.exists(BACKGROUND_PID_FILE):
+                    os.remove(BACKGROUND_PID_FILE)
+            except:
+                pass
+        
         raise
 
     print("Starting static noise quantum walk experiment...")
@@ -672,4 +721,34 @@ def run_static_experiment():
     }
 
 if __name__ == "__main__":
-    run_static_experiment()
+    try:
+        run_static_experiment()
+    except Exception as e:
+        error_msg = f"Fatal error in run_static_experiment: {e}"
+        print(error_msg)
+        
+        # If we're in background mode, write the error to the log file
+        if os.environ.get('IS_BACKGROUND_PROCESS'):
+            try:
+                with open(BACKGROUND_LOG_FILE, 'a') as f:
+                    f.write(f"\n{error_msg}\n")
+                    import traceback
+                    f.write(traceback.format_exc())
+                    f.write("\nScript exiting due to fatal error\n")
+            except:
+                pass
+            
+            # Clean up PID file if we're the background process
+            try:
+                if os.path.exists(BACKGROUND_PID_FILE):
+                    os.remove(BACKGROUND_PID_FILE)
+                    print("Cleaned up PID file due to error")
+            except:
+                pass
+        
+        # Re-raise the exception if not in background mode
+        if not os.environ.get('IS_BACKGROUND_PROCESS'):
+            raise
+        else:
+            import sys
+            sys.exit(1)
