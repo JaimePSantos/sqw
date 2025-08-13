@@ -36,6 +36,10 @@ CREATE_TAR_ARCHIVE = True  # Set to True to create tar archive of experiments_da
 
 # Background execution switch - SAFER IMPLEMENTATION
 RUN_IN_BACKGROUND = True  # Set to True to automatically run the process in background
+
+# Check if background execution has been disabled externally
+if os.environ.get('RUN_IN_BACKGROUND') == 'False':
+    RUN_IN_BACKGROUND = False
 BACKGROUND_LOG_FILE = "static_experiment_background.log"  # Log file for background execution
 BACKGROUND_PID_FILE = "static_experiment.pid"  # PID file to track background process
 
@@ -288,7 +292,10 @@ def run_static_experiment():
             else:  # Unix-like systems - SAFE METHOD
                 # Use nohup for proper background execution
                 with open(log_file_path, 'a') as log_file:
-                    # First try with nohup for better detachment
+                    # Try different approaches for Unix-like systems
+                    process = None
+                    
+                    # First try with nohup and full detachment
                     try:
                         process = subprocess.Popen(
                             ["nohup", python_executable, "-u", script_path],
@@ -299,16 +306,39 @@ def run_static_experiment():
                             preexec_fn=os.setsid,  # Create new session
                             start_new_session=True  # Additional detachment on Python 3.7+
                         )
-                    except TypeError:
-                        # Fallback for older Python versions without start_new_session
-                        process = subprocess.Popen(
-                            ["nohup", python_executable, "-u", script_path],
-                            env=env,
-                            cwd=os.getcwd(),
-                            stdout=log_file,
-                            stderr=subprocess.STDOUT,
-                            preexec_fn=os.setsid  # Create new session
-                        )
+                    except (TypeError, AttributeError, OSError) as e:
+                        print(f"   First attempt failed: {e}")
+                        # Fallback 1: Try without start_new_session
+                        try:
+                            process = subprocess.Popen(
+                                ["nohup", python_executable, "-u", script_path],
+                                env=env,
+                                cwd=os.getcwd(),
+                                stdout=log_file,
+                                stderr=subprocess.STDOUT,
+                                preexec_fn=os.setsid  # Create new session
+                            )
+                        except (AttributeError, OSError) as e2:
+                            print(f"   Second attempt failed: {e2}")
+                            # Fallback 2: Try without preexec_fn
+                            try:
+                                process = subprocess.Popen(
+                                    ["nohup", python_executable, "-u", script_path],
+                                    env=env,
+                                    cwd=os.getcwd(),
+                                    stdout=log_file,
+                                    stderr=subprocess.STDOUT
+                                )
+                            except OSError as e3:
+                                print(f"   Third attempt failed: {e3}")
+                                # Fallback 3: Try without nohup
+                                process = subprocess.Popen(
+                                    [python_executable, "-u", script_path],
+                                    env=env,
+                                    cwd=os.getcwd(),
+                                    stdout=log_file,
+                                    stderr=subprocess.STDOUT
+                                )
                 
                 # Save PID for cleanup
                 with open(pid_file_path, 'w') as pid_file:
