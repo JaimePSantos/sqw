@@ -92,16 +92,18 @@ def show_help():
     print()
     print("Options:")
     print("  --no-background  - Run in foreground mode")
+    print("  --force         - Kill existing process and start new one")
     print("  --help          - Show this help message")
     print()
     print("Examples:")
     print("  python safe_background_launcher.py samples")
     print("  python safe_background_launcher.py analysis --no-background")
+    print("  python safe_background_launcher.py samples --force")
     print()
     print("Note: This launcher preserves all parameters (N, samples, devs, etc.)")
     print("      from the main static_cluster_logged.py file.")
 
-def launch_background(mode_config=None):
+def launch_background(mode_config=None, force=False):
     """Launch the main script in background with better compatibility"""
     
     # Get the main script path
@@ -120,8 +122,8 @@ def launch_background(mode_config=None):
     print(f"Script: {main_script}")
     print(f"Log: {log_file}")
     
-    # Check if already running
-    if os.path.exists(pid_file):
+    # Check if already running (unless force is specified)
+    if not force and os.path.exists(pid_file):
         try:
             with open(pid_file, 'r') as f:
                 old_pid = int(f.read().strip())
@@ -133,15 +135,65 @@ def launch_background(mode_config=None):
                                           capture_output=True, text=True)
                     if str(old_pid) in result.stdout:
                         print(f"Background process already running (PID: {old_pid})")
+                        print(f"Monitor with: tail -f {log_file}")
+                        print(f"Kill with: kill {old_pid}")
+                        print("Use bg_manager.py to manage the existing process")
+                        print("Or use --force to kill and restart")
                         return False
                 else:  # Unix-like
                     os.kill(old_pid, 0)
                     print(f"Background process already running (PID: {old_pid})")
+                    print(f"Monitor with: tail -f {log_file}")
+                    print(f"Kill with: kill {old_pid}")
+                    print("Use bg_manager.py to manage the existing process")
+                    print("Or use --force to kill and restart")
                     return False
             except OSError:
-                pass  # Process doesn't exist
+                # Process doesn't exist, clean up stale PID file
+                print(f"Cleaning up stale PID file (process {old_pid} not running)")
+                os.remove(pid_file)
         except (ValueError, IOError):
-            pass  # Invalid PID file
+            # Invalid PID file, remove it
+            print("Cleaning up invalid PID file")
+            try:
+                os.remove(pid_file)
+            except:
+                pass
+    elif force and os.path.exists(pid_file):
+        # Force mode: kill existing process
+        try:
+            with open(pid_file, 'r') as f:
+                old_pid = int(f.read().strip())
+            
+            print(f"Force mode: killing existing process (PID: {old_pid})")
+            try:
+                if os.name == 'nt':  # Windows
+                    subprocess.run(["taskkill", "/F", "/PID", str(old_pid)], 
+                                 capture_output=True, text=True)
+                else:  # Unix-like
+                    os.kill(old_pid, 15)  # SIGTERM first
+                    time.sleep(1)
+                    try:
+                        os.kill(old_pid, 0)  # Check if still alive
+                        os.kill(old_pid, 9)  # SIGKILL if stubborn
+                    except OSError:
+                        pass  # Process is dead
+                
+                print("Existing process killed")
+                os.remove(pid_file)
+            except (OSError, subprocess.SubprocessError) as e:
+                print(f"Warning: Could not kill process {old_pid}: {e}")
+                # Continue anyway, maybe it's dead
+                try:
+                    os.remove(pid_file)
+                except:
+                    pass
+        except (ValueError, IOError):
+            # Invalid PID file, just remove it
+            try:
+                os.remove(pid_file)
+            except:
+                pass
     
     # Prepare environment to prevent recursion
     env = os.environ.copy()
@@ -229,6 +281,7 @@ def main():
     
     mode = None
     run_foreground = False
+    force_launch = False
     
     # Parse arguments
     for arg in args:
@@ -237,6 +290,8 @@ def main():
             return
         elif arg == "--no-background":
             run_foreground = True
+        elif arg == "--force":
+            force_launch = True
         elif arg in ["full", "samples", "analysis", "quick", "headless"]:
             mode = arg
         else:
@@ -270,22 +325,30 @@ def main():
         return
     
     # Background execution
-    success = launch_background(mode_config)
+    success = launch_background(mode_config, force_launch)
     if not success:
-        print("\\nFalling back to foreground execution...")
-        os.environ['RUN_IN_BACKGROUND'] = 'False'
+        print("\\nBackground process launch failed or process already running.")
+        print("Check the messages above for details.")
         
-        # Apply mode settings to environment
-        if mode_config:
-            os.environ.update(mode_config)
-        
-        try:
-            import static_cluster_logged
-            static_cluster_logged.run_static_experiment()
-        except Exception as e:
-            print(f"Error running script: {e}")
-            import traceback
-            traceback.print_exc()
+        # Only fall back to foreground if specifically requested, not on existing process
+        fallback_choice = input("Run in foreground instead? (y/N): ").lower().strip()
+        if fallback_choice == 'y' or fallback_choice == 'yes':
+            print("Running in foreground mode...")
+            os.environ['RUN_IN_BACKGROUND'] = 'False'
+            
+            # Apply mode settings to environment
+            if mode_config:
+                os.environ.update(mode_config)
+            
+            try:
+                import static_cluster_logged
+                static_cluster_logged.run_static_experiment()
+            except Exception as e:
+                print(f"Error running script: {e}")
+                import traceback
+                traceback.print_exc()
+        else:
+            print("Exiting. Use bg_manager.py to manage existing processes.")
 
 if __name__ == "__main__":
     main()
