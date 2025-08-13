@@ -31,7 +31,8 @@ def set_mode(mode):
             "CALCULATE_SAMPLES_ONLY": True,
             "SKIP_SAMPLE_COMPUTATION": False,
             "ENABLE_PLOTTING": False,
-            "CREATE_TAR_ARCHIVE": False
+            "CREATE_TAR_ARCHIVE": False,
+            'RUN_IN_BACKGROUND': True
         },
         "analysis": {
             "CALCULATE_SAMPLES_ONLY": False,
