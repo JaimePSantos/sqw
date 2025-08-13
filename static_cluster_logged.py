@@ -26,7 +26,7 @@ ENABLE_PLOTTING = False  # Set to False to disable plotting
 USE_LOGLOG_PLOT = False  # Set to True to use log-log scale for plotting
 
 # Experiment parameters
-N = 300  # System size
+N = 2000  # System size
 steps = N//4  # Time steps
 samples = 10  # Samples per deviation
 
@@ -144,7 +144,7 @@ def create_or_load_std_data(mean_results, devs, N, steps, tesselation_func, std_
     print(f"✅ Standard deviation data management completed!")
     return stds
 
-@crash_safe_log(log_file_prefix="static_noise_experiment", heartbeat_interval=30.0)
+# @crash_safe_log(log_file_prefix="static_noise_experiment", heartbeat_interval=30.0)
 @cluster_deploy(
     experiment_name="static_noise",
     noise_type="static_noise",
