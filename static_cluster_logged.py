@@ -49,6 +49,16 @@ CREATE_TAR_ARCHIVE = True  # Set to True to create tar archive of experiments_da
 CALCULATE_SAMPLES_ONLY = True  # Set to True to only compute and save samples (skip analysis)
 SKIP_SAMPLE_COMPUTATION = False  # Set to True to skip sample computation (analysis only)
 
+# Check for environment variable overrides (from safe_background_launcher.py)
+if os.environ.get('ENABLE_PLOTTING'):
+    ENABLE_PLOTTING = os.environ.get('ENABLE_PLOTTING').lower() == 'true'
+if os.environ.get('CREATE_TAR_ARCHIVE'):
+    CREATE_TAR_ARCHIVE = os.environ.get('CREATE_TAR_ARCHIVE').lower() == 'true'
+if os.environ.get('CALCULATE_SAMPLES_ONLY'):
+    CALCULATE_SAMPLES_ONLY = os.environ.get('CALCULATE_SAMPLES_ONLY').lower() == 'true'
+if os.environ.get('SKIP_SAMPLE_COMPUTATION'):
+    SKIP_SAMPLE_COMPUTATION = os.environ.get('SKIP_SAMPLE_COMPUTATION').lower() == 'true'
+
 # Background execution switch - SAFER IMPLEMENTATION
 RUN_IN_BACKGROUND = True  # Set to True to automatically run the process in background
 

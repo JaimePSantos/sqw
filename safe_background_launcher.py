@@ -5,6 +5,22 @@ Simplified background launcher for static_cluster_logged.py
 
 This script provides a more robust way to run the main script in background
 without relying on os.setsid which can cause issues on some systems.
+
+Usage:
+  python safe_background_launcher.py [mode] [options]
+
+Modes:
+  full      - Complete pipeline: samples + analysis + plots + archive
+  samples   - Only compute and save samples (for cluster)
+  analysis  - Only analyze existing samples (for local)  
+  quick     - Quick analysis without archiving
+  headless  - Full pipeline without plotting (for servers)
+
+Options:
+  --no-background  - Run in foreground mode
+  --help          - Show this help message
+
+Note: This launcher will use the parameters (N, samples, etc.) from static_cluster_logged.py
 """
 
 import os
@@ -12,7 +28,80 @@ import sys
 import subprocess
 import time
 
-def launch_background():
+def apply_mode_settings(mode):
+    """Apply mode-specific environment variables to control the main script"""
+    
+    # Define mode configurations
+    modes = {
+        "full": {
+            "CALCULATE_SAMPLES_ONLY": "False",
+            "SKIP_SAMPLE_COMPUTATION": "False", 
+            "ENABLE_PLOTTING": "True",
+            "CREATE_TAR_ARCHIVE": "True"
+        },
+        "samples": {
+            "CALCULATE_SAMPLES_ONLY": "True",
+            "SKIP_SAMPLE_COMPUTATION": "False",
+            "ENABLE_PLOTTING": "False", 
+            "CREATE_TAR_ARCHIVE": "True"
+        },
+        "analysis": {
+            "CALCULATE_SAMPLES_ONLY": "False",
+            "SKIP_SAMPLE_COMPUTATION": "True",
+            "ENABLE_PLOTTING": "True",
+            "CREATE_TAR_ARCHIVE": "True"
+        },
+        "quick": {
+            "CALCULATE_SAMPLES_ONLY": "False", 
+            "SKIP_SAMPLE_COMPUTATION": "True",
+            "ENABLE_PLOTTING": "True",
+            "CREATE_TAR_ARCHIVE": "False"
+        },
+        "headless": {
+            "CALCULATE_SAMPLES_ONLY": "False",
+            "SKIP_SAMPLE_COMPUTATION": "False", 
+            "ENABLE_PLOTTING": "False",
+            "CREATE_TAR_ARCHIVE": "True"
+        }
+    }
+    
+    if mode not in modes:
+        print(f"Warning: Unknown mode '{mode}', using current script settings")
+        return {}
+    
+    config = modes[mode]
+    print(f"Applying mode '{mode}' settings:")
+    for key, value in config.items():
+        print(f"  {key} = {value}")
+    
+    return config
+
+def show_help():
+    """Show help message"""
+    print("Safe Background Launcher for static_cluster_logged.py")
+    print("=" * 50)
+    print("Usage:")
+    print("  python safe_background_launcher.py [mode] [options]")
+    print()
+    print("Modes:")
+    print("  full      - Complete pipeline: samples + analysis + plots + archive")
+    print("  samples   - Only compute and save samples (for cluster)")
+    print("  analysis  - Only analyze existing samples (for local)")
+    print("  quick     - Quick analysis without archiving")
+    print("  headless  - Full pipeline without plotting (for servers)")
+    print()
+    print("Options:")
+    print("  --no-background  - Run in foreground mode")
+    print("  --help          - Show this help message")
+    print()
+    print("Examples:")
+    print("  python safe_background_launcher.py samples")
+    print("  python safe_background_launcher.py analysis --no-background")
+    print()
+    print("Note: This launcher preserves all parameters (N, samples, devs, etc.)")
+    print("      from the main static_cluster_logged.py file.")
+
+def launch_background(mode_config=None):
     """Launch the main script in background with better compatibility"""
     
     # Get the main script path
@@ -58,6 +147,10 @@ def launch_background():
     env = os.environ.copy()
     env['IS_BACKGROUND_PROCESS'] = '1'
     env['RUN_IN_BACKGROUND'] = 'False'  # Disable the script's own background logic
+    
+    # Apply mode-specific settings if provided
+    if mode_config:
+        env.update(mode_config)
     
     try:
         # Initialize log file
@@ -129,20 +222,70 @@ def launch_background():
         return False
 
 def main():
-    """Main function"""
-    if len(sys.argv) > 1 and sys.argv[1] == "--no-background":
+    """Main function with mode support"""
+    
+    # Parse command line arguments
+    args = sys.argv[1:] if len(sys.argv) > 1 else []
+    
+    mode = None
+    run_foreground = False
+    
+    # Parse arguments
+    for arg in args:
+        if arg == "--help" or arg == "-h":
+            show_help()
+            return
+        elif arg == "--no-background":
+            run_foreground = True
+        elif arg in ["full", "samples", "analysis", "quick", "headless"]:
+            mode = arg
+        else:
+            print(f"Unknown argument: {arg}")
+            show_help()
+            return
+    
+    # Apply mode configuration
+    mode_config = None
+    if mode:
+        mode_config = apply_mode_settings(mode)
+        print()
+    
+    if run_foreground:
         print("Running in foreground mode...")
         # Set environment to disable background execution in main script
         os.environ['RUN_IN_BACKGROUND'] = 'False'
+        
+        # Apply mode settings to environment
+        if mode_config:
+            os.environ.update(mode_config)
+        
         # Run main script directly
-        import static_cluster_logged
+        try:
+            import static_cluster_logged
+            static_cluster_logged.run_static_experiment()
+        except Exception as e:
+            print(f"Error running script: {e}")
+            import traceback
+            traceback.print_exc()
         return
     
-    success = launch_background()
+    # Background execution
+    success = launch_background(mode_config)
     if not success:
         print("\\nFalling back to foreground execution...")
         os.environ['RUN_IN_BACKGROUND'] = 'False'
-        import static_cluster_logged
+        
+        # Apply mode settings to environment
+        if mode_config:
+            os.environ.update(mode_config)
+        
+        try:
+            import static_cluster_logged
+            static_cluster_logged.run_static_experiment()
+        except Exception as e:
+            print(f"Error running script: {e}")
+            import traceback
+            traceback.print_exc()
 
 if __name__ == "__main__":
     main()
