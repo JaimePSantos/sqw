@@ -1,15 +1,22 @@
 #!/usr/bin/env python3
 
 """
-Clean cluster-compatible static noise experiment using the cluster decorator module.
+Static noise experiment for quantum walks.
 
-This version eliminates all duplicate cluster management code by using the cluster_deploy decorator.
+This script runs static noise experiments for quantum walks with configurable parameters.
 
 Now uses smart loading from smart_loading_static module.
 """
 
 import time
 import math
+import numpy as np
+import os
+import sys
+import subprocess
+import signal
+import tarfile
+from datetime import datetime
 
 # Import crash-safe logging decorator
 from logging_module.crash_safe_logging import crash_safe_log
@@ -18,40 +25,34 @@ from logging_module.crash_safe_logging import crash_safe_log
 # CONFIGURATION PARAMETERS
 # ============================================================================
 
-# Cluster module switch
-USE_CLUSTER = True  # Set to False to run locally without cluster deployment
-
 # Plotting switch
 ENABLE_PLOTTING = False  # Set to False to disable plotting
 USE_LOGLOG_PLOT = False  # Set to True to use log-log scale for plotting
+PLOT_FINAL_PROBDIST = False  # Set to True to plot probability distributions at final time step
+SAVE_FIGURES = False  # Set to False to disable saving figures to files
+
+# Archive switch
+CREATE_TAR_ARCHIVE = True  # Set to True to create tar archive of experiments_data_samples folder
+
+# Background execution switch - SAFER IMPLEMENTATION
+RUN_IN_BACKGROUND = True  # Set to True to automatically run the process in background
+BACKGROUND_LOG_FILE = "static_experiment_background.log"  # Log file for background execution
+BACKGROUND_PID_FILE = "static_experiment.pid"  # PID file to track background process
 
 # Experiment parameters
-N = 2000  # System size
+N = 10000  # System size
 steps = N//4  # Time steps
-samples = 10  # Samples per deviation
+samples = 1  # Samples per deviation - increased for smoother curves
 
 # Quantum walk parameters (for static noise, we only need theta)
 theta = math.pi/3  # Base theta parameter for static noise
 initial_state_kwargs = {"nodes": [N//2]}
 
 # List of static noise deviations
-devs = [0, 0.1, 0.5,10,100]
+devs = [0, 0.1, 0.5,1, 10]
 
 # Note: Set USE_LOGLOG_PLOT = True in the plotting configuration above to use log-log scale
 # This is useful for identifying power-law behavior in the standard deviation growth
-
-# ============================================================================
-# CLUSTER DEPLOYMENT SETUP
-# ============================================================================
-
-if USE_CLUSTER:
-    from cluster_module import cluster_deploy
-else:
-    # Mock decorator for local execution
-    def cluster_deploy(**kwargs):
-        def decorator(func):
-            return func
-        return decorator
 
 # ============================================================================
 # STANDARD DEVIATION DATA MANAGEMENT
@@ -83,7 +84,7 @@ def create_or_load_std_data(mean_results, devs, N, steps, tesselation_func, std_
     )
     from smart_loading_static import get_experiment_dir
     
-    print(f"\n📊 Managing standard deviation data in '{std_base_dir}'...")
+    print(f"\n[DATA] Managing standard deviation data in '{std_base_dir}'...")
     
     # Create base directory for std data
     os.makedirs(std_base_dir, exist_ok=True)
@@ -107,14 +108,14 @@ def create_or_load_std_data(mean_results, devs, N, steps, tesselation_func, std_
             try:
                 with open(std_filepath, 'rb') as f:
                     std_values = pickle.load(f)
-                print(f"  ✅ Loaded std data for dev {dev:.3f}")
+                print(f"  [OK] Loaded std data for dev {dev:.3f}")
                 stds.append(std_values)
                 continue
             except Exception as e:
-                print(f"  ⚠️  Could not load std data for dev {dev:.3f}: {e}")
+                print(f"  [WARNING] Could not load std data for dev {dev:.3f}: {e}")
         
         # Compute std data from mean probability distributions
-        print(f"  🔄 Computing std data for dev {dev:.3f}...")
+        print(f"  [COMPUTING] Computing std data for dev {dev:.3f}...")
         try:
             # Get mean probability distributions for this deviation
             if mean_results and i < len(mean_results) and mean_results[i]:
@@ -129,38 +130,213 @@ def create_or_load_std_data(mean_results, devs, N, steps, tesselation_func, std_
                         pickle.dump(std_values, f)
                     
                     stds.append(std_values)
-                    print(f"  ✅ Computed and saved std data for dev {dev:.3f} (final std = {std_values[-1]:.3f})")
+                    print(f"  [OK] Computed and saved std data for dev {dev:.3f} (final std = {std_values[-1]:.3f})")
                 else:
-                    print(f"  ❌ No valid probability distributions found for dev {dev:.3f}")
+                    print(f"  [ERROR] No valid probability distributions found for dev {dev:.3f}")
                     stds.append([])
             else:
-                print(f"  ❌ No mean results available for dev {dev:.3f}")
+                print(f"  [ERROR] No mean results available for dev {dev:.3f}")
                 stds.append([])
                 
         except Exception as e:
-            print(f"  ❌ Error computing std data for dev {dev:.3f}: {e}")
+            print(f"  [ERROR] Error computing std data for dev {dev:.3f}: {e}")
             stds.append([])
     
-    print(f"✅ Standard deviation data management completed!")
+    print(f"[OK] Standard deviation data management completed!")
     return stds
 
+def create_experiment_archive(N, samples):
+    """Create a tar archive of experiment data folders for the specific N value."""
+    try:
+        print("\n[ARCHIVE] Creating tar archive of experiment data...")
+        
+        # Create archive filename with timestamp, N, and samples
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        archive_name = f"experiments_data_samples_N{N}_samples{samples}_{timestamp}.tar.gz"
+        
+        # Check if the experiments_data_samples folder exists
+        data_folder = "experiments_data_samples"
+        if not os.path.exists(data_folder):
+            print(f"[WARNING] Data folder '{data_folder}' not found - skipping archive creation")
+            return
+        
+        n_folder_name = f"N_{N}"
+        folders_to_archive = []
+        
+        # Find all folders containing N_{N} folders
+        print(f"[ARCHIVE] Looking for folders containing '{n_folder_name}'...")
+        
+        for root, dirs, files in os.walk(data_folder):
+            if n_folder_name in dirs:
+                # Get the relative path from experiments_data_samples
+                relative_root = os.path.relpath(root, data_folder)
+                if relative_root == ".":
+                    folder_path = n_folder_name
+                else:
+                    folder_path = os.path.join(relative_root, n_folder_name)
+                
+                full_path = os.path.join(data_folder, folder_path)
+                folders_to_archive.append((full_path, folder_path))
+                print(f"  Found: {folder_path}")
+        
+        if not folders_to_archive:
+            print(f"[WARNING] No folders found containing '{n_folder_name}' - skipping archive creation")
+            return
+        
+        # Create the tar archive with only N-specific folders
+        with tarfile.open(archive_name, "w:gz") as tar:
+            # Add the base experiments_data_samples structure but only with N-specific content
+            for full_path, archive_path in folders_to_archive:
+                tar.add(full_path, arcname=os.path.join("experiments_data_samples", archive_path))
+        
+        # Get archive size
+        archive_size = os.path.getsize(archive_name)
+        size_mb = archive_size / (1024 * 1024)
+        
+        print(f"[OK] Archive created: {archive_name} ({size_mb:.1f} MB)")
+        print(f"[OK] Archived {len(folders_to_archive)} folders containing N={N} data")
+        
+    except Exception as e:
+        print(f"[ERROR] Failed to create archive: {e}")
+        import traceback
+        traceback.print_exc()
+
 # @crash_safe_log(log_file_prefix="static_noise_experiment", heartbeat_interval=30.0)
-@cluster_deploy(
-    experiment_name="static_noise",
-    noise_type="static_noise",
-    N=N,
-    samples=samples
-)
 def run_static_experiment():
     """Run the static noise quantum walk experiment with immediate saving."""
     
-    # Import after cluster environment is set up
-    try:
-        import numpy as np
-        import networkx as nx
-        import pickle
-        import os
+    # Import required modules at the top
+    import numpy as np
+    import networkx as nx
+    import pickle
+    
+    # SAFE Background execution handling
+    if RUN_IN_BACKGROUND and not os.environ.get('IS_BACKGROUND_PROCESS'):
+        print("Starting SAFE background execution...")
         
+        try:
+            script_path = os.path.abspath(__file__)
+            python_executable = r"C:\Users\jaime\anaconda3\envs\QWAK2\python.exe"
+            
+            # Create environment for subprocess that prevents recursion
+            env = os.environ.copy()
+            env['IS_BACKGROUND_PROCESS'] = '1'  # This prevents infinite recursion
+            
+            # Create log and PID file paths
+            log_file_path = os.path.join(os.getcwd(), BACKGROUND_LOG_FILE)
+            pid_file_path = os.path.join(os.getcwd(), BACKGROUND_PID_FILE)
+            
+            # Check if there's already a background process running
+            if os.path.exists(pid_file_path):
+                try:
+                    with open(pid_file_path, 'r') as f:
+                        old_pid = int(f.read().strip())
+                    
+                    # Check if the old process is still running
+                    if os.name == 'nt':  # Windows
+                        result = subprocess.run(["tasklist", "/FI", f"PID eq {old_pid}"], 
+                                              capture_output=True, text=True)
+                        if str(old_pid) in result.stdout:
+                            print(f"Background process already running (PID: {old_pid})")
+                            print(f"   Kill it first with: taskkill /F /PID {old_pid}")
+                            return
+                    else:  # Unix-like
+                        try:
+                            os.kill(old_pid, 0)  # Check if process exists
+                            print(f"Background process already running (PID: {old_pid})")
+                            print(f"   Kill it first with: kill {old_pid}")
+                            return
+                        except OSError:
+                            pass  # Process doesn't exist, continue
+                            
+                except (ValueError, OSError):
+                    pass  # Invalid PID file, continue
+            
+            print("Starting background process...")
+            
+            # Initialize log file
+            with open(log_file_path, 'w') as log_file:
+                log_file.write(f"Background execution started at {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
+                log_file.write(f"Command: {python_executable} {script_path}\n")
+                log_file.write("=" * 50 + "\n\n")
+            
+            if os.name == 'nt':  # Windows - SAFE METHOD
+                # Use subprocess.Popen with proper flags to avoid process spam
+                with open(log_file_path, 'a') as log_file:
+                    process = subprocess.Popen(
+                        [python_executable, "-u", script_path],  # -u for unbuffered output
+                        env=env,
+                        cwd=os.getcwd(),
+                        stdout=log_file,
+                        stderr=subprocess.STDOUT,
+                        creationflags=subprocess.CREATE_NO_WINDOW  # Don't create visible window
+                    )
+                
+                # Save PID for cleanup
+                with open(pid_file_path, 'w') as pid_file:
+                    pid_file.write(str(process.pid))
+                
+                print(f"Background process started safely (PID: {process.pid})")
+                
+            else:  # Unix-like systems - SAFE METHOD
+                # Use nohup for proper background execution
+                with open(log_file_path, 'a') as log_file:
+                    process = subprocess.Popen(
+                        ["nohup", python_executable, "-u", script_path],  # -u for unbuffered output
+                        env=env,
+                        cwd=os.getcwd(),
+                        stdout=log_file,
+                        stderr=subprocess.STDOUT,
+                        preexec_fn=os.setsid  # Create new session
+                    )
+                
+                # Save PID for cleanup
+                with open(pid_file_path, 'w') as pid_file:
+                    pid_file.write(str(process.pid))
+                
+                print(f"Background process started safely (PID: {process.pid})")
+            
+            print(f"Output logged to: {log_file_path}")
+            print(f"Process ID saved to: {pid_file_path}")
+            print("\n" + "="*50)
+            print("SAFE BACKGROUND PROCESS STARTED")
+            print("   Monitor with: Get-Content " + BACKGROUND_LOG_FILE + " -Wait")
+            print("   Kill with: taskkill /F /PID <pid>")
+            print("="*50)
+            
+            return  # Exit the foreground process
+            
+        except Exception as e:
+            print(f"Error starting background process: {e}")
+            print("   Falling back to foreground execution...")
+    
+    # Check if we're the background process
+    if os.environ.get('IS_BACKGROUND_PROCESS'):
+        print("Running in SAFE background mode...")
+        print(f"   Process ID: {os.getpid()}")
+        print(f"   Start time: {time.strftime('%Y-%m-%d %H:%M:%S')}")
+        
+        # Set up clean signal handlers for graceful shutdown
+        def cleanup_and_exit(signum, frame):
+            print(f"\nReceived signal {signum}, cleaning up...")
+            try:
+                pid_file_path = os.path.join(os.getcwd(), BACKGROUND_PID_FILE)
+                if os.path.exists(pid_file_path):
+                    os.remove(pid_file_path)
+                    print("Cleaned up PID file")
+            except Exception as e:
+                print(f"Warning during cleanup: {e}")
+            print("Background process exiting cleanly")
+            sys.exit(0)
+        
+        # Register signal handlers
+        signal.signal(signal.SIGINT, cleanup_and_exit)
+        signal.signal(signal.SIGTERM, cleanup_and_exit)
+        if hasattr(signal, 'SIGBREAK'):  # Windows
+            signal.signal(signal.SIGBREAK, cleanup_and_exit)
+    
+    # Import additional required modules
+    try:
         # For static noise, we don't need tesselations module since it's built-in
         from sqw.experiments_expanded_static import running
         from sqw.states import uniform_initial_state, amp2prob
@@ -180,8 +356,8 @@ def run_static_experiment():
 
     print("Starting static noise quantum walk experiment...")
     
-    print(f"Cluster-optimized parameters: N={N}, steps={steps}, samples={samples}")
-    print("🚀 IMMEDIATE SAVE MODE: Each sample will be saved as soon as it's computed!")
+    print(f"Experiment parameters: N={N}, steps={steps}, samples={samples}")
+    print("IMMEDIATE SAVE MODE: Each sample will be saved as soon as it's computed!")
     
     # Start timing the main experiment
     start_time = time.time()
@@ -220,11 +396,11 @@ def run_static_experiment():
                     break
             
             if sample_exists:
-                print(f"  ✅ Sample {sample_idx+1}/{samples} already exists, skipping")
+                print(f"  [OK] Sample {sample_idx+1}/{samples} already exists, skipping")
                 completed_samples += 1
                 continue
             
-            print(f"  🔄 Computing sample {sample_idx+1}/{samples}...")
+            print(f"  [COMPUTING] Computing sample {sample_idx+1}/{samples}...")
             
             # For static noise, we don't need to generate angle sequences
             # The noise is applied internally by the running function
@@ -262,19 +438,19 @@ def run_static_experiment():
             estimated_total_time = elapsed_time * total_samples / completed_samples if completed_samples > 0 else 0
             remaining_time = estimated_total_time - elapsed_time if estimated_total_time > elapsed_time else 0
             
-            print(f"  ✅ Sample {sample_idx+1}/{samples} saved in {sample_time:.1f}s")
+            print(f"  [OK] Sample {sample_idx+1}/{samples} saved in {sample_time:.1f}s")
             print(f"     Progress: {completed_samples}/{total_samples} ({progress_pct:.1f}%)")
             print(f"     Elapsed: {elapsed_time:.1f}s, Remaining: ~{remaining_time:.1f}s")
         
         dev_time = time.time() - dev_start_time
-        print(f"✅ Static noise deviation {dev:.4f} completed: {dev_computed_samples} new samples in {dev_time:.1f}s")
+        print(f"[OK] Static noise deviation {dev:.4f} completed: {dev_computed_samples} new samples in {dev_time:.1f}s")
 
     experiment_time = time.time() - start_time
-    print(f"\n🎉 All samples completed in {experiment_time:.2f} seconds")
+    print(f"\n[COMPLETED] All samples completed in {experiment_time:.2f} seconds")
     print(f"Total samples computed: {completed_samples}")
     
     # Smart load or create mean probability distributions
-    print("\n📊 Smart loading/creating mean probability distributions...")
+    print("\n[DATA] Smart loading/creating mean probability distributions...")
     try:
         mean_results = smart_load_or_create_experiment(
             graph_func=lambda n: None,  # Not used in static noise
@@ -292,10 +468,10 @@ def run_static_experiment():
             samples_base_dir="experiments_data_samples",
             probdist_base_dir="experiments_data_samples_probDist"
         )
-        print("✅ Mean probability distributions ready for analysis")
+        print("[OK] Mean probability distributions ready for analysis")
         
     except Exception as e:
-        print(f"⚠️  Warning: Could not smart load/create mean probability distributions: {e}")
+        print(f"[WARNING] Warning: Could not smart load/create mean probability distributions: {e}")
         mean_results = None
 
     # Create or load standard deviation data
@@ -313,12 +489,12 @@ def run_static_experiment():
                 print(f"Dev {dev:.3f}: No valid standard deviation data")
                 
     except Exception as e:
-        print(f"⚠️  Warning: Could not create/load standard deviation data: {e}")
+        print(f"[WARNING] Warning: Could not create/load standard deviation data: {e}")
         stds = []
 
     # Plot standard deviation vs time if enabled
     if ENABLE_PLOTTING:
-        print("\n📈 Creating standard deviation vs time plot...")
+        print("\n[PLOT] Creating standard deviation vs time plot...")
         try:
             if 'stds' in locals() and len(stds) > 0 and any(len(std) > 0 for std in stds):
                 import matplotlib.pyplot as plt
@@ -361,22 +537,81 @@ def run_static_experiment():
                 plt.legend(fontsize=10)
                 plt.tight_layout()
                 
-                # Save the plot
-                plt.savefig(plot_filename, dpi=300, bbox_inches='tight')
-                print(f"✅ Plot saved as '{plot_filename}'")
+                # Save the plot (if enabled)
+                if SAVE_FIGURES:
+                    plt.savefig(plot_filename, dpi=300, bbox_inches='tight')
+                    print(f"[OK] Plot saved as '{plot_filename}'")
                 
                 # Show the plot
                 plt.show()
                 plot_type = "log-log" if USE_LOGLOG_PLOT else "linear"
-                print(f"✅ Standard deviation plot displayed! (Scale: {plot_type})")
+                saved_status = " and saved" if SAVE_FIGURES else ""
+                print(f"[OK] Standard deviation plot displayed{saved_status}! (Scale: {plot_type})")
             else:
-                print("⚠️  Warning: No standard deviation data available for plotting")
+                print("[WARNING] Warning: No standard deviation data available for plotting")
         except Exception as e:
-            print(f"⚠️  Warning: Could not create plot: {e}")
+            print(f"[WARNING] Warning: Could not create plot: {e}")
             import traceback
             traceback.print_exc()
     else:
-        print("\n📈 Plotting disabled (ENABLE_PLOTTING=False)")
+        print("\n[PLOT] Plotting disabled (ENABLE_PLOTTING=False)")
+
+    # Plot final probability distributions if enabled
+    if ENABLE_PLOTTING and PLOT_FINAL_PROBDIST:
+        print("\n[PLOT] Creating final probability distribution plot...")
+        try:
+            if 'mean_results' in locals() and mean_results and len(mean_results) > 0:
+                import matplotlib.pyplot as plt
+                
+                # Create the plot
+                plt.figure(figsize=(14, 8))
+                
+                # Use the last time step (steps-1)
+                final_step = steps - 1
+                domain = np.arange(N) - N//2  # Center domain around 0
+                
+                for i, (dev_mean_prob_dists, dev) in enumerate(zip(mean_results, devs)):
+                    if dev_mean_prob_dists and len(dev_mean_prob_dists) > final_step and dev_mean_prob_dists[final_step] is not None:
+                        final_prob_dist = dev_mean_prob_dists[final_step].flatten()
+                        
+                        # Plot the probability distribution with log y-axis
+                        plt.semilogy(domain, final_prob_dist, 
+                                   label=f'Static deviation = {dev:.3f}', 
+                                   linewidth=2, alpha=0.8)
+                
+                plt.xlabel('Position', fontsize=12)
+                plt.ylabel('Probability (log scale)', fontsize=12)
+                plt.title(f'Probability Distributions at Final Time Step (t={final_step}) - Log Scale', fontsize=14)
+                plt.xlim(-150, 150)  # Limit x-axis range to -150 to 150
+                plt.ylim(1e-20, None)  # Limit y-axis minimum to 10^-20
+                plt.legend(fontsize=10)
+                plt.grid(True, alpha=0.3)
+                plt.tight_layout()
+                
+                # Save the plot (if enabled)
+                probdist_filename = "static_noise_final_probdist_log.png"
+                if SAVE_FIGURES:
+                    plt.savefig(probdist_filename, dpi=300, bbox_inches='tight')
+                    print(f"[OK] Probability distribution plot saved as '{probdist_filename}'")
+                
+                # Show the plot
+                plt.show()
+                saved_status = " and saved" if SAVE_FIGURES else ""
+                print(f"[OK] Final probability distribution plot displayed{saved_status}!")
+            else:
+                print("[WARNING] Warning: No mean probability distribution data available for plotting")
+        except Exception as e:
+            print(f"[WARNING] Warning: Could not create probability distribution plot: {e}")
+            import traceback
+            traceback.print_exc()
+    elif not ENABLE_PLOTTING:
+        print("\n[PLOT] Probability distribution plotting disabled (ENABLE_PLOTTING=False)")
+    else:
+        print("\n[PLOT] Final probability distribution plotting disabled (PLOT_FINAL_PROBDIST=False)")
+
+    # Create tar archive if enabled
+    if CREATE_TAR_ARCHIVE:
+        create_experiment_archive(N, samples)
 
     print("Static noise experiment completed successfully!")
     total_time = time.time() - start_time
@@ -401,13 +636,31 @@ def run_static_experiment():
     
     print("\n=== Plotting Features ===")
     print(f"- Plotting enabled: {ENABLE_PLOTTING}")
+    print(f"- Save figures to files: {SAVE_FIGURES}")
     if ENABLE_PLOTTING:
         plot_type = "Log-log scale" if USE_LOGLOG_PLOT else "Linear scale"
         plot_filename = "static_noise_std_vs_time_loglog.png" if USE_LOGLOG_PLOT else "static_noise_std_vs_time.png"
-        print(f"- Plot type: {plot_type}")
-        print(f"- Plot saved as: {plot_filename}")
+        print(f"- Standard deviation plot type: {plot_type}")
+        if SAVE_FIGURES:
+            print(f"- Standard deviation plot saved as: {plot_filename}")
         if USE_LOGLOG_PLOT:
-            print("- Log-log plots help identify power-law scaling behavior σ(t) ∝ t^α")
+            print("- Log-log plots help identify power-law scaling behavior sigma(t) proportional to t^alpha")
+        
+        print(f"- Final probability distribution plot enabled: {PLOT_FINAL_PROBDIST}")
+        if PLOT_FINAL_PROBDIST:
+            if SAVE_FIGURES:
+                print("- Final probability distribution plot saved as: static_noise_final_probdist_log.png")
+            print("- Shows probability distributions at the final time step for all deviations")
+            print("- Uses log scale for y-axis and focuses on position range -150 to +150")
+    
+    print("\n=== Archive Features ===")
+    print(f"- Create tar archive: {CREATE_TAR_ARCHIVE}")
+    if CREATE_TAR_ARCHIVE:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        archive_name = f"experiments_data_samples_N{N}_samples{samples}_{timestamp}.tar.gz"
+        print(f"- Archive will be saved as: experiments_data_samples_N{N}_samples{samples}_[timestamp].tar.gz")
+        print(f"- Archive contains only N={N} folders and their parent directory structure")
+        print("- This selective archiving reduces file size compared to archiving all N values")
     
     return {
         "devs": devs,

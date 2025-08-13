@@ -2,7 +2,14 @@
 
 ## 📋 **COMPACT SUMMARY - Recent Major Achievements**
 
-### 🔧 **Static Noise Infrastructure & Log-Log Plotting** (August 12, 2025)
+### �️ **Unicode Fixes, Figure Controls & Selective Archiving** (August 13, 2025)
+- **Unicode Encoding Fixes**: Resolved all Windows console encoding errors by replacing Unicode emojis with ASCII alternatives across all files
+- **Background Logging Fix**: Fixed Python output buffering in background processes by adding `-u` (unbuffered) flag to subprocess calls
+- **Figure Saving Toggle**: Added `SAVE_FIGURES` configuration parameter to independently control plot display vs file saving
+- **Selective Archiving**: Implemented `CREATE_TAR_ARCHIVE` toggle with smart N-specific folder archiving (only archives folders containing current N value)
+- **Real-time Monitoring**: Restored proper real-time logging for background processes, enabling live experiment monitoring
+
+### �🔧 **Static Noise Infrastructure & Log-Log Plotting** (August 12, 2025)
 - **Static Smart Loading**: Adapted smart loading system to work with `experiments_expanded_static` interface and built-in tessellations
 - **Static Cluster Framework**: Created `static_cluster_clean.py` with full cluster deployment support for static noise experiments
 - **Log-Log Plotting**: Added `USE_LOGLOG_PLOT` parameter for power-law analysis in quantum walk standard deviation growth

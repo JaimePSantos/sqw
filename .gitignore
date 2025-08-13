@@ -197,3 +197,6 @@ experiments_data*
 sqw/__pycache__
 **/*.logs
 **/logs/*
+*.pid
+*.png
+*.tar

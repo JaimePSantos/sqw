@@ -525,7 +525,7 @@ def create_mean_probability_distributions(
                 # Convert quantum states to probability distributions with memory optimization
                 prob_distributions = []
                 for i, state in enumerate(sample_states):
-                    prob_dist = amp2prob(state)  # |amplitude|²
+                    prob_dist = amp2prob(state)  # |amplitude|^2
                     prob_distributions.append(prob_dist)
                     # Clear state from memory to save RAM
                     sample_states[i] = None
@@ -684,7 +684,7 @@ def smart_load_or_create_experiment(
     # Step 1: Try to load mean probability distributions
     print("Step 1: Checking for existing mean probability distributions...")
     if check_mean_probability_distributions_exist(tesselation_func, N, steps, parameter_list, probdist_base_dir, noise_type):
-        print("✅ Found existing mean probability distributions - loading directly!")
+        print("[OK] Found existing mean probability distributions - loading directly!")
         result = load_mean_probability_distributions(tesselation_func, N, steps, parameter_list, probdist_base_dir, noise_type)
         elapsed = time.time() - start_time
         print(f"Smart loading completed in {elapsed:.1f}s (probability distributions path)")
@@ -720,11 +720,11 @@ def smart_load_or_create_experiment(
                 break
         
         if sample_files_exist:
-            print("✅ Found existing sample data - creating probability distributions...")
+            print("[OK] Found existing sample data - creating probability distributions...")
             create_mean_probability_distributions(tesselation_func, N, steps, parameter_list, samples, samples_base_dir, probdist_base_dir, noise_type)
             result = load_mean_probability_distributions(tesselation_func, N, steps, parameter_list, probdist_base_dir, noise_type)
             elapsed = time.time() - start_time
-            print(f"Smart loading completed in {elapsed:.1f}s (samples → probabilities path)")
+            print(f"Smart loading completed in {elapsed:.1f}s (samples -> probabilities path)")
             return result
     
     # Step 3: No existing data found - run new experiment
