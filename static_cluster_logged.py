@@ -27,6 +27,7 @@ import sys
 import subprocess
 import signal
 import tarfile
+import traceback
 from datetime import datetime
 
 # Import crash-safe logging decorator
@@ -189,6 +190,8 @@ def create_experiment_archive(N, samples):
             print(f"[WARNING] Data folder '{data_folder}' not found - skipping archive creation")
             return
         
+        print(f"[ARCHIVE] Data folder found: {os.path.abspath(data_folder)}")
+        
         n_folder_name = f"N_{N}"
         folders_to_archive = []
         
@@ -210,12 +213,32 @@ def create_experiment_archive(N, samples):
         
         if not folders_to_archive:
             print(f"[WARNING] No folders found containing '{n_folder_name}' - skipping archive creation")
+            print(f"[DEBUG] Directory contents of {data_folder}:")
+            try:
+                for item in os.listdir(data_folder):
+                    item_path = os.path.join(data_folder, item)
+                    if os.path.isdir(item_path):
+                        print(f"  Directory: {item}")
+                        # List subdirectories to see if N_ folders exist deeper
+                        try:
+                            subdirs = [d for d in os.listdir(item_path) if os.path.isdir(os.path.join(item_path, d))]
+                            if subdirs:
+                                print(f"    Subdirs: {subdirs}")
+                        except:
+                            pass
+                    else:
+                        print(f"  File: {item}")
+            except Exception as e:
+                print(f"  Error listing directory: {e}")
             return
+        
+        print(f"[ARCHIVE] Creating archive: {archive_name}")
         
         # Create the tar archive with only N-specific folders
         with tarfile.open(archive_name, "w:gz") as tar:
             # Add the base experiments_data_samples structure but only with N-specific content
             for full_path, archive_path in folders_to_archive:
+                print(f"  Adding to archive: {archive_path}")
                 tar.add(full_path, arcname=os.path.join("experiments_data_samples", archive_path))
         
         # Get archive size
@@ -224,10 +247,10 @@ def create_experiment_archive(N, samples):
         
         print(f"[OK] Archive created: {archive_name} ({size_mb:.1f} MB)")
         print(f"[OK] Archived {len(folders_to_archive)} folders containing N={N} data")
+        print(f"[OK] Archive location: {os.path.abspath(archive_name)}")
         
     except Exception as e:
         print(f"[ERROR] Failed to create archive: {e}")
-        import traceback
         traceback.print_exc()
 
 # @crash_safe_log(log_file_prefix="static_noise_experiment", heartbeat_interval=30.0)
@@ -591,7 +614,14 @@ def run_static_experiment():
     # Early exit if only computing samples
     if CALCULATE_SAMPLES_ONLY:
         print("\n=== SAMPLES ONLY MODE - ANALYSIS SKIPPED ===")
-        print("Sample computation completed. Skipping analysis, plotting, and archiving.")
+        print("Sample computation completed. Skipping analysis and plotting.")
+        
+        # Create tar archive if enabled (even in samples-only mode)
+        if CREATE_TAR_ARCHIVE:
+            create_experiment_archive(N, samples)
+        else:
+            print("Archiving disabled (CREATE_TAR_ARCHIVE=False)")
+        
         print("To run analysis on existing samples, set:")
         print("  CALCULATE_SAMPLES_ONLY = False")
         print("  SKIP_SAMPLE_COMPUTATION = True")
