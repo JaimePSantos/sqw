@@ -72,7 +72,7 @@ BACKGROUND_PID_FILE = "static_experiment.pid"  # PID file to track background pr
 # Experiment parameters
 N = 20000  # System size
 steps = N//4  # Time steps
-samples = 5  # Samples per deviation - increased for smoother curves
+samples = 1  # Samples per deviation - increased for smoother curves
 
 # Quantum walk parameters (for static noise, we only need theta)
 theta = math.pi/3  # Base theta parameter for static noise
