@@ -475,6 +475,18 @@ def create_mean_probability_distributions(
     Convert each sample to probability distribution and create mean probability distributions
     for each step, saving them to a new folder structure.
     """
+    import os
+    
+    # Check for forced sample count override
+    if os.environ.get('FORCE_SAMPLES_COUNT'):
+        try:
+            forced_samples = int(os.environ.get('FORCE_SAMPLES_COUNT'))
+            if samples != forced_samples:
+                print(f"🔒 FORCED: Using only {forced_samples} samples instead of {samples}")
+                samples = forced_samples
+        except ValueError:
+            pass
+    
     print(f"Creating mean probability distributions for {len(devs)} devs, {steps} steps, {samples} samples each...")
     total_start_time = time.time()
     
@@ -678,7 +690,19 @@ def smart_load_or_create_experiment(
     
     Returns: mean_probability_distributions [parameter][step] -> probability_distribution
     """
-    print(f"Smart loading for {len(parameter_list)} {parameter_name} values...")
+    import os
+    
+    # Check for forced sample count override
+    if os.environ.get('FORCE_SAMPLES_COUNT'):
+        try:
+            forced_samples = int(os.environ.get('FORCE_SAMPLES_COUNT'))
+            if samples != forced_samples:
+                print(f"🔒 FORCED: Overriding samples from {samples} to {forced_samples}")
+                samples = forced_samples
+        except ValueError:
+            pass
+    
+    print(f"Smart loading for {len(parameter_list)} {parameter_name} values with {samples} samples...")
     start_time = time.time()
     
     # Step 1: Try to load mean probability distributions

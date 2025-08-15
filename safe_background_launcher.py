@@ -103,6 +103,35 @@ def show_help():
     print("Note: This launcher preserves all parameters (N, samples, devs, etc.)")
     print("      from the main static_cluster_logged.py file.")
 
+def get_script_parameters():
+    """Read parameters from static_cluster_logged.py"""
+    try:
+        # Import the main script to get current parameters
+        import static_cluster_logged
+        # Force reload to get latest values
+        import importlib
+        importlib.reload(static_cluster_logged)
+        
+        params = {
+            'N': getattr(static_cluster_logged, 'N', 20000),
+            'samples': getattr(static_cluster_logged, 'samples', 1),
+            'steps': getattr(static_cluster_logged, 'steps', None),
+            'devs': getattr(static_cluster_logged, 'devs', []),
+            'theta': getattr(static_cluster_logged, 'theta', None)
+        }
+        
+        print(f"Current parameters from static_cluster_logged.py:")
+        print(f"  N = {params['N']}")
+        print(f"  samples = {params['samples']}")
+        print(f"  steps = {params['steps']}")
+        print(f"  devs = {params['devs']}")
+        print(f"  theta = {params['theta']}")
+        
+        return params
+    except Exception as e:
+        print(f"Warning: Could not read parameters from static_cluster_logged.py: {e}")
+        return None
+
 def launch_background(mode_config=None, force=False):
     """Launch the main script in background with better compatibility"""
     
@@ -111,6 +140,13 @@ def launch_background(mode_config=None, force=False):
     if not os.path.exists(main_script):
         print(f"Error: {main_script} not found in current directory")
         return False
+    
+    # Read current parameters from the script
+    params = get_script_parameters()
+    if params:
+        print(f"\n🔧 Using parameters: N={params['N']}, samples={params['samples']}")
+    else:
+        print("\n⚠️  Could not read parameters - using script defaults")
     
     # Use current Python executable
     python_exe = sys.executable
@@ -203,6 +239,12 @@ def launch_background(mode_config=None, force=False):
     # Apply mode-specific settings if provided
     if mode_config:
         env.update(mode_config)
+    
+    # Force current parameters from script (override any cached/existing data behavior)
+    if params:
+        env['FORCE_SAMPLES_COUNT'] = str(params['samples'])
+        env['FORCE_N_VALUE'] = str(params['N'])
+        print(f"🔒 Forcing parameters: samples={params['samples']}, N={params['N']}")
     
     try:
         # Initialize log file
