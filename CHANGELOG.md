@@ -2,7 +2,17 @@
 
 ## 📋 **COMPACT SUMMARY - Recent Major Achievements**
 
-### �️ **Unicode Fixes, Figure Controls & Selective Archiving** (August 13, 2025)
+### 🚀 **Multiprocessing Static Noise Experiments** (August 15, 2025)
+- **Multiprocessing Implementation**: Created `static_cluster_logged_mp.py` with concurrent processing of deviation values using ProcessPoolExecutor
+- **Enhanced Logging System**: Implemented dual logging architecture with master process logger and individual process loggers for comprehensive tracking
+- **Parameter Override System**: Unified parameter configuration with environment variable forcing (FORCE_SAMPLES_COUNT, FORCE_N_VALUE) for cluster deployment
+- **Smart Loading Integration**: Fixed sample count discrepancy issue where smart loading used cached 20-sample data instead of configured 1 sample
+- **Concurrent Process Management**: Each deviation value runs in separate process with individual log files and error handling
+- **Performance Optimization**: Parallel processing of 5 deviation values (0, 0.1, 0.5, 1, 10) with automatic CPU scaling and process coordination
+- **Background Launcher Enhancement**: Updated `safe_background_launcher.py` to read script parameters dynamically and inject environment overrides
+- **Customizable Deviation Lists**: Added manual deviation list specification with automatic process scaling based on list length
+
+### 🛠️ **Unicode Fixes, Figure Controls & Selective Archiving** (August 13, 2025)
 - **Unicode Encoding Fixes**: Resolved all Windows console encoding errors by replacing Unicode emojis with ASCII alternatives across all files
 - **Background Logging Fix**: Fixed Python output buffering in background processes by adding `-u` (unbuffered) flag to subprocess calls
 - **Figure Saving Toggle**: Added `SAVE_FIGURES` configuration parameter to independently control plot display vs file saving
