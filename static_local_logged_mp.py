@@ -82,15 +82,15 @@ BACKGROUND_LOG_FILE = "static_experiment_background.log"  # Log file for backgro
 BACKGROUND_PID_FILE = "static_experiment.pid"  # PID file to track background process
 
 # Experiment parameters
-N = 102  # System size
+N = 10000  # System size
 steps = N//4  # Time steps - now we can handle the full computation with streaming
-samples = 65  # Samples per deviation - changed from 1 to 5
+samples = 20  # Samples per deviation - changed from 1 to 5
 
 # Memory management warning (updated for streaming)
-print(f"📊 COMPUTATION SCALE: N={N}, steps={steps}, samples={samples}")
-print(f"🔧 STREAMING MODE: Memory-efficient computation saves states incrementally")
+print(f"[INFO] COMPUTATION SCALE: N={N}, steps={steps}, samples={samples}")
+print(f"[INFO] STREAMING MODE: Memory-efficient computation saves states incrementally")
 if N > 10000 and steps > 1000:
-    print(f"⚠️  LARGE COMPUTATION: This will take significant time but use reasonable memory")
+    print(f"[WARNING]  LARGE COMPUTATION: This will take significant time but use reasonable memory")
     print("   Streaming approach keeps memory usage low regardless of problem size")
     print("   Each process uses ~100MB instead of several GB")
 
@@ -98,7 +98,7 @@ if N > 10000 and steps > 1000:
 if os.environ.get('FORCE_SAMPLES_COUNT'):
     try:
         forced_samples = int(os.environ.get('FORCE_SAMPLES_COUNT'))
-        print(f"🔒 FORCED: Using samples = {forced_samples} (launcher override)")
+        print(f"[FORCED] Using samples = {forced_samples} (launcher override)")
         samples = forced_samples
     except ValueError:
         pass
@@ -106,7 +106,7 @@ if os.environ.get('FORCE_SAMPLES_COUNT'):
 if os.environ.get('FORCE_N_VALUE'):
     try:
         forced_N = int(os.environ.get('FORCE_N_VALUE'))
-        print(f"🔒 FORCED: Using N = {forced_N} (launcher override)")
+        print(f"[FORCED] Using N = {forced_N} (launcher override)")
         N = forced_N
         steps = N//4  # Recalculate steps
     except ValueError:
@@ -120,12 +120,17 @@ initial_state_kwargs = {"nodes": [N//2]}
 # CUSTOMIZE THIS LIST: Add or remove deviation values as needed
 # Format: For tuples (max_dev, min_factor), min_dev = max_dev * min_factor
 # For single values, use old-style format for backward compatibility
+# devs = [
+#     0,              # No noise
+#     (theta/5, 0.1),     # max_dev=0.1, min_dev=0.01 (range [0.01, 0.1])
+#     (theta/2, 0.2),     # max_dev=0.5, min_dev=0.1 (range [0.1, 0.5]) 
+#     (theta, 0.5),     # max_dev=1.0, min_dev=0.5 (range [0.5, 1.0])
+#     (2*theta, 0.5)     # max_dev=10.0, min_dev=1.0 (range [1.0, 10.0])
+# ]
+
 devs = [
     0,              # No noise
-    (0.1, 0.1),     # max_dev=0.1, min_dev=0.01 (range [0.01, 0.1])
-    (0.5, 0.2),     # max_dev=0.5, min_dev=0.1 (range [0.1, 0.5]) 
-    (1.0, 0.5),     # max_dev=1.0, min_dev=0.5 (range [0.5, 1.0])
-    (10.0, 0.1)     # max_dev=10.0, min_dev=1.0 (range [1.0, 10.0])
+    1   # max_dev=10.0, min_dev=1.0 (range [1.0, 10.0])
 ]
 
 # Multiprocessing configuration
@@ -800,10 +805,10 @@ def run_static_experiment():
     print(f"  Traditional approach would need: ~{(steps * N * 16 * 2 * MAX_PROCESSES) / (1024 * 1024):.0f} MB")
     
     if total_estimated_memory_mb > 8000:  # This threshold is much less likely to be hit now
-        print("⚠️  WARNING: High memory usage predicted!")
+        print("[WARNING]  WARNING: High memory usage predicted!")
         print("   Consider reducing N or MAX_PROCESSES")
     else:
-        print("✓ Memory usage looks reasonable with streaming approach")
+        print("[OK] Memory usage looks reasonable with streaming approach")
     
     print(f"Experiment parameters: N={N}, steps={steps}, samples={samples}")
     print(f"Multiprocessing: Using up to {MAX_PROCESSES} processes for {len(devs)} deviations")
@@ -903,13 +908,13 @@ def run_static_experiment():
                         if result["success"]:
                             process_info[dev]["status"] = "completed"
                             completed_samples += result["computed_samples"]
-                            master_logger.info(f"✓ Process for dev={dev_display} completed successfully")
+                            master_logger.info(f"[OK] Process for dev={dev_display} completed successfully")
                             master_logger.info(f"  Computed samples: {result['computed_samples']}")
                             master_logger.info(f"  Time: {result['total_time']:.1f}s")
                             master_logger.info(f"  Log file: {result['log_file']}")
                         else:
                             process_info[dev]["status"] = "failed"
-                            master_logger.error(f"✗ Process for dev={dev_display} failed")
+                            master_logger.error(f"[FAILED] Process for dev={dev_display} failed")
                             master_logger.error(f"  Error: {result['error']}")
                             master_logger.error(f"  Log file: {result['log_file']}")
                             
@@ -962,10 +967,10 @@ def run_static_experiment():
             
             if result["success"]:
                 successful_processes += 1
-                master_logger.info(f"  ✓ dev={dev_display}: {result['computed_samples']} samples in {result['total_time']:.1f}s")
+                master_logger.info(f"  [OK] dev={dev_display}: {result['computed_samples']} samples in {result['total_time']:.1f}s")
             else:
                 failed_processes += 1
-                master_logger.error(f"  ✗ dev={dev_display}: FAILED - {result['error']}")
+                master_logger.error(f"  [FAILED] dev={dev_display}: FAILED - {result['error']}")
         
         master_logger.info(f"\nRESULTS: {successful_processes} successful, {failed_processes} failed processes")
         
@@ -1336,8 +1341,16 @@ def run_static_experiment():
     if process_results:
         print("Individual process logs:")
         for result in process_results:
-            status = "✓" if result["success"] else "✗"
-            print(f"  {status} dev={result['dev']:.4f}: {result['log_file']}")
+            status = "[OK]" if result["success"] else "[FAILED]"
+            dev = result['dev']
+            
+            # Format dev for display based on type
+            if isinstance(dev, tuple):
+                dev_display = f"({dev[0]:.4f}, {dev[1]:.4f})"
+            else:
+                dev_display = f"{dev:.4f}"
+            
+            print(f"  {status} dev={dev_display}: {result['log_file']}")
     
     print("\n=== Execution Modes ===")
     print("Available execution phases (can be combined):")

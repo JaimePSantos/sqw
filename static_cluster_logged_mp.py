@@ -73,7 +73,7 @@ BACKGROUND_LOG_FILE = "static_experiment_background.log"  # Log file for backgro
 BACKGROUND_PID_FILE = "static_experiment.pid"  # PID file to track background process
 
 # Experiment parameters
-N = 20000  # System size
+N = 15000  # System size
 steps = N//4  # Time steps - now we can handle the full computation with streaming
 samples = 5  # Samples per deviation - changed from 1 to 5
 
@@ -114,11 +114,11 @@ initial_state_kwargs = {"nodes": [N//2]}
 # 2. Tuple (max_dev, min_factor): devs = [(0.2, 0.3)] - new format (range [max_dev*min_factor, max_dev])
 # 3. Mixed: devs = [0, (0.2, 0.3), 0.5] - can mix formats
 devs = [
-    0,              # No noise (single value format)
-    (0.1, 0.0),     # Range [0.0, 0.1] - equivalent to old 0.1
-    (0.5, 0.8),     # Range [0.1, 0.5] - new format with min factor 0.2
-    (1.0, 0.6),     # Range [0.3, 1.0] - new format with min factor 0.3
-    (2, 0)     # Range [1.0, 10.0] - new format with min factor 0.1
+    0,              # No noise
+    (theta/5, 0.1),     # max_dev=0.1, min_dev=0.01 (range [0.01, 0.1])
+    (theta/2, 0.2),     # max_dev=0.5, min_dev=0.1 (range [0.1, 0.5]) 
+    (theta, 0.5),     # max_dev=1.0, min_dev=0.5 (range [0.5, 1.0])
+    (2*theta, 0.5)     # max_dev=10.0, min_dev=1.0 (range [1.0, 10.0])
 ]
 
 # Multiprocessing configuration
