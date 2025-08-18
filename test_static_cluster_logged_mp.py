@@ -73,17 +73,16 @@ BACKGROUND_LOG_FILE = "static_experiment_background.log"  # Log file for backgro
 BACKGROUND_PID_FILE = "static_experiment.pid"  # PID file to track background process
 
 # Experiment parameters
-N = 20000  # System size
-steps = N//4  # Time steps - now we can handle the full computation with streaming
-samples = 5  # Samples per deviation - changed from 1 to 5
+N = 100  # System size (TEST: reduced for quick test)
+steps = 10  # Time steps (TEST: reduced for quick test)
+samples = 1  # Samples per deviation (TEST: reduced for quick test)
 
-# Memory management warning (updated for streaming)
-print(f"📊 COMPUTATION SCALE: N={N}, steps={steps}, samples={samples}")
-print(f"🔧 STREAMING MODE: Memory-efficient computation saves states incrementally")
-if N > 10000 and steps > 1000:
-    print(f"⚠️  LARGE COMPUTATION: This will take significant time but use reasonable memory")
-    print("   Streaming approach keeps memory usage low regardless of problem size")
-    print("   Each process uses ~100MB instead of several GB")
+# Memory management warning
+if N > 10000 and steps > 500:
+    print(f"⚠️  WARNING: Large computation detected (N={N}, steps={steps})")
+    print("   This may require significant memory and computation time.")
+    print("   Consider reducing N or steps if you encounter memory issues.")
+    print("   Each process may use several GB of RAM.")
 
 # Check for forced parameter overrides from launcher
 if os.environ.get('FORCE_SAMPLES_COUNT'):
@@ -109,21 +108,11 @@ initial_state_kwargs = {"nodes": [N//2]}
 
 # Deviation values for static noise experiments
 # CUSTOMIZE THIS LIST: Add or remove deviation values as needed
-# Format options:
-# 1. Single value: devs = [0, 0.1, 0.5] - backward compatibility (range [0, value])
-# 2. Tuple (max_dev, min_factor): devs = [(0.2, 0.3)] - new format (range [max_dev*min_factor, max_dev])
-# 3. Mixed: devs = [0, (0.2, 0.3), 0.5] - can mix formats
-devs = [
-    0,              # No noise (single value format)
-    (0.1, 0.0),     # Range [0.0, 0.1] - equivalent to old 0.1
-    (0.5, 0.8),     # Range [0.1, 0.5] - new format with min factor 0.2
-    (1.0, 0.6),     # Range [0.3, 1.0] - new format with min factor 0.3
-    (2, 0)     # Range [1.0, 10.0] - new format with min factor 0.1
-]
+devs = [0, 0.1]  # List of static noise deviation values (TEST: reduced for quick test)
 
 # Multiprocessing configuration
-# With streaming approach, memory is no longer the bottleneck, so we can use more processes
-MAX_PROCESSES = min(len(devs), mp.cpu_count())  # Use all available CPUs
+# Reduce max processes to prevent memory exhaustion with large computations
+MAX_PROCESSES = min(len(devs), max(1, mp.cpu_count() // 2))  # Use half available CPUs to prevent memory issues
 PROCESS_LOG_DIR = "process_logs"  # Directory for individual process logs
 
 # ============================================================================
@@ -134,26 +123,10 @@ def setup_process_logging(dev_value, process_id):
     """Setup logging for individual processes"""
     os.makedirs(PROCESS_LOG_DIR, exist_ok=True)
     
-    # Format dev_value for filename (handle both old and new formats)
-    if isinstance(dev_value, str):
-        dev_str = dev_value  # Already formatted as string
-    elif isinstance(dev_value, (tuple, list)) and len(dev_value) == 2:
-        # New format: (max_dev, min_factor) or legacy (min, max)
-        if dev_value[1] <= 1.0 and dev_value[1] >= 0.0:
-            max_dev, min_factor = dev_value
-            min_dev = max_dev * min_factor
-            dev_str = f"max{max_dev:.3f}_min{min_dev:.3f}"
-        else:
-            min_val, max_val = dev_value
-            dev_str = f"min{min_val:.3f}_max{max_val:.3f}"
-    else:
-        # Single value format
-        dev_str = f"{float(dev_value):.3f}"
-    
-    log_filename = os.path.join(PROCESS_LOG_DIR, f"process_dev_{dev_str}_pid_{process_id}.log")
+    log_filename = os.path.join(PROCESS_LOG_DIR, f"process_dev_{dev_value:.3f}_pid_{process_id}.log")
     
     # Create logger for this process
-    logger = logging.getLogger(f"dev_{dev_str}")
+    logger = logging.getLogger(f"dev_{dev_value}")
     logger.setLevel(logging.INFO)
     
     # Remove any existing handlers
@@ -218,16 +191,15 @@ def compute_dev_samples(dev_args):
     """Worker function to compute samples for a single deviation value in a separate process"""
     dev, process_id, N, steps, samples, theta, initial_state_kwargs = dev_args
     
-    # Setup logging for this process - need to format dev for logging
-    dev_str = f"{dev}" if isinstance(dev, (int, float)) else f"{dev[0]}_{dev[1]}" if isinstance(dev, (tuple, list)) else str(dev)
-    logger, log_file = setup_process_logging(dev_str, process_id)
+    # Setup logging for this process
+    logger, log_file = setup_process_logging(dev, process_id)
     
     try:
-        logger.info(f"Starting computation for deviation {dev}")
+        logger.info(f"Starting computation for deviation {dev:.4f}")
         logger.info(f"Parameters: N={N}, steps={steps}, samples={samples}, theta={theta:.4f}")
         
         # Import required modules (each process needs its own imports)
-        from sqw.experiments_expanded_static import running_streaming
+        from sqw.experiments_expanded_static import running
         from smart_loading_static import get_experiment_dir
         import pickle
         import gc  # For garbage collection
@@ -236,25 +208,12 @@ def compute_dev_samples(dev_args):
         def dummy_tesselation_func(N):
             return None
         
-        # Setup experiment directory - handle new deviation format
-        if isinstance(dev, (tuple, list)) and len(dev) == 2:
-            # New format: (max_dev, min_factor) or legacy (min, max)
-            if dev[1] <= 1.0 and dev[1] >= 0.0:
-                # New format
-                max_dev, min_factor = dev
-                has_noise = max_dev > 0
-            else:
-                # Legacy format
-                min_val, max_val = dev
-                has_noise = max_val > 0
-        else:
-            # Single value format
-            has_noise = dev > 0
-        
+        # Setup experiment directory
+        has_noise = dev > 0
         noise_params = [dev] if has_noise else [0]
         exp_dir = get_experiment_dir(dummy_tesselation_func, has_noise, N, 
                                    noise_params=noise_params, noise_type="static_noise", 
-                                   base_dir="experiments_data_samples", theta=theta)
+                                   base_dir="experiments_data_samples")
         os.makedirs(exp_dir, exist_ok=True)
         
         logger.info(f"Experiment directory: {exp_dir}")
@@ -285,37 +244,37 @@ def compute_dev_samples(dev_args):
             # Extract initial nodes from initial_state_kwargs
             initial_nodes = initial_state_kwargs.get('nodes', [])
             
-            # Create step callback function for streaming saves
-            def save_step_callback(step_idx, state):
-                """Callback function to save each step as it's computed"""
-                step_dir = os.path.join(exp_dir, f"step_{step_idx}")
-                os.makedirs(step_dir, exist_ok=True)
-                
-                filename = f"final_step_{step_idx}_sample{sample_idx}.pkl"
-                filepath = os.path.join(step_dir, filename)
-                
-                with open(filepath, 'wb') as f:
-                    pickle.dump(state, f)
-                
-                # Progress logging for large computations
-                if step_idx % 100 == 0 or step_idx == steps:
-                    logger.info(f"    Saved step {step_idx}/{steps}")
-            
-            # Memory-efficient streaming approach
+            # Memory-efficient approach: reduce steps if needed and process immediately
             try:
-                # Run the quantum walk experiment using streaming approach
-                logger.info(f"  Running streaming quantum walk: N={N}, steps={steps}, dev={dev}")
-                
-                final_state = running_streaming(
+                # Run the quantum walk experiment for this sample using static noise
+                logger.info(f"  Running quantum walk: N={N}, steps={steps}, dev={dev}")
+                walk_result = running(
                     N, theta, steps,
                     initial_nodes=initial_nodes,
                     deviation_range=dev,
-                    step_callback=save_step_callback
+                    return_all_states=True
                 )
                 
-                logger.info(f"  Streaming computation completed, all {steps+1} steps saved incrementally")
+                logger.info(f"  Computation completed, saving {len(walk_result)} steps...")
                 
-                # No need to explicitly delete anything - streaming approach doesn't accumulate states
+                # Save each step immediately and free memory
+                for step_idx in range(len(walk_result)):
+                    step_dir = os.path.join(exp_dir, f"step_{step_idx}")
+                    os.makedirs(step_dir, exist_ok=True)
+                    
+                    filename = f"final_step_{step_idx}_sample{sample_idx}.pkl"
+                    filepath = os.path.join(step_dir, filename)
+                    
+                    with open(filepath, 'wb') as f:
+                        pickle.dump(walk_result[step_idx], f)
+                    
+                    # Progress logging for large computations
+                    if step_idx % 100 == 0 or step_idx == len(walk_result) - 1:
+                        logger.info(f"    Saved step {step_idx}/{len(walk_result)}")
+                
+                # Explicitly delete the result to free memory
+                del walk_result
+                logger.info(f"  All steps saved and memory freed")
                 
             except MemoryError as mem_error:
                 logger.error(f"Memory error during computation: {mem_error}")
@@ -334,12 +293,7 @@ def compute_dev_samples(dev_args):
             logger.info(f"Sample {sample_idx+1}/{samples} completed in {sample_time:.1f}s")
         
         dev_time = time.time() - dev_start_time
-        # Format dev for display
-        if isinstance(dev, tuple):
-            dev_str = f"max{dev[0]:.3f}_min{dev[0]*dev[1]:.3f}"
-        else:
-            dev_str = f"{dev:.4f}"
-        logger.info(f"Deviation {dev_str} completed: {dev_computed_samples} samples in {dev_time:.1f}s")
+        logger.info(f"Deviation {dev:.4f} completed: {dev_computed_samples} samples in {dev_time:.1f}s")
         
         return {
             "dev": dev,
@@ -353,12 +307,7 @@ def compute_dev_samples(dev_args):
         
     except Exception as e:
         import traceback
-        # Format dev for display
-        if isinstance(dev, tuple):
-            dev_str = f"max{dev[0]:.3f}_min{dev[0]*dev[1]:.3f}"
-        else:
-            dev_str = f"{dev:.4f}"
-        error_msg = f"Error in process for dev {dev_str}: {str(e)}"
+        error_msg = f"Error in process for dev {dev:.4f}: {str(e)}"
         logger.error(error_msg)
         logger.error(traceback.format_exc())
         
@@ -376,7 +325,7 @@ def compute_dev_samples(dev_args):
 # STANDARD DEVIATION DATA MANAGEMENT
 # ============================================================================
 
-def create_or_load_std_data(mean_results, devs, N, steps, tesselation_func, std_base_dir, noise_type, theta=None):
+def create_or_load_std_data(mean_results, devs, N, steps, tesselation_func, std_base_dir, noise_type):
     """
     Create or load standard deviation data from mean probability distributions.
     
@@ -411,29 +360,12 @@ def create_or_load_std_data(mean_results, devs, N, steps, tesselation_func, std_
     domain = np.arange(N) - N//2  # Center domain around 0
     
     for i, dev in enumerate(devs):
-        # Handle new deviation format for has_noise check
-        if isinstance(dev, (tuple, list)) and len(dev) == 2:
-            # New format: (max_dev, min_factor) or legacy (min, max)
-            if dev[1] <= 1.0 and dev[1] >= 0.0:
-                # New format
-                max_dev, min_factor = dev
-                has_noise = max_dev > 0
-                dev_str = f"max{max_dev:.3f}_min{max_dev * min_factor:.3f}"
-            else:
-                # Legacy format
-                min_val, max_val = dev
-                has_noise = max_val > 0
-                dev_str = f"min{min_val:.3f}_max{max_val:.3f}"
-        else:
-            # Single value format
-            has_noise = dev > 0
-            dev_str = f"{dev:.3f}"
-        
         # Setup std data directory structure for static noise
+        has_noise = dev > 0
         noise_params = [dev] if has_noise else [0]  # Static noise uses single parameter
         std_dir = get_experiment_dir(tesselation_func, has_noise, N, 
                                    noise_params=noise_params, noise_type=noise_type, 
-                                   base_dir=std_base_dir, theta=theta)
+                                   base_dir=std_base_dir)
         os.makedirs(std_dir, exist_ok=True)
         
         std_filepath = os.path.join(std_dir, "std_vs_time.pkl")
@@ -443,14 +375,14 @@ def create_or_load_std_data(mean_results, devs, N, steps, tesselation_func, std_
             try:
                 with open(std_filepath, 'rb') as f:
                     std_values = pickle.load(f)
-                print(f"  [OK] Loaded std data for dev {dev_str}")
+                print(f"  [OK] Loaded std data for dev {dev:.3f}")
                 stds.append(std_values)
                 continue
             except Exception as e:
-                print(f"  [WARNING] Could not load std data for dev {dev_str}: {e}")
+                print(f"  [WARNING] Could not load std data for dev {dev:.3f}: {e}")
         
         # Compute std data from mean probability distributions
-        print(f"  [COMPUTING] Computing std data for dev {dev_str}...")
+        print(f"  [COMPUTING] Computing std data for dev {dev:.3f}...")
         try:
             # Get mean probability distributions for this deviation
             if mean_results and i < len(mean_results) and mean_results[i]:
@@ -465,16 +397,16 @@ def create_or_load_std_data(mean_results, devs, N, steps, tesselation_func, std_
                         pickle.dump(std_values, f)
                     
                     stds.append(std_values)
-                    print(f"  [OK] Computed and saved std data for dev {dev_str} (final std = {std_values[-1]:.3f})")
+                    print(f"  [OK] Computed and saved std data for dev {dev:.3f} (final std = {std_values[-1]:.3f})")
                 else:
-                    print(f"  [ERROR] No valid probability distributions found for dev {dev_str}")
+                    print(f"  [ERROR] No valid probability distributions found for dev {dev:.3f}")
                     stds.append([])
             else:
-                print(f"  [ERROR] No mean results available for dev {dev_str}")
+                print(f"  [ERROR] No mean results available for dev {dev:.3f}")
                 stds.append([])
                 
         except Exception as e:
-            print(f"  [ERROR] Error computing std data for dev {dev_str}: {e}")
+            print(f"  [ERROR] Error computing std data for dev {dev:.3f}: {e}")
             stds.append([])
     
     print(f"[OK] Standard deviation data management completed!")
@@ -810,21 +742,18 @@ def run_static_experiment():
 
     print("Starting static noise quantum walk experiment...")
     
-    # Memory safety check (updated for streaming approach)
-    # With streaming, we only hold one state at a time, not all states
-    estimated_memory_per_process_mb = (N * 16 * 3) / (1024 * 1024)  # ~3 states max (current + temp calculations)
+    # Memory safety check
+    estimated_memory_per_process_mb = (steps * N * 16 * 2) / (1024 * 1024)  # 2x overhead
     total_estimated_memory_mb = estimated_memory_per_process_mb * MAX_PROCESSES
     
-    print(f"Memory estimation (streaming approach):")
-    print(f"  Per process: ~{estimated_memory_per_process_mb:.0f} MB (single state + overhead)")
+    print(f"Memory estimation:")
+    print(f"  Per process: ~{estimated_memory_per_process_mb:.0f} MB")
     print(f"  Total (all processes): ~{total_estimated_memory_mb:.0f} MB")
-    print(f"  Traditional approach would need: ~{(steps * N * 16 * 2 * MAX_PROCESSES) / (1024 * 1024):.0f} MB")
     
-    if total_estimated_memory_mb > 8000:  # This threshold is much less likely to be hit now
+    if total_estimated_memory_mb > 8000:  # 8GB threshold
         print("⚠️  WARNING: High memory usage predicted!")
-        print("   Consider reducing N or MAX_PROCESSES")
-    else:
-        print("✓ Memory usage looks reasonable with streaming approach")
+        print("   Consider reducing N, steps, or MAX_PROCESSES")
+        print("   Current settings may cause system instability")
     
     print(f"Experiment parameters: N={N}, steps={steps}, samples={samples}")
     print(f"Multiprocessing: Using up to {MAX_PROCESSES} processes for {len(devs)} deviations")
@@ -870,21 +799,7 @@ def run_static_experiment():
         # Track process information
         process_info = {}
         for i, (dev, process_id, *_) in enumerate(process_args):
-            # Format dev for filename (handle both old and new formats)
-            if isinstance(dev, (tuple, list)) and len(dev) == 2:
-                # New format: (max_dev, min_factor) or legacy (min, max)
-                if dev[1] <= 1.0 and dev[1] >= 0.0:
-                    max_dev, min_factor = dev
-                    min_dev = max_dev * min_factor
-                    dev_str = f"max{max_dev:.3f}_min{min_dev:.3f}"
-                else:
-                    min_val, max_val = dev
-                    dev_str = f"min{min_val:.3f}_max{max_val:.3f}"
-            else:
-                # Single value format
-                dev_str = f"{float(dev):.3f}"
-                
-            log_file = os.path.join(PROCESS_LOG_DIR, f"process_dev_{dev_str}_pid_{process_id}.log")
+            log_file = os.path.join(PROCESS_LOG_DIR, f"process_dev_{dev:.3f}_pid_{process_id}.log")
             process_info[dev] = {
                 "process_id": process_id,
                 "log_file": log_file,
@@ -904,12 +819,7 @@ def run_static_experiment():
                     future_to_dev[future] = dev
                     process_info[dev]["start_time"] = time.time()
                     process_info[dev]["status"] = "running"
-                    # Format dev for display
-                    if isinstance(dev, tuple):
-                        dev_str = f"max{dev[0]:.3f}_min{dev[0]*dev[1]:.3f}"
-                    else:
-                        dev_str = f"{dev:.4f}"
-                    master_logger.info(f"Process launched for dev={dev_str} (PID will be assigned)")
+                    master_logger.info(f"Process launched for dev={dev:.4f} (PID will be assigned)")
                 
                 # Collect results as they complete
                 for future in as_completed(future_to_dev):
@@ -922,23 +832,13 @@ def run_static_experiment():
                         if result["success"]:
                             process_info[dev]["status"] = "completed"
                             completed_samples += result["computed_samples"]
-                            # Format dev for display
-                            if isinstance(dev, tuple):
-                                dev_str = f"max{dev[0]:.3f}_min{dev[0]*dev[1]:.3f}"
-                            else:
-                                dev_str = f"{dev:.4f}"
-                            master_logger.info(f"✓ Process for dev={dev_str} completed successfully")
+                            master_logger.info(f"✓ Process for dev={dev:.4f} completed successfully")
                             master_logger.info(f"  Computed samples: {result['computed_samples']}")
                             master_logger.info(f"  Time: {result['total_time']:.1f}s")
                             master_logger.info(f"  Log file: {result['log_file']}")
                         else:
                             process_info[dev]["status"] = "failed"
-                            # Format dev for display
-                            if isinstance(dev, tuple):
-                                dev_str = f"max{dev[0]:.3f}_min{dev[0]*dev[1]:.3f}"
-                            else:
-                                dev_str = f"{dev:.4f}"
-                            master_logger.error(f"✗ Process for dev={dev_str} failed")
+                            master_logger.error(f"✗ Process for dev={dev:.4f} failed")
                             master_logger.error(f"  Error: {result['error']}")
                             master_logger.error(f"  Log file: {result['log_file']}")
                             
@@ -946,12 +846,7 @@ def run_static_experiment():
                         import traceback
                         process_info[dev]["status"] = "failed"
                         process_info[dev]["end_time"] = time.time()
-                        # Format dev for display
-                        if isinstance(dev, tuple):
-                            dev_str = f"max{dev[0]:.3f}_min{dev[0]*dev[1]:.3f}"
-                        else:
-                            dev_str = f"{dev:.4f}"
-                        error_msg = f"Exception in process for dev={dev_str}: {str(e)}"
+                        error_msg = f"Exception in process for dev={dev:.4f}: {str(e)}"
                         master_logger.error(error_msg)
                         master_logger.error(traceback.format_exc())
                         
@@ -987,30 +882,19 @@ def run_static_experiment():
         
         for result in process_results:
             dev = result["dev"]
-            # Format dev for display
-            if isinstance(dev, tuple):
-                dev_str = f"max{dev[0]:.3f}_min{dev[0]*dev[1]:.3f}"
-            else:
-                dev_str = f"{dev:.4f}"
-            
             if result["success"]:
                 successful_processes += 1
-                master_logger.info(f"  ✓ dev={dev_str}: {result['computed_samples']} samples in {result['total_time']:.1f}s")
+                master_logger.info(f"  ✓ dev={dev:.4f}: {result['computed_samples']} samples in {result['total_time']:.1f}s")
             else:
                 failed_processes += 1
-                master_logger.error(f"  ✗ dev={dev_str}: FAILED - {result['error']}")
+                master_logger.error(f"  ✗ dev={dev:.4f}: FAILED - {result['error']}")
         
         master_logger.info(f"\nRESULTS: {successful_processes} successful, {failed_processes} failed processes")
         
         # Log process log file locations
         master_logger.info("\nPROCESS LOG FILES:")
         for dev, info in process_info.items():
-            # Format dev for display
-            if isinstance(dev, tuple):
-                dev_str = f"max{dev[0]:.3f}_min{dev[0]*dev[1]:.3f}"
-            else:
-                dev_str = f"{dev:.4f}"
-            master_logger.info(f"  dev={dev_str}: {info['log_file']}")
+            master_logger.info(f"  dev={dev:.4f}: {info['log_file']}")
         
         print(f"\n[COMPLETED] Multiprocess sample computation completed in {experiment_time:.2f} seconds")
         print(f"Total samples computed: {completed_samples}")
@@ -1085,8 +969,7 @@ def run_static_experiment():
             noise_type="static_noise",
             parameter_name="static_dev",
             samples_base_dir="experiments_data_samples",
-            probdist_base_dir="experiments_data_samples_probDist",
-            theta=theta
+            probdist_base_dir="experiments_data_samples_probDist"
         )
         print("[OK] Mean probability distributions ready for analysis")
         
@@ -1098,7 +981,7 @@ def run_static_experiment():
     try:
         stds = create_or_load_std_data(
             mean_results, devs, N, steps, dummy_tesselation_func,
-            "experiments_data_samples_std", "static_noise", theta=theta
+            "experiments_data_samples_std", "static_noise"
         )
         
         # Print final std values for verification

@@ -2,6 +2,24 @@
 
 ## 📋 **COMPACT SUMMARY - Recent Major Achievements**
 
+### �️ **Theta Parameter Directory Structure Enhancement** (August 18, 2025)
+- **Hierarchical Organization**: Enhanced directory structure to include theta parameter folder above dev parameter folders
+- **Directory Structure**: Changed from `base_dir/tesselation_noise/dev_<value>/N_<value>/` to `base_dir/tesselation_noise/theta_<value>/dev_<value>/N_<value>/`
+- **Parameter Propagation**: Added theta parameter support across all experiment scripts (local, multiprocessing, cluster)
+- **Function Signature Updates**: Updated `get_experiment_dir()` and all related functions in smart_loading_static.py to accept optional theta parameter
+- **Backward Compatibility**: Maintained backward compatibility with theta=None default parameter for existing experiments
+- **Comprehensive Coverage**: Updated static_local_logged.py, static_local_logged_mp.py, static_cluster_logged.py, and static_cluster_logged_mp.py
+- **Smart Loading Integration**: All smart loading functions now support theta parameter for organized experiment hierarchy
+
+### �🚀 **Streaming Memory-Efficient Quantum Walk Computation** (August 18, 2025)
+- **Memory Issue Resolution**: Solved critical memory exhaustion problem in multiprocessing static noise experiments (processes terminated after 36 minutes due to 8GB+ RAM usage)
+- **Streaming Architecture**: Implemented `running_streaming()` function with callback-based state saving, eliminating memory accumulation during computation
+- **Memory Optimization**: Reduced per-process memory usage from ~1.6GB to ~100MB (94% reduction) by saving states incrementally instead of storing all states
+- **Full Scale Support**: Restored original parameters (N=20,000 nodes, steps=5,000) while maintaining memory efficiency through streaming approach
+- **Process Optimization**: Restored full CPU utilization (all cores) since memory is no longer the limiting factor
+- **Backward Compatibility**: Preserved original `running()` function interface while adding new streaming capabilities
+- **Traceback Import Fix**: Resolved "cannot access local variable 'traceback'" error by importing traceback locally in exception handlers
+
 ### 🚀 **Multiprocessing Static Noise Experiments** (August 15, 2025)
 - **Multiprocessing Implementation**: Created `static_cluster_logged_mp.py` with concurrent processing of deviation values using ProcessPoolExecutor
 - **Enhanced Logging System**: Implemented dual logging architecture with master process logger and individual process loggers for comprehensive tracking

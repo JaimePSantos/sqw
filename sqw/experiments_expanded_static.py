@@ -67,7 +67,10 @@ def create_noise_lists(theta, red_edge_list, blue_edge_list, deviation_range):
     - theta: base theta value
     - red_edge_list: list of edges in red tessellation
     - blue_edge_list: list of edges in blue tessellation
-    - deviation_range: either a single value (backward compatibility) or tuple (min, max) for deviation range
+    - deviation_range: either:
+        - single value (backward compatibility): random range [0, value]
+        - tuple (max_dev, min_factor): max_dev is max deviation, min_factor (0-1) determines min as (max_dev * min_factor)
+        - tuple (min, max): explicit min/max range (legacy support when both > 1)
     
     Returns:
     - red_noise_list: list of theta values for red edges (theta + random_dev)
@@ -76,12 +79,21 @@ def create_noise_lists(theta, red_edge_list, blue_edge_list, deviation_range):
     red_noise_list = []
     blue_noise_list = []
     
-    # Handle both single value and tuple formats for deviation_range
+    # Handle different formats for deviation_range
     if isinstance(deviation_range, (tuple, list)) and len(deviation_range) == 2:
-        dev_min, dev_max = deviation_range
+        # Check if this is the new format (max_dev, min_factor) where min_factor <= 1
+        if deviation_range[1] <= 1.0 and deviation_range[1] >= 0.0:
+            # New format: (max_deviation, min_factor)
+            max_dev, min_factor = deviation_range
+            max_dev = abs(max_dev)
+            dev_min = max_dev * min_factor
+            dev_max = max_dev
+        else:
+            # Legacy format: explicit (min, max) range
+            dev_min, dev_max = deviation_range
     else:
-        # Backward compatibility: single value means [-value, +value]
-        dev_min, dev_max = -abs(deviation_range), abs(deviation_range)
+        # Backward compatibility: single value means [0, value]
+        dev_min, dev_max = 0, abs(deviation_range)
     
     # Generate noise for red edges (theta + deviation)
     for _ in range(len(red_edge_list)):
@@ -174,7 +186,10 @@ def running(N, theta, num_steps,
     - theta: base theta parameter for evolution
     - num_steps: number of evolution steps
     - initial_nodes: list of initial nodes (empty list = uniform superposition)
-    - deviation_range: noise deviation range
+    - deviation_range: noise deviation range - can be:
+        * single value: random range [0, value]
+        * tuple (max_dev, min_factor): min_dev = max_dev * min_factor, max_dev = max_dev
+        * tuple (min, max): explicit range (legacy, when both > 1)
     - return_all_states: if True, return evolution states, else return final probabilities
     
     Returns:
@@ -216,6 +231,64 @@ def running(N, theta, num_steps,
         probvec = prob_vec(psiN, N)
         return probvec
 
+def running_streaming(N, theta, num_steps, 
+                     initial_nodes=[], 
+                     deviation_range=0.0,
+                     step_callback=None):
+    """
+    Run staggered quantum walk with static noise using streaming approach.
+    
+    This version saves memory by calling a callback function for each step
+    instead of storing all states in memory.
+    
+    Parameters:
+    - N: number of nodes in the cycle
+    - theta: base theta parameter for evolution
+    - num_steps: number of evolution steps
+    - initial_nodes: list of initial nodes (empty list = uniform superposition)
+    - deviation_range: noise deviation range - can be:
+        * single value: random range [0, value]
+        * tuple (max_dev, min_factor): min_dev = max_dev * min_factor, max_dev = max_dev
+        * tuple (min, max): explicit range (legacy, when both > 1)
+    - step_callback: function(step_idx, state) called for each step
+    
+    Returns:
+    - final_state: the final quantum state after all steps
+    """
+    # Create tessellations
+    red_graph = cycle_tesselation_alpha(N)
+    blue_graph = cycle_tesselation_beta(N)
+    
+    # Get edge lists
+    red_edge_list = list(red_graph.edges())
+    blue_edge_list = list(blue_graph.edges())
+    
+    # Create noise parameters
+    red_noise_list, blue_noise_list = create_noise_lists(
+        theta, red_edge_list, blue_edge_list, deviation_range
+    )
+    
+    # Create initial state
+    psi0 = uniform_initial_state(N, initial_nodes)
+    
+    # Create evolution operator
+    U, Hr_noisy, Hb_noisy = ct_evo_with_noise(red_graph, blue_graph, red_noise_list, blue_noise_list)
+    
+    # Save initial state if callback provided
+    if step_callback:
+        step_callback(0, psi0.copy())
+    
+    # Evolve state step by step, calling callback for each step
+    psi = psi0.copy()
+    for i in range(num_steps):
+        psi = dot(U, psi)
+        
+        # Call callback with current step and state
+        if step_callback:
+            step_callback(i + 1, psi.copy())
+    
+    return psi
+
 def staggered_qwalk_with_noise(N, theta, steps, init_nodes=[], deviation_range=0.0):
     """
     Perform staggered quantum walk with static noise (wrapper for compatibility)
@@ -225,7 +298,10 @@ def staggered_qwalk_with_noise(N, theta, steps, init_nodes=[], deviation_range=0
     - theta: base theta parameter
     - steps: number of evolution steps
     - init_nodes: list of initial nodes (empty list = uniform superposition)
-    - deviation_range: noise deviation range
+    - deviation_range: noise deviation range - can be:
+        * single value: random range [0, value]
+        * tuple (max_dev, min_factor): min_dev = max_dev * min_factor, max_dev = max_dev
+        * tuple (min, max): explicit range (legacy, when both > 1)
     
     Returns:
     - probability distribution
@@ -351,25 +427,51 @@ if __name__ == "__main__":
     theta = np.pi / 4  # Base theta parameter
     steps = 5  # Number of evolution steps
     init_nodes = [0]  # Start at node 0 only
-    deviation_range = 0.1  # Small noise deviation
     
-    # Run quantum walk with noise
-    probabilities = running(N, theta, steps, init_nodes, deviation_range)
+    # Example 1: Old format (single value) - backward compatibility
+    deviation_range_old = 0.1  # Random range [0, 0.1]
     
+    # Example 2: New format (max_dev, min_factor)
+    max_deviation = 0.2
+    min_factor = 0.3  # minimum will be 0.2 * 0.3 = 0.06
+    deviation_range_new = (max_deviation, min_factor)  # Random range [0.06, 0.2]
+    
+    print("Example 1: Old format (backward compatibility)")
     print(f"Parameters: N={N}, theta={theta:.3f}, steps={steps}")
     print(f"Initial nodes: {init_nodes}")
-    print(f"Deviation range: {deviation_range}")
-    print("\nFinal Probability Distribution:")
-    print("=" * 32)
-    for i in range(N):
-        print(f"Node {i}: {probabilities[i][0]:.6f}")
+    print(f"Deviation range (old): {deviation_range_old} -> [0, {deviation_range_old}]")
     
-    print(f"\nSum of probabilities: {np.sum(probabilities):.6f}")
+    # Run quantum walk with old format
+    probabilities_old = running(N, theta, steps, init_nodes, deviation_range_old)
+    
+    print("\nFinal Probability Distribution (old format):")
+    print("=" * 43)
+    for i in range(N):
+        print(f"Node {i}: {probabilities_old[i][0]:.6f}")
+    
+    print(f"\nSum of probabilities: {np.sum(probabilities_old):.6f}")
+    
+    print("\n" + "="*50)
+    print("Example 2: New format (max_dev, min_factor)")
+    print(f"Parameters: N={N}, theta={theta:.3f}, steps={steps}")
+    print(f"Initial nodes: {init_nodes}")
+    print(f"Deviation range (new): {deviation_range_new} -> [{max_deviation * min_factor:.3f}, {max_deviation}]")
+    
+    # Run quantum walk with new format
+    probabilities_new = running(N, theta, steps, init_nodes, deviation_range_new)
+    
+    print("\nFinal Probability Distribution (new format):")
+    print("=" * 43)
+    for i in range(N):
+        print(f"Node {i}: {probabilities_new[i][0]:.6f}")
+    
+    print(f"\nSum of probabilities: {np.sum(probabilities_new):.6f}")
     
     # Compare with no noise
     probabilities_no_noise = running(N, theta, steps, init_nodes, deviation_range=0.0)
     
-    print("\nComparison (No Noise):")
+    print("\n" + "="*50)
+    print("Comparison (No Noise):")
     print("=" * 22)
     for i in range(N):
         print(f"Node {i}: {probabilities_no_noise[i][0]:.6f}")
@@ -377,7 +479,7 @@ if __name__ == "__main__":
     print(f"\nSum of probabilities (no noise): {np.sum(probabilities_no_noise):.6f}")
     
     # Get evolution states example
-    evolution_states = running(N, theta, steps, init_nodes, deviation_range, return_all_states=True)
+    evolution_states = running(N, theta, steps, init_nodes, deviation_range_new, return_all_states=True)
     print(f"\nEvolution states collected: {len(evolution_states)} states")
     print(f"Initial state shape: {evolution_states[0].shape}")
     print(f"Final state shape: {evolution_states[-1].shape}")

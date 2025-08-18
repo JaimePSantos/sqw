@@ -7,16 +7,22 @@ This script runs static noise experiments for quantum walks with configurable pa
 
 Now uses smart loading from smart_loading_static module.
 
-Execution Modes:
-1. Full Pipeline (default): Compute samples + analysis + plots + archive
-2. Samples Only: Set CALCULATE_SAMPLES_ONLY = True to only compute and save samples
-3. Analysis Only: Set SKIP_SAMPLE_COMPUTATION = True to skip sample computation
-4. Custom: Adjust individual toggles for plotting, archiving, etc.
+Execution Phases (can be combined):
+1. Sample Computation: Set COMPUTE_SAMPLES = True
+2. Probability Distribution Computation: Set COMPUTE_PROB_DISTRIBUTIONS = True  
+3. Analysis & Plotting: Set COMPUTE_ANALYSIS = True
+
+Common Execution Modes:
+- Full Pipeline (default): All phases enabled
+- Samples Only: COMPUTE_SAMPLES=True, others=False
+- Analysis Only: COMPUTE_ANALYSIS=True, COMPUTE_PROB_DISTRIBUTIONS=True, COMPUTE_SAMPLES=False
+- Prob Dist Only: COMPUTE_PROB_DISTRIBUTIONS=True, others=False
 
 This modular approach allows you to:
 - Run expensive sample computation on cluster, then analysis locally
 - Recompute analysis with different parameters without recomputing samples
 - Split long computations into manageable chunks
+- Separately control probability distribution computation for memory management
 """
 
 import time
@@ -41,30 +47,33 @@ from logging_module.crash_safe_logging import crash_safe_log
 # ============================================================================
 
 # Plotting switch
-ENABLE_PLOTTING = False  # Set to False to disable plotting
-USE_LOGLOG_PLOT = False  # Set to True to use log-log scale for plotting
-PLOT_FINAL_PROBDIST = False  # Set to True to plot probability distributions at final time step
+ENABLE_PLOTTING = True  # Set to False to disable plotting
+USE_LOGLOG_PLOT = True  # Set to True to use log-log scale for plotting
+PLOT_FINAL_PROBDIST = True  # Set to True to plot probability distributions at final time step
 SAVE_FIGURES = False  # Set to False to disable saving figures to files
 
 # Archive switch
-CREATE_TAR_ARCHIVE = True  # Set to True to create tar archive of experiments_data_samples folder
+CREATE_TAR_ARCHIVE = False  # Set to True to create tar archive of experiments_data_samples folder
 
-# Computation control switches
-CALCULATE_SAMPLES_ONLY = True  # Set to True to only compute and save samples (skip analysis)
-SKIP_SAMPLE_COMPUTATION = False  # Set to True to skip sample computation (analysis only)
+# Computation control switches - Choose your execution pipeline
+COMPUTE_SAMPLES = True          # Set to False to skip sample computation
+COMPUTE_PROB_DISTRIBUTIONS = True   # Set to False to skip probability distribution computation  
+COMPUTE_ANALYSIS = True         # Set to False to skip analysis (std calculations and plotting)
 
 # Check for environment variable overrides (from safe_background_launcher.py)
 if os.environ.get('ENABLE_PLOTTING'):
     ENABLE_PLOTTING = os.environ.get('ENABLE_PLOTTING').lower() == 'true'
 if os.environ.get('CREATE_TAR_ARCHIVE'):
     CREATE_TAR_ARCHIVE = os.environ.get('CREATE_TAR_ARCHIVE').lower() == 'true'
-if os.environ.get('CALCULATE_SAMPLES_ONLY'):
-    CALCULATE_SAMPLES_ONLY = os.environ.get('CALCULATE_SAMPLES_ONLY').lower() == 'true'
-if os.environ.get('SKIP_SAMPLE_COMPUTATION'):
-    SKIP_SAMPLE_COMPUTATION = os.environ.get('SKIP_SAMPLE_COMPUTATION').lower() == 'true'
+if os.environ.get('COMPUTE_SAMPLES'):
+    COMPUTE_SAMPLES = os.environ.get('COMPUTE_SAMPLES').lower() == 'true'
+if os.environ.get('COMPUTE_PROB_DISTRIBUTIONS'):
+    COMPUTE_PROB_DISTRIBUTIONS = os.environ.get('COMPUTE_PROB_DISTRIBUTIONS').lower() == 'true'
+if os.environ.get('COMPUTE_ANALYSIS'):
+    COMPUTE_ANALYSIS = os.environ.get('COMPUTE_ANALYSIS').lower() == 'true'
 
 # Background execution switch - SAFER IMPLEMENTATION
-RUN_IN_BACKGROUND = True  # Set to True to automatically run the process in background
+RUN_IN_BACKGROUND = False  # Set to True to automatically run the process in background
 
 # Check if background execution has been disabled externally
 if os.environ.get('RUN_IN_BACKGROUND') == 'False':
@@ -73,9 +82,9 @@ BACKGROUND_LOG_FILE = "static_experiment_background.log"  # Log file for backgro
 BACKGROUND_PID_FILE = "static_experiment.pid"  # PID file to track background process
 
 # Experiment parameters
-N = 20000  # System size
+N = 102  # System size
 steps = N//4  # Time steps - now we can handle the full computation with streaming
-samples = 5  # Samples per deviation - changed from 1 to 5
+samples = 65  # Samples per deviation - changed from 1 to 5
 
 # Memory management warning (updated for streaming)
 print(f"📊 COMPUTATION SCALE: N={N}, steps={steps}, samples={samples}")
@@ -109,16 +118,14 @@ initial_state_kwargs = {"nodes": [N//2]}
 
 # Deviation values for static noise experiments
 # CUSTOMIZE THIS LIST: Add or remove deviation values as needed
-# Format options:
-# 1. Single value: devs = [0, 0.1, 0.5] - backward compatibility (range [0, value])
-# 2. Tuple (max_dev, min_factor): devs = [(0.2, 0.3)] - new format (range [max_dev*min_factor, max_dev])
-# 3. Mixed: devs = [0, (0.2, 0.3), 0.5] - can mix formats
+# Format: For tuples (max_dev, min_factor), min_dev = max_dev * min_factor
+# For single values, use old-style format for backward compatibility
 devs = [
-    0,              # No noise (single value format)
-    (0.1, 0.0),     # Range [0.0, 0.1] - equivalent to old 0.1
-    (0.5, 0.8),     # Range [0.1, 0.5] - new format with min factor 0.2
-    (1.0, 0.6),     # Range [0.3, 1.0] - new format with min factor 0.3
-    (2, 0)     # Range [1.0, 10.0] - new format with min factor 0.1
+    0,              # No noise
+    (0.1, 0.1),     # max_dev=0.1, min_dev=0.01 (range [0.01, 0.1])
+    (0.5, 0.2),     # max_dev=0.5, min_dev=0.1 (range [0.1, 0.5]) 
+    (1.0, 0.5),     # max_dev=1.0, min_dev=0.5 (range [0.5, 1.0])
+    (10.0, 0.1)     # max_dev=10.0, min_dev=1.0 (range [1.0, 10.0])
 ]
 
 # Multiprocessing configuration
@@ -134,21 +141,12 @@ def setup_process_logging(dev_value, process_id):
     """Setup logging for individual processes"""
     os.makedirs(PROCESS_LOG_DIR, exist_ok=True)
     
-    # Format dev_value for filename (handle both old and new formats)
-    if isinstance(dev_value, str):
-        dev_str = dev_value  # Already formatted as string
-    elif isinstance(dev_value, (tuple, list)) and len(dev_value) == 2:
-        # New format: (max_dev, min_factor) or legacy (min, max)
-        if dev_value[1] <= 1.0 and dev_value[1] >= 0.0:
-            max_dev, min_factor = dev_value
-            min_dev = max_dev * min_factor
-            dev_str = f"max{max_dev:.3f}_min{min_dev:.3f}"
-        else:
-            min_val, max_val = dev_value
-            dev_str = f"min{min_val:.3f}_max{max_val:.3f}"
+    # Format dev_value for filename based on type
+    if isinstance(dev_value, tuple):
+        max_dev, min_factor = dev_value
+        dev_str = f"max{max_dev:.3f}_min{max_dev * min_factor:.3f}"
     else:
-        # Single value format
-        dev_str = f"{float(dev_value):.3f}"
+        dev_str = f"{dev_value:.3f}"
     
     log_filename = os.path.join(PROCESS_LOG_DIR, f"process_dev_{dev_str}_pid_{process_id}.log")
     
@@ -218,17 +216,22 @@ def compute_dev_samples(dev_args):
     """Worker function to compute samples for a single deviation value in a separate process"""
     dev, process_id, N, steps, samples, theta, initial_state_kwargs = dev_args
     
-    # Setup logging for this process - need to format dev for logging
-    dev_str = f"{dev}" if isinstance(dev, (int, float)) else f"{dev[0]}_{dev[1]}" if isinstance(dev, (tuple, list)) else str(dev)
-    logger, log_file = setup_process_logging(dev_str, process_id)
+    # Setup logging for this process
+    logger, log_file = setup_process_logging(dev, process_id)
     
     try:
-        logger.info(f"Starting computation for deviation {dev}")
+        # Format dev for display based on type
+        if isinstance(dev, tuple):
+            dev_display = f"({dev[0]:.4f}, {dev[1]:.4f})"
+        else:
+            dev_display = f"{dev:.4f}"
+            
+        logger.info(f"Starting computation for deviation {dev_display}")
         logger.info(f"Parameters: N={N}, steps={steps}, samples={samples}, theta={theta:.4f}")
         
         # Import required modules (each process needs its own imports)
         from sqw.experiments_expanded_static import running_streaming
-        from smart_loading_static import get_experiment_dir
+        from smart_loading_static import get_experiment_dir, format_deviation_for_filename
         import pickle
         import gc  # For garbage collection
         
@@ -236,21 +239,8 @@ def compute_dev_samples(dev_args):
         def dummy_tesselation_func(N):
             return None
         
-        # Setup experiment directory - handle new deviation format
-        if isinstance(dev, (tuple, list)) and len(dev) == 2:
-            # New format: (max_dev, min_factor) or legacy (min, max)
-            if dev[1] <= 1.0 and dev[1] >= 0.0:
-                # New format
-                max_dev, min_factor = dev
-                has_noise = max_dev > 0
-            else:
-                # Legacy format
-                min_val, max_val = dev
-                has_noise = max_val > 0
-        else:
-            # Single value format
-            has_noise = dev > 0
-        
+        # Setup experiment directory using smart loading format
+        has_noise = dev != 0 and dev != (0, 0) if isinstance(dev, tuple) else dev != 0
         noise_params = [dev] if has_noise else [0]
         exp_dir = get_experiment_dir(dummy_tesselation_func, has_noise, N, 
                                    noise_params=noise_params, noise_type="static_noise", 
@@ -304,7 +294,7 @@ def compute_dev_samples(dev_args):
             # Memory-efficient streaming approach
             try:
                 # Run the quantum walk experiment using streaming approach
-                logger.info(f"  Running streaming quantum walk: N={N}, steps={steps}, dev={dev}")
+                logger.info(f"  Running streaming quantum walk: N={N}, steps={steps}, dev={dev_display}")
                 
                 final_state = running_streaming(
                     N, theta, steps,
@@ -334,12 +324,7 @@ def compute_dev_samples(dev_args):
             logger.info(f"Sample {sample_idx+1}/{samples} completed in {sample_time:.1f}s")
         
         dev_time = time.time() - dev_start_time
-        # Format dev for display
-        if isinstance(dev, tuple):
-            dev_str = f"max{dev[0]:.3f}_min{dev[0]*dev[1]:.3f}"
-        else:
-            dev_str = f"{dev:.4f}"
-        logger.info(f"Deviation {dev_str} completed: {dev_computed_samples} samples in {dev_time:.1f}s")
+        logger.info(f"Deviation {dev_display} completed: {dev_computed_samples} samples in {dev_time:.1f}s")
         
         return {
             "dev": dev,
@@ -353,12 +338,7 @@ def compute_dev_samples(dev_args):
         
     except Exception as e:
         import traceback
-        # Format dev for display
-        if isinstance(dev, tuple):
-            dev_str = f"max{dev[0]:.3f}_min{dev[0]*dev[1]:.3f}"
-        else:
-            dev_str = f"{dev:.4f}"
-        error_msg = f"Error in process for dev {dev_str}: {str(e)}"
+        error_msg = f"Error in process for dev {dev_display}: {str(e)}"
         logger.error(error_msg)
         logger.error(traceback.format_exc())
         
@@ -411,25 +391,8 @@ def create_or_load_std_data(mean_results, devs, N, steps, tesselation_func, std_
     domain = np.arange(N) - N//2  # Center domain around 0
     
     for i, dev in enumerate(devs):
-        # Handle new deviation format for has_noise check
-        if isinstance(dev, (tuple, list)) and len(dev) == 2:
-            # New format: (max_dev, min_factor) or legacy (min, max)
-            if dev[1] <= 1.0 and dev[1] >= 0.0:
-                # New format
-                max_dev, min_factor = dev
-                has_noise = max_dev > 0
-                dev_str = f"max{max_dev:.3f}_min{max_dev * min_factor:.3f}"
-            else:
-                # Legacy format
-                min_val, max_val = dev
-                has_noise = max_val > 0
-                dev_str = f"min{min_val:.3f}_max{max_val:.3f}"
-        else:
-            # Single value format
-            has_noise = dev > 0
-            dev_str = f"{dev:.3f}"
-        
         # Setup std data directory structure for static noise
+        has_noise = dev != 0 and dev != (0, 0) if isinstance(dev, tuple) else dev != 0
         noise_params = [dev] if has_noise else [0]  # Static noise uses single parameter
         std_dir = get_experiment_dir(tesselation_func, has_noise, N, 
                                    noise_params=noise_params, noise_type=noise_type, 
@@ -438,19 +401,25 @@ def create_or_load_std_data(mean_results, devs, N, steps, tesselation_func, std_
         
         std_filepath = os.path.join(std_dir, "std_vs_time.pkl")
         
+        # Format dev for display based on type
+        if isinstance(dev, tuple):
+            dev_display = f"({dev[0]:.3f}, {dev[1]:.3f})"
+        else:
+            dev_display = f"{dev:.3f}"
+        
         # Try to load existing std data
         if os.path.exists(std_filepath):
             try:
                 with open(std_filepath, 'rb') as f:
                     std_values = pickle.load(f)
-                print(f"  [OK] Loaded std data for dev {dev_str}")
+                print(f"  [OK] Loaded std data for dev {dev_display}")
                 stds.append(std_values)
                 continue
             except Exception as e:
-                print(f"  [WARNING] Could not load std data for dev {dev_str}: {e}")
+                print(f"  [WARNING] Could not load std data for dev {dev_display}: {e}")
         
         # Compute std data from mean probability distributions
-        print(f"  [COMPUTING] Computing std data for dev {dev_str}...")
+        print(f"  [COMPUTING] Computing std data for dev {dev_display}...")
         try:
             # Get mean probability distributions for this deviation
             if mean_results and i < len(mean_results) and mean_results[i]:
@@ -465,16 +434,16 @@ def create_or_load_std_data(mean_results, devs, N, steps, tesselation_func, std_
                         pickle.dump(std_values, f)
                     
                     stds.append(std_values)
-                    print(f"  [OK] Computed and saved std data for dev {dev_str} (final std = {std_values[-1]:.3f})")
+                    print(f"  [OK] Computed and saved std data for dev {dev_display} (final std = {std_values[-1]:.3f})")
                 else:
-                    print(f"  [ERROR] No valid probability distributions found for dev {dev_str}")
+                    print(f"  [ERROR] No valid probability distributions found for dev {dev_display}")
                     stds.append([])
             else:
-                print(f"  [ERROR] No mean results available for dev {dev_str}")
+                print(f"  [ERROR] No mean results available for dev {dev_display}")
                 stds.append([])
                 
         except Exception as e:
-            print(f"  [ERROR] Error computing std data for dev {dev_str}: {e}")
+            print(f"  [ERROR] Error computing std data for dev {dev_display}: {e}")
             stds.append([])
     
     print(f"[OK] Standard deviation data management completed!")
@@ -560,25 +529,35 @@ def create_experiment_archive(N, samples):
 
 # @crash_safe_log(log_file_prefix="static_noise_experiment", heartbeat_interval=30.0)
 def run_static_experiment():
-    """Run the static noise quantum walk experiment with configurable execution modes."""
+    """Run the static noise quantum walk experiment with configurable execution phases."""
     
-    # Validate configuration
-    if CALCULATE_SAMPLES_ONLY and SKIP_SAMPLE_COMPUTATION:
-        raise ValueError("Invalid configuration: Cannot set both CALCULATE_SAMPLES_ONLY=True and SKIP_SAMPLE_COMPUTATION=True")
+    # Validate configuration - ensure at least one phase is enabled
+    if not (COMPUTE_SAMPLES or COMPUTE_PROB_DISTRIBUTIONS or COMPUTE_ANALYSIS):
+        raise ValueError("Invalid configuration: At least one computation phase must be enabled")
     
-    if SKIP_SAMPLE_COMPUTATION and not ENABLE_PLOTTING:
-        print("WARNING: Analysis-only mode with plotting disabled - limited output will be generated")
+    # Logical dependencies - you can't compute analysis without probability distributions
+    if COMPUTE_ANALYSIS and not COMPUTE_PROB_DISTRIBUTIONS and not COMPUTE_SAMPLES:
+        print("WARNING: Analysis enabled but no probability distributions will be computed")
+        print("         Either enable COMPUTE_SAMPLES or COMPUTE_PROB_DISTRIBUTIONS")
     
     # Configuration summary
     print("=== EXECUTION CONFIGURATION ===")
-    mode_description = (
-        "Samples Only" if CALCULATE_SAMPLES_ONLY else
-        "Analysis Only" if SKIP_SAMPLE_COMPUTATION else
-        "Full Pipeline"
-    )
+    
+    # Determine execution mode description
+    enabled_phases = []
+    if COMPUTE_SAMPLES:
+        enabled_phases.append("Samples")
+    if COMPUTE_PROB_DISTRIBUTIONS:
+        enabled_phases.append("Prob Distributions") 
+    if COMPUTE_ANALYSIS:
+        enabled_phases.append("Analysis")
+    
+    mode_description = " + ".join(enabled_phases) if enabled_phases else "No computation phases"
+    
     print(f"Execution mode: {mode_description}")
-    print(f"Sample computation: {'Enabled' if not SKIP_SAMPLE_COMPUTATION else 'Disabled'}")
-    print(f"Analysis phase: {'Enabled' if not CALCULATE_SAMPLES_ONLY else 'Disabled'}")
+    print(f"Sample computation: {'Enabled' if COMPUTE_SAMPLES else 'Disabled'}")
+    print(f"Probability distributions: {'Enabled' if COMPUTE_PROB_DISTRIBUTIONS else 'Disabled'}")
+    print(f"Analysis phase: {'Enabled' if COMPUTE_ANALYSIS else 'Disabled'}")
     print(f"Plotting: {'Enabled' if ENABLE_PLOTTING else 'Disabled'}")
     print(f"Archiving: {'Enabled' if CREATE_TAR_ARCHIVE else 'Disabled'}")
     print(f"Background execution: {'Enabled' if RUN_IN_BACKGROUND else 'Disabled'}")
@@ -854,7 +833,7 @@ def run_static_experiment():
     experiment_time = 0
     process_results = []
     
-    if not SKIP_SAMPLE_COMPUTATION:
+    if COMPUTE_SAMPLES:
         master_logger.info("=" * 40)
         master_logger.info("MULTIPROCESS SAMPLE COMPUTATION PHASE")
         master_logger.info("=" * 40)
@@ -870,19 +849,12 @@ def run_static_experiment():
         # Track process information
         process_info = {}
         for i, (dev, process_id, *_) in enumerate(process_args):
-            # Format dev for filename (handle both old and new formats)
-            if isinstance(dev, (tuple, list)) and len(dev) == 2:
-                # New format: (max_dev, min_factor) or legacy (min, max)
-                if dev[1] <= 1.0 and dev[1] >= 0.0:
-                    max_dev, min_factor = dev
-                    min_dev = max_dev * min_factor
-                    dev_str = f"max{max_dev:.3f}_min{min_dev:.3f}"
-                else:
-                    min_val, max_val = dev
-                    dev_str = f"min{min_val:.3f}_max{max_val:.3f}"
+            # Format dev for filename based on type
+            if isinstance(dev, tuple):
+                max_dev, min_factor = dev
+                dev_str = f"max{max_dev:.3f}_min{max_dev * min_factor:.3f}"
             else:
-                # Single value format
-                dev_str = f"{float(dev):.3f}"
+                dev_str = f"{dev:.3f}"
                 
             log_file = os.path.join(PROCESS_LOG_DIR, f"process_dev_{dev_str}_pid_{process_id}.log")
             process_info[dev] = {
@@ -904,16 +876,25 @@ def run_static_experiment():
                     future_to_dev[future] = dev
                     process_info[dev]["start_time"] = time.time()
                     process_info[dev]["status"] = "running"
-                    # Format dev for display
+                    
+                    # Format dev for display based on type
                     if isinstance(dev, tuple):
-                        dev_str = f"max{dev[0]:.3f}_min{dev[0]*dev[1]:.3f}"
+                        dev_display = f"({dev[0]:.4f}, {dev[1]:.4f})"
                     else:
-                        dev_str = f"{dev:.4f}"
-                    master_logger.info(f"Process launched for dev={dev_str} (PID will be assigned)")
+                        dev_display = f"{dev:.4f}"
+                    
+                    master_logger.info(f"Process launched for dev={dev_display} (PID will be assigned)")
                 
                 # Collect results as they complete
                 for future in as_completed(future_to_dev):
                     dev = future_to_dev[future]
+                    
+                    # Format dev for display based on type
+                    if isinstance(dev, tuple):
+                        dev_display = f"({dev[0]:.4f}, {dev[1]:.4f})"
+                    else:
+                        dev_display = f"{dev:.4f}"
+                    
                     try:
                         result = future.result()
                         process_results.append(result)
@@ -922,23 +903,13 @@ def run_static_experiment():
                         if result["success"]:
                             process_info[dev]["status"] = "completed"
                             completed_samples += result["computed_samples"]
-                            # Format dev for display
-                            if isinstance(dev, tuple):
-                                dev_str = f"max{dev[0]:.3f}_min{dev[0]*dev[1]:.3f}"
-                            else:
-                                dev_str = f"{dev:.4f}"
-                            master_logger.info(f"✓ Process for dev={dev_str} completed successfully")
+                            master_logger.info(f"✓ Process for dev={dev_display} completed successfully")
                             master_logger.info(f"  Computed samples: {result['computed_samples']}")
                             master_logger.info(f"  Time: {result['total_time']:.1f}s")
                             master_logger.info(f"  Log file: {result['log_file']}")
                         else:
                             process_info[dev]["status"] = "failed"
-                            # Format dev for display
-                            if isinstance(dev, tuple):
-                                dev_str = f"max{dev[0]:.3f}_min{dev[0]*dev[1]:.3f}"
-                            else:
-                                dev_str = f"{dev:.4f}"
-                            master_logger.error(f"✗ Process for dev={dev_str} failed")
+                            master_logger.error(f"✗ Process for dev={dev_display} failed")
                             master_logger.error(f"  Error: {result['error']}")
                             master_logger.error(f"  Log file: {result['log_file']}")
                             
@@ -946,12 +917,7 @@ def run_static_experiment():
                         import traceback
                         process_info[dev]["status"] = "failed"
                         process_info[dev]["end_time"] = time.time()
-                        # Format dev for display
-                        if isinstance(dev, tuple):
-                            dev_str = f"max{dev[0]:.3f}_min{dev[0]*dev[1]:.3f}"
-                        else:
-                            dev_str = f"{dev:.4f}"
-                        error_msg = f"Exception in process for dev={dev_str}: {str(e)}"
+                        error_msg = f"Exception in process for dev={dev_display}: {str(e)}"
                         master_logger.error(error_msg)
                         master_logger.error(traceback.format_exc())
                         
@@ -987,30 +953,31 @@ def run_static_experiment():
         
         for result in process_results:
             dev = result["dev"]
-            # Format dev for display
+            
+            # Format dev for display based on type
             if isinstance(dev, tuple):
-                dev_str = f"max{dev[0]:.3f}_min{dev[0]*dev[1]:.3f}"
+                dev_display = f"({dev[0]:.4f}, {dev[1]:.4f})"
             else:
-                dev_str = f"{dev:.4f}"
+                dev_display = f"{dev:.4f}"
             
             if result["success"]:
                 successful_processes += 1
-                master_logger.info(f"  ✓ dev={dev_str}: {result['computed_samples']} samples in {result['total_time']:.1f}s")
+                master_logger.info(f"  ✓ dev={dev_display}: {result['computed_samples']} samples in {result['total_time']:.1f}s")
             else:
                 failed_processes += 1
-                master_logger.error(f"  ✗ dev={dev_str}: FAILED - {result['error']}")
+                master_logger.error(f"  ✗ dev={dev_display}: FAILED - {result['error']}")
         
         master_logger.info(f"\nRESULTS: {successful_processes} successful, {failed_processes} failed processes")
         
         # Log process log file locations
         master_logger.info("\nPROCESS LOG FILES:")
         for dev, info in process_info.items():
-            # Format dev for display
+            # Format dev for display based on type
             if isinstance(dev, tuple):
-                dev_str = f"max{dev[0]:.3f}_min{dev[0]*dev[1]:.3f}"
+                dev_display = f"({dev[0]:.4f}, {dev[1]:.4f})"
             else:
-                dev_str = f"{dev:.4f}"
-            master_logger.info(f"  dev={dev_str}: {info['log_file']}")
+                dev_display = f"{dev:.4f}"
+            master_logger.info(f"  dev={dev_display}: {info['log_file']}")
         
         print(f"\n[COMPLETED] Multiprocess sample computation completed in {experiment_time:.2f} seconds")
         print(f"Total samples computed: {completed_samples}")
@@ -1019,17 +986,17 @@ def run_static_experiment():
         print(f"Process log directory: {PROCESS_LOG_DIR}")
         
     else:
-        master_logger.info("SKIPPING SAMPLE COMPUTATION")
-        print("=== SKIPPING SAMPLE COMPUTATION ===")
-        print("Sample computation disabled - proceeding to analysis phase")
+        master_logger.info("SAMPLE COMPUTATION SKIPPED")
+        print("=== SAMPLE COMPUTATION SKIPPED ===")
+        print("Sample computation disabled - proceeding to next phases")
         experiment_time = 0
         completed_samples = 0
 
-    # Early exit if only computing samples
-    if CALCULATE_SAMPLES_ONLY:
-        master_logger.info("SAMPLES ONLY MODE - ANALYSIS SKIPPED")
-        print("\n=== SAMPLES ONLY MODE - ANALYSIS SKIPPED ===")
-        print("Sample computation completed. Skipping analysis and plotting.")
+    # Early exit if only computing samples (no prob distributions or analysis)
+    if COMPUTE_SAMPLES and not COMPUTE_PROB_DISTRIBUTIONS and not COMPUTE_ANALYSIS:
+        master_logger.info("SAMPLES ONLY MODE - SUBSEQUENT PHASES SKIPPED")
+        print("\n=== SAMPLES ONLY MODE - SUBSEQUENT PHASES SKIPPED ===")
+        print("Sample computation completed. Skipping probability distributions and analysis.")
         
         # Create tar archive if enabled (even in samples-only mode)
         if CREATE_TAR_ARCHIVE:
@@ -1039,9 +1006,9 @@ def run_static_experiment():
             master_logger.info("Archiving disabled")
             print("Archiving disabled (CREATE_TAR_ARCHIVE=False)")
         
-        print("To run analysis on existing samples, set:")
-        print("  CALCULATE_SAMPLES_ONLY = False")
-        print("  SKIP_SAMPLE_COMPUTATION = True")
+        print("To run subsequent phases on existing samples, enable:")
+        print("  COMPUTE_PROB_DISTRIBUTIONS = True  # for probability distribution computation")
+        print("  COMPUTE_ANALYSIS = True            # for analysis and plotting")
         
         total_time = time.time() - start_time
         master_logger.info(f"Total execution time: {total_time:.2f} seconds")
@@ -1064,35 +1031,115 @@ def run_static_experiment():
             "process_log_dir": PROCESS_LOG_DIR
         }
 
+    # Probability Distribution Phase
+    mean_results = None
+    if COMPUTE_PROB_DISTRIBUTIONS:
+        print("\n=== PROBABILITY DISTRIBUTION PHASE ===")
+        print("Loading existing samples and computing mean probability distributions...")
+
+        # Smart load or create mean probability distributions
+        print("\n[DATA] Smart loading/creating mean probability distributions...")
+        try:
+            mean_results = smart_load_or_create_experiment(
+                graph_func=lambda n: None,  # Not used in static noise
+                tesselation_func=dummy_tesselation_func,
+                N=N,
+                steps=steps,
+                angles_or_angles_list=theta,  # Single theta value for static noise
+                tesselation_order_or_list=None,  # Not used in static noise
+                initial_state_func=uniform_initial_state,
+                initial_state_kwargs=initial_state_kwargs,
+                parameter_list=devs,
+                samples=samples,
+                noise_type="static_noise",
+                parameter_name="static_dev",
+                samples_base_dir="experiments_data_samples",
+                probdist_base_dir="experiments_data_samples_probDist",
+                theta=theta
+            )
+            print("[OK] Mean probability distributions ready for analysis")
+            
+        except Exception as e:
+            print(f"[WARNING] Warning: Could not smart load/create mean probability distributions: {e}")
+            mean_results = None
+    else:
+        print("\n=== PROBABILITY DISTRIBUTION PHASE SKIPPED ===")
+        print("Probability distribution computation disabled")
+
+    # Early exit if only computing samples and probability distributions (no analysis)  
+    if not COMPUTE_ANALYSIS:
+        master_logger.info("ANALYSIS PHASE SKIPPED")
+        print("\n=== ANALYSIS PHASE SKIPPED ===")
+        print("Analysis phase disabled. Probability distributions completed.")
+        
+        # Create tar archive if enabled
+        if CREATE_TAR_ARCHIVE:
+            master_logger.info("Creating tar archive...")
+            create_experiment_archive(N, samples)
+        else:
+            master_logger.info("Archiving disabled")
+            print("Archiving disabled (CREATE_TAR_ARCHIVE=False)")
+        
+        print("To run analysis on existing data, enable:")
+        print("  COMPUTE_ANALYSIS = True")
+        
+        total_time = time.time() - start_time
+        master_logger.info(f"Total execution time: {total_time:.2f} seconds")
+        master_logger.info("Experiment completed (no analysis mode)")
+        
+        print(f"Total execution time: {total_time:.2f} seconds")
+        
+        return {
+            "mode": "no_analysis",
+            "devs": devs,
+            "N": N,
+            "steps": steps,
+            "samples": samples,
+            "total_time": total_time,
+            "theta": theta,
+            "completed_samples": completed_samples,
+            "mean_results_computed": COMPUTE_PROB_DISTRIBUTIONS,
+            "multiprocessing": True,
+            "process_results": process_results,
+            "master_log_file": master_log_file,
+            "process_log_dir": PROCESS_LOG_DIR
+        }
+
     # Analysis phase
     print("\n=== ANALYSIS PHASE ===")
-    print("Loading existing samples and computing analysis...")
+    print("Computing analysis from probability distributions...")
 
-    # Smart load or create mean probability distributions
-    print("\n[DATA] Smart loading/creating mean probability distributions...")
-    try:
-        mean_results = smart_load_or_create_experiment(
-            graph_func=lambda n: None,  # Not used in static noise
-            tesselation_func=dummy_tesselation_func,
-            N=N,
-            steps=steps,
-            angles_or_angles_list=theta,  # Single theta value for static noise
-            tesselation_order_or_list=None,  # Not used in static noise
-            initial_state_func=uniform_initial_state,
-            initial_state_kwargs=initial_state_kwargs,
-            parameter_list=devs,
-            samples=samples,
-            noise_type="static_noise",
-            parameter_name="static_dev",
-            samples_base_dir="experiments_data_samples",
-            probdist_base_dir="experiments_data_samples_probDist",
-            theta=theta
-        )
-        print("[OK] Mean probability distributions ready for analysis")
+    # Ensure we have probability distributions for analysis
+    if mean_results is None and COMPUTE_PROB_DISTRIBUTIONS:
+        print("[WARNING] No mean probability distributions available despite COMPUTE_PROB_DISTRIBUTIONS=True")
+        print("         This may indicate an error in the probability distribution phase")
+    elif mean_results is None:
+        print("[INFO] No probability distributions available (COMPUTE_PROB_DISTRIBUTIONS=False)")
+        print("       Loading probability distributions from existing files if available...")
         
-    except Exception as e:
-        print(f"[WARNING] Warning: Could not smart load/create mean probability distributions: {e}")
-        mean_results = None
+        # Try to load existing probability distributions for analysis
+        try:
+            mean_results = smart_load_or_create_experiment(
+                graph_func=lambda n: None,  # Not used in static noise
+                tesselation_func=dummy_tesselation_func,
+                N=N,
+                steps=steps,
+                angles_or_angles_list=theta,  # Single theta value for static noise
+                tesselation_order_or_list=None,  # Not used in static noise
+                initial_state_func=uniform_initial_state,
+                initial_state_kwargs=initial_state_kwargs,
+                parameter_list=devs,
+                samples=samples,
+                noise_type="static_noise",
+                parameter_name="static_dev",
+                samples_base_dir="experiments_data_samples",
+                probdist_base_dir="experiments_data_samples_probDist",
+                theta=theta
+            )
+            print("[OK] Loaded existing mean probability distributions for analysis")
+        except Exception as e:
+            print(f"[WARNING] Could not load existing probability distributions: {e}")
+            mean_results = None
 
     # Create or load standard deviation data
     try:
@@ -1103,10 +1150,16 @@ def run_static_experiment():
         
         # Print final std values for verification
         for i, (dev, std_values) in enumerate(zip(devs, stds)):
-            if std_values and len(std_values) > 0:
-                print(f"Dev {dev:.3f}: Final std = {std_values[-1]:.3f}")
+            # Format dev for display based on type
+            if isinstance(dev, tuple):
+                dev_display = f"({dev[0]:.3f}, {dev[1]:.3f})"
             else:
-                print(f"Dev {dev:.3f}: No valid standard deviation data")
+                dev_display = f"{dev:.3f}"
+                
+            if std_values and len(std_values) > 0:
+                print(f"Dev {dev_display}: Final std = {std_values[-1]:.3f}")
+            else:
+                print(f"Dev {dev_display}: No valid standard deviation data")
                 
     except Exception as e:
         print(f"[WARNING] Warning: Could not create/load standard deviation data: {e}")
@@ -1126,6 +1179,12 @@ def run_static_experiment():
                     if len(std_values) > 0:
                         time_steps = list(range(len(std_values)))
                         
+                        # Format dev for display based on type
+                        if isinstance(dev, tuple):
+                            dev_label = f"({dev[0]:.3f}, {dev[1]:.3f})"
+                        else:
+                            dev_label = f"{dev:.3f}"
+                        
                         # Filter out zero values for log-log plot
                         if USE_LOGLOG_PLOT:
                             # Remove zero values which can't be plotted on log scale
@@ -1133,13 +1192,13 @@ def run_static_experiment():
                             if filtered_data:
                                 filtered_times, filtered_stds = zip(*filtered_data)
                                 plt.loglog(filtered_times, filtered_stds, 
-                                         label=f'Static deviation = {dev:.3f}', 
+                                         label=f'Static deviation = {dev_label}', 
                                          marker='o', markersize=3, linewidth=2)
 
 
                         else:
                             plt.plot(time_steps, std_values, 
-                                   label=f'Static deviation = {dev:.3f}', 
+                                   label=f'Static deviation = {dev_label}', 
                                    marker='o', markersize=3, linewidth=2)
                 
                 plt.xlabel('Time Step', fontsize=12)
@@ -1194,9 +1253,15 @@ def run_static_experiment():
                     if dev_mean_prob_dists and len(dev_mean_prob_dists) > final_step and dev_mean_prob_dists[final_step] is not None:
                         final_prob_dist = dev_mean_prob_dists[final_step].flatten()
                         
+                        # Format dev for display based on type
+                        if isinstance(dev, tuple):
+                            dev_label = f"({dev[0]:.3f}, {dev[1]:.3f})"
+                        else:
+                            dev_label = f"{dev:.3f}"
+                        
                         # Plot the probability distribution with log y-axis
                         plt.semilogy(domain, final_prob_dist, 
-                                   label=f'Static deviation = {dev:.3f}', 
+                                   label=f'Static deviation = {dev_label}', 
                                    linewidth=2, alpha=0.8)
                 
                 plt.xlabel('Position', fontsize=12)
@@ -1239,14 +1304,24 @@ def run_static_experiment():
     print(f"Total execution time: {total_time:.2f} seconds")
     
     print("\n=== Performance Summary ===")
-    print(f"Execution mode: {'Samples Only' if CALCULATE_SAMPLES_ONLY else 'Analysis Only' if SKIP_SAMPLE_COMPUTATION else 'Full Pipeline'}")
+    # Determine execution mode description
+    enabled_phases = []
+    if COMPUTE_SAMPLES:
+        enabled_phases.append("Samples")
+    if COMPUTE_PROB_DISTRIBUTIONS:
+        enabled_phases.append("Prob Distributions") 
+    if COMPUTE_ANALYSIS:
+        enabled_phases.append("Analysis")
+    
+    mode_description = " + ".join(enabled_phases) if enabled_phases else "No computation phases"
+    print(f"Execution mode: {mode_description}")
     print(f"System size (N): {N}")
     print(f"Time steps: {steps}")
     print(f"Samples per deviation: {samples}")
     print(f"Number of deviations: {len(devs)}")
     print(f"Multiprocessing: {MAX_PROCESSES} max processes")
     
-    if not SKIP_SAMPLE_COMPUTATION:
+    if COMPUTE_SAMPLES:
         print(f"Total quantum walks computed: {completed_samples}")
         successful_processes = len([r for r in process_results if r["success"]])
         print(f"Successful processes: {successful_processes}/{len(devs)}")
@@ -1265,11 +1340,16 @@ def run_static_experiment():
             print(f"  {status} dev={result['dev']:.4f}: {result['log_file']}")
     
     print("\n=== Execution Modes ===")
-    print("Available execution modes:")
-    print("1. Full Pipeline (default): Compute samples + analysis + plots + archive")
-    print("2. Samples Only: Set CALCULATE_SAMPLES_ONLY = True")
-    print("3. Analysis Only: Set SKIP_SAMPLE_COMPUTATION = True")
-    print("4. Custom: Adjust individual toggles for plotting, archiving, etc.")
+    print("Available execution phases (can be combined):")
+    print("1. Sample Computation: Set COMPUTE_SAMPLES = True")
+    print("2. Probability Distributions: Set COMPUTE_PROB_DISTRIBUTIONS = True") 
+    print("3. Analysis & Plotting: Set COMPUTE_ANALYSIS = True")
+    print("")
+    print("Common combinations:")
+    print("- Full Pipeline: All three phases enabled")
+    print("- Samples Only: COMPUTE_SAMPLES=True, others=False")  
+    print("- Analysis Only: COMPUTE_ANALYSIS=True, COMPUTE_PROB_DISTRIBUTIONS=True, COMPUTE_SAMPLES=False")
+    print("- Prob Dist Only: COMPUTE_PROB_DISTRIBUTIONS=True, others=False")
     
     print("\n=== Static Noise Details ===")
     print("Static noise model:")
@@ -1317,8 +1397,9 @@ def run_static_experiment():
         "total_time": total_time,
         "theta": theta,
         "completed_samples": completed_samples,
-        "sample_computation_enabled": not SKIP_SAMPLE_COMPUTATION,
-        "analysis_enabled": not CALCULATE_SAMPLES_ONLY,
+        "sample_computation_enabled": COMPUTE_SAMPLES,
+        "prob_distribution_enabled": COMPUTE_PROB_DISTRIBUTIONS,
+        "analysis_enabled": COMPUTE_ANALYSIS,
         "plotting_enabled": ENABLE_PLOTTING,
         "archiving_enabled": CREATE_TAR_ARCHIVE,
         "multiprocessing": True,

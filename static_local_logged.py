@@ -29,9 +29,6 @@ import signal
 import tarfile
 import traceback
 from datetime import datetime
-import multiprocessing as mp
-from concurrent.futures import ProcessPoolExecutor, as_completed
-import logging
 
 # Import crash-safe logging decorator
 from logging_module.crash_safe_logging import crash_safe_log
@@ -41,17 +38,17 @@ from logging_module.crash_safe_logging import crash_safe_log
 # ============================================================================
 
 # Plotting switch
-ENABLE_PLOTTING = False  # Set to False to disable plotting
-USE_LOGLOG_PLOT = False  # Set to True to use log-log scale for plotting
-PLOT_FINAL_PROBDIST = False  # Set to True to plot probability distributions at final time step
-SAVE_FIGURES = False  # Set to False to disable saving figures to files
+ENABLE_PLOTTING = True  # Set to False to disable plotting
+USE_LOGLOG_PLOT = True  # Set to True to use log-log scale for plotting
+PLOT_FINAL_PROBDIST = True  # Set to True to plot probability distributions at final time step
+SAVE_FIGURES = True  # Set to False to disable saving figures to files
 
 # Archive switch
-CREATE_TAR_ARCHIVE = True  # Set to True to create tar archive of experiments_data_samples folder
+CREATE_TAR_ARCHIVE = False  # Set to True to create tar archive of experiments_data_samples folder
 
 # Computation control switches
-CALCULATE_SAMPLES_ONLY = True  # Set to True to only compute and save samples (skip analysis)
-SKIP_SAMPLE_COMPUTATION = False  # Set to True to skip sample computation (analysis only)
+CALCULATE_SAMPLES_ONLY = False  # Set to True to only compute and save samples (skip analysis)
+SKIP_SAMPLE_COMPUTATION = True  # Set to True to skip sample computation (analysis only)
 
 # Check for environment variable overrides (from safe_background_launcher.py)
 if os.environ.get('ENABLE_PLOTTING'):
@@ -64,7 +61,7 @@ if os.environ.get('SKIP_SAMPLE_COMPUTATION'):
     SKIP_SAMPLE_COMPUTATION = os.environ.get('SKIP_SAMPLE_COMPUTATION').lower() == 'true'
 
 # Background execution switch - SAFER IMPLEMENTATION
-RUN_IN_BACKGROUND = True  # Set to True to automatically run the process in background
+RUN_IN_BACKGROUND = False  # Set to True to automatically run the process in background
 
 # Check if background execution has been disabled externally
 if os.environ.get('RUN_IN_BACKGROUND') == 'False':
@@ -73,17 +70,9 @@ BACKGROUND_LOG_FILE = "static_experiment_background.log"  # Log file for backgro
 BACKGROUND_PID_FILE = "static_experiment.pid"  # PID file to track background process
 
 # Experiment parameters
-N = 20000  # System size
-steps = N//4  # Time steps - now we can handle the full computation with streaming
-samples = 5  # Samples per deviation - changed from 1 to 5
-
-# Memory management warning (updated for streaming)
-print(f"📊 COMPUTATION SCALE: N={N}, steps={steps}, samples={samples}")
-print(f"🔧 STREAMING MODE: Memory-efficient computation saves states incrementally")
-if N > 10000 and steps > 1000:
-    print(f"⚠️  LARGE COMPUTATION: This will take significant time but use reasonable memory")
-    print("   Streaming approach keeps memory usage low regardless of problem size")
-    print("   Each process uses ~100MB instead of several GB")
+N = 10000  # System size
+steps = N//4  # Time steps
+samples = 20  # Samples per deviation - changed from 1 to 5
 
 # Check for forced parameter overrides from launcher
 if os.environ.get('FORCE_SAMPLES_COUNT'):
@@ -115,262 +104,14 @@ initial_state_kwargs = {"nodes": [N//2]}
 # 3. Mixed: devs = [0, (0.2, 0.3), 0.5] - can mix formats
 devs = [
     0,              # No noise (single value format)
-    (0.1, 0.0),     # Range [0.0, 0.1] - equivalent to old 0.1
-    (0.5, 0.8),     # Range [0.1, 0.5] - new format with min factor 0.2
-    (1.0, 0.6),     # Range [0.3, 1.0] - new format with min factor 0.3
-    (2, 0)     # Range [1.0, 10.0] - new format with min factor 0.1
+    ( theta/4 , 0.0),     
+    (theta/2, 0.2),     
+    (theta, 0.5),     
+    (2*theta, 0.5)             
 ]
 
-# Multiprocessing configuration
-# With streaming approach, memory is no longer the bottleneck, so we can use more processes
-MAX_PROCESSES = min(len(devs), mp.cpu_count())  # Use all available CPUs
-PROCESS_LOG_DIR = "process_logs"  # Directory for individual process logs
-
-# ============================================================================
-# MULTIPROCESSING LOGGING SETUP
-# ============================================================================
-
-def setup_process_logging(dev_value, process_id):
-    """Setup logging for individual processes"""
-    os.makedirs(PROCESS_LOG_DIR, exist_ok=True)
-    
-    # Format dev_value for filename (handle both old and new formats)
-    if isinstance(dev_value, str):
-        dev_str = dev_value  # Already formatted as string
-    elif isinstance(dev_value, (tuple, list)) and len(dev_value) == 2:
-        # New format: (max_dev, min_factor) or legacy (min, max)
-        if dev_value[1] <= 1.0 and dev_value[1] >= 0.0:
-            max_dev, min_factor = dev_value
-            min_dev = max_dev * min_factor
-            dev_str = f"max{max_dev:.3f}_min{min_dev:.3f}"
-        else:
-            min_val, max_val = dev_value
-            dev_str = f"min{min_val:.3f}_max{max_val:.3f}"
-    else:
-        # Single value format
-        dev_str = f"{float(dev_value):.3f}"
-    
-    log_filename = os.path.join(PROCESS_LOG_DIR, f"process_dev_{dev_str}_pid_{process_id}.log")
-    
-    # Create logger for this process
-    logger = logging.getLogger(f"dev_{dev_str}")
-    logger.setLevel(logging.INFO)
-    
-    # Remove any existing handlers
-    for handler in logger.handlers[:]:
-        logger.removeHandler(handler)
-    
-    # Create file handler
-    file_handler = logging.FileHandler(log_filename, mode='w')
-    file_handler.setLevel(logging.INFO)
-    
-    # Create console handler
-    console_handler = logging.StreamHandler()
-    console_handler.setLevel(logging.INFO)
-    
-    # Create formatter
-    formatter = logging.Formatter('[%(asctime)s] [PID:%(process)d] [DEV:%(name)s] %(levelname)s: %(message)s')
-    file_handler.setFormatter(formatter)
-    console_handler.setFormatter(formatter)
-    
-    # Add handlers to logger
-    logger.addHandler(file_handler)
-    logger.addHandler(console_handler)
-    
-    return logger, log_filename
-
-def setup_master_logging():
-    """Setup logging for the master process"""
-    master_log_filename = "static_experiment_multiprocess.log"
-    
-    # Create master logger
-    master_logger = logging.getLogger("master")
-    master_logger.setLevel(logging.INFO)
-    
-    # Remove any existing handlers
-    for handler in master_logger.handlers[:]:
-        master_logger.removeHandler(handler)
-    
-    # Create file handler
-    file_handler = logging.FileHandler(master_log_filename, mode='w')
-    file_handler.setLevel(logging.INFO)
-    
-    # Create console handler
-    console_handler = logging.StreamHandler()
-    console_handler.setLevel(logging.INFO)
-    
-    # Create formatter
-    formatter = logging.Formatter('[%(asctime)s] [MASTER] %(levelname)s: %(message)s')
-    file_handler.setFormatter(formatter)
-    console_handler.setFormatter(formatter)
-    
-    # Add handlers to logger
-    master_logger.addHandler(file_handler)
-    master_logger.addHandler(console_handler)
-    
-    return master_logger, master_log_filename
-
-# ============================================================================
-# MULTIPROCESSING WORKER FUNCTIONS
-# ============================================================================
-
-def compute_dev_samples(dev_args):
-    """Worker function to compute samples for a single deviation value in a separate process"""
-    dev, process_id, N, steps, samples, theta, initial_state_kwargs = dev_args
-    
-    # Setup logging for this process - need to format dev for logging
-    dev_str = f"{dev}" if isinstance(dev, (int, float)) else f"{dev[0]}_{dev[1]}" if isinstance(dev, (tuple, list)) else str(dev)
-    logger, log_file = setup_process_logging(dev_str, process_id)
-    
-    try:
-        logger.info(f"Starting computation for deviation {dev}")
-        logger.info(f"Parameters: N={N}, steps={steps}, samples={samples}, theta={theta:.4f}")
-        
-        # Import required modules (each process needs its own imports)
-        from sqw.experiments_expanded_static import running_streaming
-        from smart_loading_static import get_experiment_dir
-        import pickle
-        import gc  # For garbage collection
-        
-        # Create dummy tessellation function
-        def dummy_tesselation_func(N):
-            return None
-        
-        # Setup experiment directory - handle new deviation format
-        if isinstance(dev, (tuple, list)) and len(dev) == 2:
-            # New format: (max_dev, min_factor) or legacy (min, max)
-            if dev[1] <= 1.0 and dev[1] >= 0.0:
-                # New format
-                max_dev, min_factor = dev
-                has_noise = max_dev > 0
-            else:
-                # Legacy format
-                min_val, max_val = dev
-                has_noise = max_val > 0
-        else:
-            # Single value format
-            has_noise = dev > 0
-        
-        noise_params = [dev] if has_noise else [0]
-        exp_dir = get_experiment_dir(dummy_tesselation_func, has_noise, N, 
-                                   noise_params=noise_params, noise_type="static_noise", 
-                                   base_dir="experiments_data_samples", theta=theta)
-        os.makedirs(exp_dir, exist_ok=True)
-        
-        logger.info(f"Experiment directory: {exp_dir}")
-        
-        dev_start_time = time.time()
-        dev_computed_samples = 0
-        
-        for sample_idx in range(samples):
-            sample_start_time = time.time()
-            
-            # Check if this sample already exists (all step files)
-            sample_exists = True
-            for step_idx in range(steps):
-                step_dir = os.path.join(exp_dir, f"step_{step_idx}")
-                filename = f"final_step_{step_idx}_sample{sample_idx}.pkl"
-                filepath = os.path.join(step_dir, filename)
-                if not os.path.exists(filepath):
-                    sample_exists = False
-                    break
-            
-            if sample_exists:
-                logger.info(f"Sample {sample_idx+1}/{samples} already exists, skipping")
-                dev_computed_samples += 1
-                continue
-            
-            logger.info(f"Computing sample {sample_idx+1}/{samples}...")
-            
-            # Extract initial nodes from initial_state_kwargs
-            initial_nodes = initial_state_kwargs.get('nodes', [])
-            
-            # Create step callback function for streaming saves
-            def save_step_callback(step_idx, state):
-                """Callback function to save each step as it's computed"""
-                step_dir = os.path.join(exp_dir, f"step_{step_idx}")
-                os.makedirs(step_dir, exist_ok=True)
-                
-                filename = f"final_step_{step_idx}_sample{sample_idx}.pkl"
-                filepath = os.path.join(step_dir, filename)
-                
-                with open(filepath, 'wb') as f:
-                    pickle.dump(state, f)
-                
-                # Progress logging for large computations
-                if step_idx % 100 == 0 or step_idx == steps:
-                    logger.info(f"    Saved step {step_idx}/{steps}")
-            
-            # Memory-efficient streaming approach
-            try:
-                # Run the quantum walk experiment using streaming approach
-                logger.info(f"  Running streaming quantum walk: N={N}, steps={steps}, dev={dev}")
-                
-                final_state = running_streaming(
-                    N, theta, steps,
-                    initial_nodes=initial_nodes,
-                    deviation_range=dev,
-                    step_callback=save_step_callback
-                )
-                
-                logger.info(f"  Streaming computation completed, all {steps+1} steps saved incrementally")
-                
-                # No need to explicitly delete anything - streaming approach doesn't accumulate states
-                
-            except MemoryError as mem_error:
-                logger.error(f"Memory error during computation: {mem_error}")
-                logger.error("Consider reducing N, steps, or running fewer processes simultaneously")
-                raise
-            except Exception as comp_error:
-                logger.error(f"Computation error: {comp_error}")
-                raise
-            
-            dev_computed_samples += 1
-            sample_time = time.time() - sample_start_time
-            
-            # Force garbage collection to free memory
-            gc.collect()
-            
-            logger.info(f"Sample {sample_idx+1}/{samples} completed in {sample_time:.1f}s")
-        
-        dev_time = time.time() - dev_start_time
-        # Format dev for display
-        if isinstance(dev, tuple):
-            dev_str = f"max{dev[0]:.3f}_min{dev[0]*dev[1]:.3f}"
-        else:
-            dev_str = f"{dev:.4f}"
-        logger.info(f"Deviation {dev_str} completed: {dev_computed_samples} samples in {dev_time:.1f}s")
-        
-        return {
-            "dev": dev,
-            "process_id": process_id,
-            "computed_samples": dev_computed_samples,
-            "total_time": dev_time,
-            "log_file": log_file,
-            "success": True,
-            "error": None
-        }
-        
-    except Exception as e:
-        import traceback
-        # Format dev for display
-        if isinstance(dev, tuple):
-            dev_str = f"max{dev[0]:.3f}_min{dev[0]*dev[1]:.3f}"
-        else:
-            dev_str = f"{dev:.4f}"
-        error_msg = f"Error in process for dev {dev_str}: {str(e)}"
-        logger.error(error_msg)
-        logger.error(traceback.format_exc())
-        
-        return {
-            "dev": dev,
-            "process_id": process_id,
-            "computed_samples": 0,
-            "total_time": 0,
-            "log_file": log_file,
-            "success": False,
-            "error": error_msg
-        }
+# Note: Set USE_LOGLOG_PLOT = True in the plotting configuration above to use log-log scale
+# This is useful for identifying power-law behavior in the standard deviation growth
 
 # ============================================================================
 # STANDARD DEVIATION DATA MANAGEMENT
@@ -810,35 +551,8 @@ def run_static_experiment():
 
     print("Starting static noise quantum walk experiment...")
     
-    # Memory safety check (updated for streaming approach)
-    # With streaming, we only hold one state at a time, not all states
-    estimated_memory_per_process_mb = (N * 16 * 3) / (1024 * 1024)  # ~3 states max (current + temp calculations)
-    total_estimated_memory_mb = estimated_memory_per_process_mb * MAX_PROCESSES
-    
-    print(f"Memory estimation (streaming approach):")
-    print(f"  Per process: ~{estimated_memory_per_process_mb:.0f} MB (single state + overhead)")
-    print(f"  Total (all processes): ~{total_estimated_memory_mb:.0f} MB")
-    print(f"  Traditional approach would need: ~{(steps * N * 16 * 2 * MAX_PROCESSES) / (1024 * 1024):.0f} MB")
-    
-    if total_estimated_memory_mb > 8000:  # This threshold is much less likely to be hit now
-        print("⚠️  WARNING: High memory usage predicted!")
-        print("   Consider reducing N or MAX_PROCESSES")
-    else:
-        print("✓ Memory usage looks reasonable with streaming approach")
-    
     print(f"Experiment parameters: N={N}, steps={steps}, samples={samples}")
-    print(f"Multiprocessing: Using up to {MAX_PROCESSES} processes for {len(devs)} deviations")
-    print("MULTIPROCESS MODE: Each deviation will run in a separate process!")
-    
-    # Setup master logging
-    master_logger, master_log_file = setup_master_logging()
-    master_logger.info("=" * 60)
-    master_logger.info("MULTIPROCESS STATIC NOISE EXPERIMENT STARTED")
-    master_logger.info("=" * 60)
-    master_logger.info(f"Parameters: N={N}, steps={steps}, samples={samples}")
-    master_logger.info(f"Deviations: {devs}")
-    master_logger.info(f"Max processes: {MAX_PROCESSES}")
-    master_logger.info(f"Master log file: {master_log_file}")
+    print("IMMEDIATE SAVE MODE: Each sample will be saved as soon as it's computed!")
     
     # Start timing the main experiment
     start_time = time.time()
@@ -850,176 +564,114 @@ def run_static_experiment():
         """Dummy tessellation function for static noise (tessellations are built-in)"""
         return None
 
-    # Sample computation phase with multiprocessing
+    # Sample computation phase
     experiment_time = 0
-    process_results = []
+    completed_samples = 0
     
     if not SKIP_SAMPLE_COMPUTATION:
-        master_logger.info("=" * 40)
-        master_logger.info("MULTIPROCESS SAMPLE COMPUTATION PHASE")
-        master_logger.info("=" * 40)
+        print("=== SAMPLE COMPUTATION PHASE ===")
+        print("Computing and saving quantum walk samples...")
         
-        # Prepare arguments for each process
-        process_args = []
-        for process_id, dev in enumerate(devs):
-            args = (dev, process_id, N, steps, samples, theta, initial_state_kwargs)
-            process_args.append(args)
-        
-        master_logger.info(f"Launching {len(process_args)} processes...")
-        
-        # Track process information
-        process_info = {}
-        for i, (dev, process_id, *_) in enumerate(process_args):
-            # Format dev for filename (handle both old and new formats)
+        # Run experiments with immediate saving for each sample
+        for dev_idx, dev in enumerate(devs):
+            # Format dev for display
             if isinstance(dev, (tuple, list)) and len(dev) == 2:
                 # New format: (max_dev, min_factor) or legacy (min, max)
                 if dev[1] <= 1.0 and dev[1] >= 0.0:
                     max_dev, min_factor = dev
-                    min_dev = max_dev * min_factor
-                    dev_str = f"max{max_dev:.3f}_min{min_dev:.3f}"
+                    has_noise = max_dev > 0
+                    dev_str = f"max{max_dev:.3f}_min{max_dev * min_factor:.3f}"
                 else:
                     min_val, max_val = dev
+                    has_noise = max_val > 0
                     dev_str = f"min{min_val:.3f}_max{max_val:.3f}"
             else:
                 # Single value format
-                dev_str = f"{float(dev):.3f}"
-                
-            log_file = os.path.join(PROCESS_LOG_DIR, f"process_dev_{dev_str}_pid_{process_id}.log")
-            process_info[dev] = {
-                "process_id": process_id,
-                "log_file": log_file,
-                "start_time": None,
-                "end_time": None,
-                "status": "pending"
-            }
-        
-        # Execute processes concurrently
-        try:
-            with ProcessPoolExecutor(max_workers=MAX_PROCESSES) as executor:
-                # Submit all jobs
-                future_to_dev = {}
-                for args in process_args:
-                    dev = args[0]
-                    future = executor.submit(compute_dev_samples, args)
-                    future_to_dev[future] = dev
-                    process_info[dev]["start_time"] = time.time()
-                    process_info[dev]["status"] = "running"
-                    # Format dev for display
-                    if isinstance(dev, tuple):
-                        dev_str = f"max{dev[0]:.3f}_min{dev[0]*dev[1]:.3f}"
-                    else:
-                        dev_str = f"{dev:.4f}"
-                    master_logger.info(f"Process launched for dev={dev_str} (PID will be assigned)")
-                
-                # Collect results as they complete
-                for future in as_completed(future_to_dev):
-                    dev = future_to_dev[future]
-                    try:
-                        result = future.result()
-                        process_results.append(result)
-                        process_info[dev]["end_time"] = time.time()
-                        
-                        if result["success"]:
-                            process_info[dev]["status"] = "completed"
-                            completed_samples += result["computed_samples"]
-                            # Format dev for display
-                            if isinstance(dev, tuple):
-                                dev_str = f"max{dev[0]:.3f}_min{dev[0]*dev[1]:.3f}"
-                            else:
-                                dev_str = f"{dev:.4f}"
-                            master_logger.info(f"✓ Process for dev={dev_str} completed successfully")
-                            master_logger.info(f"  Computed samples: {result['computed_samples']}")
-                            master_logger.info(f"  Time: {result['total_time']:.1f}s")
-                            master_logger.info(f"  Log file: {result['log_file']}")
-                        else:
-                            process_info[dev]["status"] = "failed"
-                            # Format dev for display
-                            if isinstance(dev, tuple):
-                                dev_str = f"max{dev[0]:.3f}_min{dev[0]*dev[1]:.3f}"
-                            else:
-                                dev_str = f"{dev:.4f}"
-                            master_logger.error(f"✗ Process for dev={dev_str} failed")
-                            master_logger.error(f"  Error: {result['error']}")
-                            master_logger.error(f"  Log file: {result['log_file']}")
-                            
-                    except Exception as e:
-                        import traceback
-                        process_info[dev]["status"] = "failed"
-                        process_info[dev]["end_time"] = time.time()
-                        # Format dev for display
-                        if isinstance(dev, tuple):
-                            dev_str = f"max{dev[0]:.3f}_min{dev[0]*dev[1]:.3f}"
-                        else:
-                            dev_str = f"{dev:.4f}"
-                        error_msg = f"Exception in process for dev={dev_str}: {str(e)}"
-                        master_logger.error(error_msg)
-                        master_logger.error(traceback.format_exc())
-                        
-                        process_results.append({
-                            "dev": dev,
-                            "process_id": -1,
-                            "computed_samples": 0,
-                            "total_time": 0,
-                            "log_file": "unknown",
-                            "success": False,
-                            "error": error_msg
-                        })
-        
-        except Exception as e:
-            import traceback
-            master_logger.error(f"Critical error in multiprocessing: {str(e)}")
-            master_logger.error(traceback.format_exc())
-            raise
-
-        experiment_time = time.time() - start_time
-        
-        # Log final results
-        master_logger.info("=" * 40)
-        master_logger.info("MULTIPROCESS COMPUTATION COMPLETED")
-        master_logger.info("=" * 40)
-        master_logger.info(f"Total execution time: {experiment_time:.2f} seconds")
-        master_logger.info(f"Total samples computed: {completed_samples}/{total_samples}")
-        
-        # Log individual process results
-        master_logger.info("\nPROCESS SUMMARY:")
-        successful_processes = 0
-        failed_processes = 0
-        
-        for result in process_results:
-            dev = result["dev"]
-            # Format dev for display
-            if isinstance(dev, tuple):
-                dev_str = f"max{dev[0]:.3f}_min{dev[0]*dev[1]:.3f}"
-            else:
+                has_noise = dev > 0
                 dev_str = f"{dev:.4f}"
             
-            if result["success"]:
-                successful_processes += 1
-                master_logger.info(f"  ✓ dev={dev_str}: {result['computed_samples']} samples in {result['total_time']:.1f}s")
-            else:
-                failed_processes += 1
-                master_logger.error(f"  ✗ dev={dev_str}: FAILED - {result['error']}")
-        
-        master_logger.info(f"\nRESULTS: {successful_processes} successful, {failed_processes} failed processes")
-        
-        # Log process log file locations
-        master_logger.info("\nPROCESS LOG FILES:")
-        for dev, info in process_info.items():
-            # Format dev for display
+            print(f"\n=== Processing static noise deviation {dev_str} ({dev_idx+1}/{len(devs)}) ===")
+            
+            # Setup experiment directory
+            noise_params = [dev] if has_noise else [0]  # Static noise uses single parameter
+            exp_dir = get_experiment_dir(dummy_tesselation_func, has_noise, N, noise_params=noise_params, noise_type="static_noise", base_dir="experiments_data_samples", theta=theta)
+            os.makedirs(exp_dir, exist_ok=True)
+            
+            dev_start_time = time.time()
+            dev_computed_samples = 0
+            
+            for sample_idx in range(samples):
+                sample_start_time = time.time()
+                
+                # Check if this sample already exists (all step files)
+                sample_exists = True
+                for step_idx in range(steps):
+                    step_dir = os.path.join(exp_dir, f"step_{step_idx}")
+                    filename = f"final_step_{step_idx}_sample{sample_idx}.pkl"
+                    filepath = os.path.join(step_dir, filename)
+                    if not os.path.exists(filepath):
+                        sample_exists = False
+                        break
+                
+                if sample_exists:
+                    print(f"  [OK] Sample {sample_idx+1}/{samples} already exists, skipping")
+                    completed_samples += 1
+                    continue
+                
+                print(f"  [COMPUTING] Computing sample {sample_idx+1}/{samples}...")
+                
+                # For static noise, we don't need to generate angle sequences
+                # The noise is applied internally by the running function
+                deviation_range = dev
+                
+                # Extract initial nodes from initial_state_kwargs
+                initial_nodes = initial_state_kwargs.get('nodes', [])
+                
+                # Run the quantum walk experiment for this sample using static noise
+                walk_result = running(
+                    N, theta, steps,
+                    initial_nodes=initial_nodes,
+                    deviation_range=deviation_range,
+                    return_all_states=True
+                )
+                
+                # Save each step immediately
+                for step_idx in range(steps):
+                    step_dir = os.path.join(exp_dir, f"step_{step_idx}")
+                    os.makedirs(step_dir, exist_ok=True)
+                    
+                    filename = f"final_step_{step_idx}_sample{sample_idx}.pkl"
+                    filepath = os.path.join(step_dir, filename)
+                    
+                    with open(filepath, 'wb') as f:
+                        pickle.dump(walk_result[step_idx], f)
+                
+                dev_computed_samples += 1
+                completed_samples += 1
+                sample_time = time.time() - sample_start_time
+                
+                # Progress report
+                progress_pct = (completed_samples / total_samples) * 100
+                elapsed_time = time.time() - start_time
+                estimated_total_time = elapsed_time * total_samples / completed_samples if completed_samples > 0 else 0
+                remaining_time = estimated_total_time - elapsed_time if estimated_total_time > elapsed_time else 0
+                
+                print(f"  [OK] Sample {sample_idx+1}/{samples} saved in {sample_time:.1f}s")
+                print(f"     Progress: {completed_samples}/{total_samples} ({progress_pct:.1f}%)")
+                print(f"     Elapsed: {elapsed_time:.1f}s, Remaining: ~{remaining_time:.1f}s")
+            
+            dev_time = time.time() - dev_start_time
+            # Format deviation for display based on type
             if isinstance(dev, tuple):
-                dev_str = f"max{dev[0]:.3f}_min{dev[0]*dev[1]:.3f}"
+                dev_display = f"({dev[0]:.4f}, {dev[1]:.4f})"
             else:
-                dev_str = f"{dev:.4f}"
-            master_logger.info(f"  dev={dev_str}: {info['log_file']}")
-        
-        print(f"\n[COMPLETED] Multiprocess sample computation completed in {experiment_time:.2f} seconds")
+                dev_display = f"{dev:.4f}"
+            print(f"[OK] Static noise deviation {dev_display} completed: {dev_computed_samples} new samples in {dev_time:.1f}s")
+
+        experiment_time = time.time() - start_time
+        print(f"\n[COMPLETED] Sample computation completed in {experiment_time:.2f} seconds")
         print(f"Total samples computed: {completed_samples}")
-        print(f"Successful processes: {successful_processes}/{len(devs)}")
-        print(f"Master log file: {master_log_file}")
-        print(f"Process log directory: {PROCESS_LOG_DIR}")
-        
     else:
-        master_logger.info("SKIPPING SAMPLE COMPUTATION")
         print("=== SKIPPING SAMPLE COMPUTATION ===")
         print("Sample computation disabled - proceeding to analysis phase")
         experiment_time = 0
@@ -1027,16 +679,13 @@ def run_static_experiment():
 
     # Early exit if only computing samples
     if CALCULATE_SAMPLES_ONLY:
-        master_logger.info("SAMPLES ONLY MODE - ANALYSIS SKIPPED")
         print("\n=== SAMPLES ONLY MODE - ANALYSIS SKIPPED ===")
         print("Sample computation completed. Skipping analysis and plotting.")
         
         # Create tar archive if enabled (even in samples-only mode)
         if CREATE_TAR_ARCHIVE:
-            master_logger.info("Creating tar archive...")
             create_experiment_archive(N, samples)
         else:
-            master_logger.info("Archiving disabled")
             print("Archiving disabled (CREATE_TAR_ARCHIVE=False)")
         
         print("To run analysis on existing samples, set:")
@@ -1044,9 +693,6 @@ def run_static_experiment():
         print("  SKIP_SAMPLE_COMPUTATION = True")
         
         total_time = time.time() - start_time
-        master_logger.info(f"Total execution time: {total_time:.2f} seconds")
-        master_logger.info("Experiment completed (samples only mode)")
-        
         print(f"Total execution time: {total_time:.2f} seconds")
         
         return {
@@ -1057,11 +703,7 @@ def run_static_experiment():
             "samples": samples,
             "total_time": total_time,
             "theta": theta,
-            "completed_samples": completed_samples,
-            "multiprocessing": True,
-            "process_results": process_results,
-            "master_log_file": master_log_file,
-            "process_log_dir": PROCESS_LOG_DIR
+            "completed_samples": completed_samples
         }
 
     # Analysis phase
@@ -1098,15 +740,21 @@ def run_static_experiment():
     try:
         stds = create_or_load_std_data(
             mean_results, devs, N, steps, dummy_tesselation_func,
-            "experiments_data_samples_std", "static_noise", theta=theta
+            "experiments_data_samples_std", "static_noise", theta
         )
         
         # Print final std values for verification
         for i, (dev, std_values) in enumerate(zip(devs, stds)):
-            if std_values and len(std_values) > 0:
-                print(f"Dev {dev:.3f}: Final std = {std_values[-1]:.3f}")
+            # Format dev for display based on type
+            if isinstance(dev, tuple):
+                dev_display = f"({dev[0]:.3f}, {dev[1]:.3f})"
             else:
-                print(f"Dev {dev:.3f}: No valid standard deviation data")
+                dev_display = f"{dev:.3f}"
+                
+            if std_values and len(std_values) > 0:
+                print(f"Dev {dev_display}: Final std = {std_values[-1]:.3f}")
+            else:
+                print(f"Dev {dev_display}: No valid standard deviation data")
                 
     except Exception as e:
         print(f"[WARNING] Warning: Could not create/load standard deviation data: {e}")
@@ -1126,6 +774,12 @@ def run_static_experiment():
                     if len(std_values) > 0:
                         time_steps = list(range(len(std_values)))
                         
+                        # Format dev for display based on type
+                        if isinstance(dev, tuple):
+                            dev_label = f"({dev[0]:.3f}, {dev[1]:.3f})"
+                        else:
+                            dev_label = f"{dev:.3f}"
+                        
                         # Filter out zero values for log-log plot
                         if USE_LOGLOG_PLOT:
                             # Remove zero values which can't be plotted on log scale
@@ -1133,13 +787,13 @@ def run_static_experiment():
                             if filtered_data:
                                 filtered_times, filtered_stds = zip(*filtered_data)
                                 plt.loglog(filtered_times, filtered_stds, 
-                                         label=f'Static deviation = {dev:.3f}', 
+                                         label=f'Static deviation = {dev_label}', 
                                          marker='o', markersize=3, linewidth=2)
 
 
                         else:
                             plt.plot(time_steps, std_values, 
-                                   label=f'Static deviation = {dev:.3f}', 
+                                   label=f'Static deviation = {dev_label}', 
                                    marker='o', markersize=3, linewidth=2)
                 
                 plt.xlabel('Time Step', fontsize=12)
@@ -1194,9 +848,15 @@ def run_static_experiment():
                     if dev_mean_prob_dists and len(dev_mean_prob_dists) > final_step and dev_mean_prob_dists[final_step] is not None:
                         final_prob_dist = dev_mean_prob_dists[final_step].flatten()
                         
+                        # Format dev for display based on type
+                        if isinstance(dev, tuple):
+                            dev_label = f"({dev[0]:.3f}, {dev[1]:.3f})"
+                        else:
+                            dev_label = f"{dev:.3f}"
+                        
                         # Plot the probability distribution with log y-axis
                         plt.semilogy(domain, final_prob_dist, 
-                                   label=f'Static deviation = {dev:.3f}', 
+                                   label=f'Static deviation = {dev_label}', 
                                    linewidth=2, alpha=0.8)
                 
                 plt.xlabel('Position', fontsize=12)
@@ -1235,7 +895,6 @@ def run_static_experiment():
 
     print("Static noise experiment completed successfully!")
     total_time = time.time() - start_time
-    master_logger.info(f"EXPERIMENT COMPLETED - Total time: {total_time:.2f} seconds")
     print(f"Total execution time: {total_time:.2f} seconds")
     
     print("\n=== Performance Summary ===")
@@ -1244,25 +903,13 @@ def run_static_experiment():
     print(f"Time steps: {steps}")
     print(f"Samples per deviation: {samples}")
     print(f"Number of deviations: {len(devs)}")
-    print(f"Multiprocessing: {MAX_PROCESSES} max processes")
     
     if not SKIP_SAMPLE_COMPUTATION:
         print(f"Total quantum walks computed: {completed_samples}")
-        successful_processes = len([r for r in process_results if r["success"]])
-        print(f"Successful processes: {successful_processes}/{len(devs)}")
         if experiment_time > 0 and completed_samples > 0:
             print(f"Average time per quantum walk: {experiment_time / completed_samples:.3f} seconds")
     else:
         print(f"Expected quantum walks: {len(devs) * samples} (sample computation skipped)")
-    
-    print("\n=== Multiprocessing Log Files ===")
-    print(f"Master log: {master_log_file}")
-    print(f"Process logs directory: {PROCESS_LOG_DIR}")
-    if process_results:
-        print("Individual process logs:")
-        for result in process_results:
-            status = "✓" if result["success"] else "✗"
-            print(f"  {status} dev={result['dev']:.4f}: {result['log_file']}")
     
     print("\n=== Execution Modes ===")
     print("Available execution modes:")
@@ -1278,7 +925,6 @@ def run_static_experiment():
     print("- Each sample generates different random noise for edge parameters")
     print("- Mean probability distributions average over all samples")
     print("- Tessellations are built-in (alpha and beta patterns)")
-    print("- MULTIPROCESSING: Each deviation value runs in separate process")
     
     print("\n=== Plotting Features ===")
     print(f"- Plotting enabled: {ENABLE_PLOTTING}")
@@ -1320,32 +966,15 @@ def run_static_experiment():
         "sample_computation_enabled": not SKIP_SAMPLE_COMPUTATION,
         "analysis_enabled": not CALCULATE_SAMPLES_ONLY,
         "plotting_enabled": ENABLE_PLOTTING,
-        "archiving_enabled": CREATE_TAR_ARCHIVE,
-        "multiprocessing": True,
-        "max_processes": MAX_PROCESSES,
-        "process_results": process_results,
-        "master_log_file": master_log_file,
-        "process_log_dir": PROCESS_LOG_DIR
+        "archiving_enabled": CREATE_TAR_ARCHIVE
     }
 
 if __name__ == "__main__":
-    # Multiprocessing protection for Windows
-    mp.set_start_method('spawn', force=True)
-    
     try:
         run_static_experiment()
     except Exception as e:
         error_msg = f"Fatal error in run_static_experiment: {e}"
         print(error_msg)
-        
-        # Try to log to master logger if available
-        try:
-            master_logger = logging.getLogger("master")
-            if master_logger.handlers:
-                master_logger.error(error_msg)
-                master_logger.error(traceback.format_exc())
-        except:
-            pass
         
         # If we're in background mode, write the error to the log file
         if os.environ.get('IS_BACKGROUND_PROCESS'):

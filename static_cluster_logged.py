@@ -106,7 +106,7 @@ devs = [0, 0.1, 0.5,1, 10]
 # STANDARD DEVIATION DATA MANAGEMENT
 # ============================================================================
 
-def create_or_load_std_data(mean_results, devs, N, steps, tesselation_func, std_base_dir, noise_type):
+def create_or_load_std_data(mean_results, devs, N, steps, tesselation_func, std_base_dir, noise_type, theta=None):
     """
     Create or load standard deviation data from mean probability distributions.
     
@@ -146,7 +146,7 @@ def create_or_load_std_data(mean_results, devs, N, steps, tesselation_func, std_
         noise_params = [dev] if has_noise else [0]  # Static noise uses single parameter
         std_dir = get_experiment_dir(tesselation_func, has_noise, N, 
                                    noise_params=noise_params, noise_type=noise_type, 
-                                   base_dir=std_base_dir)
+                                   base_dir=std_base_dir, theta=theta)
         os.makedirs(std_dir, exist_ok=True)
         
         std_filepath = os.path.join(std_dir, "std_vs_time.pkl")
@@ -551,7 +551,7 @@ def run_static_experiment():
             # Setup experiment directory
             has_noise = dev > 0
             noise_params = [dev] if has_noise else [0]  # Static noise uses single parameter
-            exp_dir = get_experiment_dir(dummy_tesselation_func, has_noise, N, noise_params=noise_params, noise_type="static_noise", base_dir="experiments_data_samples")
+            exp_dir = get_experiment_dir(dummy_tesselation_func, has_noise, N, noise_params=noise_params, noise_type="static_noise", base_dir="experiments_data_samples", theta=theta)
             os.makedirs(exp_dir, exist_ok=True)
             
             dev_start_time = time.time()
@@ -679,7 +679,8 @@ def run_static_experiment():
             noise_type="static_noise",
             parameter_name="static_dev",
             samples_base_dir="experiments_data_samples",
-            probdist_base_dir="experiments_data_samples_probDist"
+            probdist_base_dir="experiments_data_samples_probDist",
+            theta=theta
         )
         print("[OK] Mean probability distributions ready for analysis")
         
@@ -691,7 +692,7 @@ def run_static_experiment():
     try:
         stds = create_or_load_std_data(
             mean_results, devs, N, steps, dummy_tesselation_func,
-            "experiments_data_samples_std", "static_noise"
+            "experiments_data_samples_std", "static_noise", theta=theta
         )
         
         # Print final std values for verification
