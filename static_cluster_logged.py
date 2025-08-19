@@ -38,10 +38,10 @@ from logging_module.crash_safe_logging import crash_safe_log
 # ============================================================================
 
 # Plotting switch
-ENABLE_PLOTTING = True  # Set to False to disable plotting
-USE_LOGLOG_PLOT = True  # Set to True to use log-log scale for plotting
-PLOT_FINAL_PROBDIST = True  # Set to True to plot probability distributions at final time step
-SAVE_FIGURES = True  # Set to False to disable saving figures to files
+ENABLE_PLOTTING = False  # Set to False to disable plotting
+USE_LOGLOG_PLOT = False  # Set to True to use log-log scale for plotting
+PLOT_FINAL_PROBDIST = False  # Set to True to plot probability distributions at final time step
+SAVE_FIGURES = False  # Set to False to disable saving figures to files
 
 # Archive switches
 CREATE_TAR_ARCHIVE = True  # Set to True to create tar archive
@@ -318,6 +318,10 @@ def create_experiment_archive(N, samples):
 def run_static_experiment():
     """Run the static noise quantum walk experiment with configurable execution modes."""
     
+    # Declare global variables that will be modified
+    global COMPUTE_RAW_SAMPLES, COMPUTE_PROBDIST, COMPUTE_STD_DATA
+    global ARCHIVE_SAMPLES, ARCHIVE_PROBDIST
+    
     # Validate configuration
     if CALCULATE_SAMPLES_ONLY and SKIP_SAMPLE_COMPUTATION:
         raise ValueError("Invalid configuration: Cannot set both CALCULATE_SAMPLES_ONLY=True and SKIP_SAMPLE_COMPUTATION=True")
@@ -327,12 +331,18 @@ def run_static_experiment():
         COMPUTE_RAW_SAMPLES = True
         COMPUTE_PROBDIST = False
         COMPUTE_STD_DATA = False
+        # Also override archive settings to match what's being computed
+        ARCHIVE_PROBDIST = False  # Can't archive what's not computed
         print("SAMPLES ONLY mode: Forcing COMPUTE_RAW_SAMPLES=True, COMPUTE_PROBDIST=False, COMPUTE_STD_DATA=False")
+        print("                   Also forcing ARCHIVE_PROBDIST=False (not computing probdist)")
     
     if SKIP_SAMPLE_COMPUTATION:
         COMPUTE_RAW_SAMPLES = False
+        # Also override archive settings to match what's being computed
+        ARCHIVE_SAMPLES = False  # Can't archive what's not computed
         # Keep COMPUTE_PROBDIST and COMPUTE_STD_DATA as they were set (allows selective analysis)
         print("ANALYSIS ONLY mode: Forcing COMPUTE_RAW_SAMPLES=False")
+        print("                    Also forcing ARCHIVE_SAMPLES=False (not computing samples)")
     
     if CREATE_TAR_ARCHIVE and not ARCHIVE_SAMPLES and not ARCHIVE_PROBDIST:
         print("WARNING: Archive enabled but no content selected (ARCHIVE_SAMPLES=False, ARCHIVE_PROBDIST=False)")
