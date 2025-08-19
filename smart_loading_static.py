@@ -44,51 +44,88 @@ def find_experiment_dir_flexible(
 ):
     """
     Find experiment directory supporting both old and new formats.
-    For single values, tries both legacy format (dev_1.000) and new format (dev_max1.000_min0.000).
+    Updated to work with unified folder structure.
     
     Returns:
-        Tuple (directory_path, found_format) where found_format is 'legacy' or 'new' or None if not found
+        Tuple (directory_path, found_format) where found_format is 'legacy', 'new', or 'unified'
     """
-    if noise_type != "static_noise" or not has_noise or not noise_params:
-        # Use standard directory for non-static noise or no noise cases
-        return get_experiment_dir(tesselation_func, has_noise, N, noise_params, noise_type, base_dir, theta), 'standard'
+    if noise_type != "static_noise" or not noise_params:
+        # Use standard directory for non-static noise cases
+        return get_experiment_dir(tesselation_func, has_noise, N, noise_params, noise_type, base_dir, theta), 'unified'
     
     # For static noise with deviation parameters
-    deviation_range = noise_params[0]
+    deviation_range = noise_params[0] if noise_params else 0
     
-    # If it's a tuple, only the new format applies
-    if isinstance(deviation_range, (tuple, list)) and len(deviation_range) == 2:
-        return get_experiment_dir(tesselation_func, has_noise, N, noise_params, noise_type, base_dir, theta), 'new'
-    
-    # For single values, try both formats
     tesselation_name = tesselation_func.__name__
-    noise_str = "static_noise" if has_noise else "static_noise_nonoise"
-    folder = f"{tesselation_name}_{noise_str}"
-    base = os.path.join(base_dir, folder)
     
-    # Add theta parameter folder if provided
+    # Try new unified structure first
+    unified_folder = f"{tesselation_name}_static_noise"
+    unified_base = os.path.join(base_dir, unified_folder)
+    
     if theta is not None:
         theta_folder = f"theta_{theta:.6f}"
-        base = os.path.join(base, theta_folder)
+        unified_base = os.path.join(unified_base, theta_folder)
     
-    # Try legacy format first (dev_1.000)
-    legacy_dev_suffix = format_deviation_for_filename(deviation_range, use_legacy_format=True)
-    legacy_dev_folder = f"dev_{legacy_dev_suffix}"
-    legacy_path = os.path.join(base, legacy_dev_folder, f"N_{N}")
+    # For unified structure, always include dev value
+    if isinstance(deviation_range, (tuple, list)) and len(deviation_range) == 2:
+        unified_dev_suffix = format_deviation_for_filename(deviation_range, use_legacy_format=False)
+    else:
+        unified_dev_suffix = format_deviation_for_filename(deviation_range, use_legacy_format=True)
     
-    if os.path.exists(legacy_path):
-        return legacy_path, 'legacy'
+    unified_dev_folder = f"dev_{unified_dev_suffix}"
+    unified_path = os.path.join(unified_base, unified_dev_folder, f"N_{N}")
     
-    # Try new format (dev_max1.000_min0.000)
-    new_dev_suffix = format_deviation_for_filename(deviation_range, use_legacy_format=False)
-    new_dev_folder = f"dev_{new_dev_suffix}"
-    new_path = os.path.join(base, new_dev_folder, f"N_{N}")
+    if os.path.exists(unified_path):
+        return unified_path, 'unified'
     
-    if os.path.exists(new_path):
-        return new_path, 'new'
+    # Fall back to old structure for backward compatibility
+    # Try old noise/no-noise separated structure
+    if deviation_range == 0 or (isinstance(deviation_range, (tuple, list)) and len(deviation_range) == 2 and deviation_range[0] == 0):
+        # No noise case - try old no-noise structure
+        old_noise_str = "static_noise_nonoise"
+        old_folder = f"{tesselation_name}_{old_noise_str}"
+        old_base = os.path.join(base_dir, old_folder)
+        
+        if theta is not None:
+            theta_folder = f"theta_{theta:.6f}"
+            old_base = os.path.join(old_base, theta_folder)
+        
+        old_path = os.path.join(old_base, f"N_{N}")
+        if os.path.exists(old_path):
+            return old_path, 'legacy_nonoise'
+    else:
+        # Noise case - try old noise structure
+        old_noise_str = "static_noise"
+        old_folder = f"{tesselation_name}_{old_noise_str}"
+        old_base = os.path.join(base_dir, old_folder)
+        
+        if theta is not None:
+            theta_folder = f"theta_{theta:.6f}"
+            old_base = os.path.join(old_base, theta_folder)
+        
+        # Try legacy format first (dev_1.000)
+        if isinstance(deviation_range, (tuple, list)) and len(deviation_range) == 2:
+            legacy_dev_suffix = format_deviation_for_filename(deviation_range, use_legacy_format=False)
+        else:
+            legacy_dev_suffix = format_deviation_for_filename(deviation_range, use_legacy_format=True)
+        
+        legacy_dev_folder = f"dev_{legacy_dev_suffix}"
+        legacy_path = os.path.join(old_base, legacy_dev_folder, f"N_{N}")
+        
+        if os.path.exists(legacy_path):
+            return legacy_path, 'legacy'
+        
+        # Try new format (dev_max1.000_min0.000)
+        if not isinstance(deviation_range, (tuple, list)):
+            new_dev_suffix = format_deviation_for_filename(deviation_range, use_legacy_format=False)
+            new_dev_folder = f"dev_{new_dev_suffix}"
+            new_path = os.path.join(old_base, new_dev_folder, f"N_{N}")
+            
+            if os.path.exists(new_path):
+                return new_path, 'new'
     
-    # If neither exists, return the new format path (for creation)
-    return new_path, 'new'
+    # If no existing directory found, return the new unified format path (for creation)
+    return unified_path, 'unified'
 
 def format_deviation_for_filename(deviation_range, use_legacy_format=False):
     """
@@ -131,33 +168,40 @@ def get_experiment_dir(
 ):
     """
     Returns the directory path for the experiment based on tesselation, noise, and graph size.
-    Updated to handle new deviation range format for static noise.
+    Updated to use unified folder structure where noise value is always included in path.
     """
     tesselation_name = tesselation_func.__name__
     if noise_type == "angle":
-        noise_str = "angle_noise" if has_noise else "angle_nonoise"
-        folder = f"{tesselation_name}_{noise_str}"
+        # Unified folder structure - no separation between noise/no-noise
+        folder = f"{tesselation_name}_angle"
         base = os.path.join(base_dir, folder)
-        if has_noise and noise_params is not None:
-            # Use the helper function to format noise params (handles both old and new formats)
-            dev_folder = f"dev_{format_deviation_for_filename(noise_params[0])}"
-            return os.path.join(base, dev_folder, f"N_{N}")
+        
+        # Always include deviation value in path, use 0 for no noise
+        if noise_params is not None and len(noise_params) > 0:
+            dev_value = noise_params[0]
         else:
-            return os.path.join(base, f"N_{N}")
+            dev_value = 0
+        
+        dev_folder = f"dev_{format_deviation_for_filename(dev_value)}"
+        return os.path.join(base, dev_folder, f"N_{N}")
+        
     elif noise_type == "tesselation_order":
-        noise_str = "tesselation_order_noise" if has_noise else "tesselation_order_nonoise"
-        folder = f"{tesselation_name}_{noise_str}"
+        # Unified folder structure - no separation between noise/no-noise
+        folder = f"{tesselation_name}_tesselation_order"
         base = os.path.join(base_dir, folder)
-        if has_noise and noise_params is not None:
-            # Round each noise param to 3 decimal places for folder name
+        
+        # Always include noise value in path, use 0 for no noise
+        if noise_params is not None and len(noise_params) > 0:
             noise_suffix = "_".join(f"{float(x):.3f}" for x in noise_params)
-            shift_folder = f"tesselation_shift_prob_{noise_suffix}"
-            return os.path.join(base, shift_folder, f"N_{N}")
         else:
-            return os.path.join(base, f"N_{N}")
+            noise_suffix = "0.000"
+        
+        shift_folder = f"shift_prob_{noise_suffix}"
+        return os.path.join(base, shift_folder, f"N_{N}")
+        
     elif noise_type == "static_noise":
-        noise_str = "static_noise" if has_noise else "static_noise_nonoise"
-        folder = f"{tesselation_name}_{noise_str}"
+        # Unified folder structure - no separation between noise/no-noise
+        folder = f"{tesselation_name}_static_noise"
         base = os.path.join(base_dir, folder)
         
         # Add theta parameter folder if provided
@@ -165,21 +209,22 @@ def get_experiment_dir(
             theta_folder = f"theta_{theta:.6f}"
             base = os.path.join(base, theta_folder)
         
-        if has_noise and noise_params is not None:
-            # Handle the new deviation range format for static noise
+        # Always include deviation value in path, use 0 for no noise
+        if noise_params is not None and len(noise_params) > 0:
             if len(noise_params) == 1:
-                # Single deviation parameter - use legacy formatting for backward compatibility
+                # Single deviation parameter
                 deviation_range = noise_params[0]
                 dev_suffix = format_deviation_for_filename(deviation_range, use_legacy_format=True)
-                dev_folder = f"dev_{dev_suffix}"
-                return os.path.join(base, dev_folder, f"N_{N}")
             else:
-                # Multiple parameters - use old format for backward compatibility
+                # Multiple parameters
                 noise_suffix = "_".join(f"{float(x):.3f}" for x in noise_params)
-                dev_folder = f"dev_{noise_suffix}"
-                return os.path.join(base, dev_folder, f"N_{N}")
+                dev_suffix = noise_suffix
         else:
-            return os.path.join(base, f"N_{N}")
+            # No noise case - use 0
+            dev_suffix = "0.000"
+        
+        dev_folder = f"dev_{dev_suffix}"
+        return os.path.join(base, dev_folder, f"N_{N}")
     else:
         raise ValueError(f"Unknown noise_type: {noise_type}")
 
@@ -201,9 +246,12 @@ def run_and_save_experiment_generic(
 ):
     """
     Generic function to run and save experiments for different parameter values.
+    Updated to work with unified folder structure.
     """
     results = []
     for i, (param, noise_params) in enumerate(zip(parameter_list, noise_params_list)):
+        # With unified structure, has_noise is less critical for path determination
+        # but still needed for experiment logic
         has_noise = any(p > 0 for p in noise_params) if isinstance(noise_params, list) else noise_params > 0
         exp_dir = get_experiment_dir(tesselation_func, has_noise, N, noise_params=noise_params, noise_type=noise_type, base_dir=base_dir, theta=theta)
         os.makedirs(exp_dir, exist_ok=True)
@@ -271,11 +319,14 @@ def load_experiment_results_generic(
 ):
     """
     Generic function to load experiment results from disk.
+    Updated to work with unified folder structure.
     """
     all_results = []
     for param, noise_params in zip(parameter_list, noise_params_list):
+        # With unified structure, has_noise is less critical for path determination
         has_noise = any(p > 0 for p in noise_params) if isinstance(noise_params, list) else noise_params > 0
-        # Use flexible directory finding for static noise
+        
+        # Use flexible directory finding for static noise (handles backward compatibility)
         if noise_type == "static_noise":
             exp_dir, found_format = find_experiment_dir_flexible(tesselation_func, has_noise, N, noise_params=noise_params, noise_type=noise_type, base_dir=base_dir, theta=theta)
         else:
@@ -326,7 +377,9 @@ def run_and_save_experiment_samples_tesselation(
     for shift_prob_idx, shift_prob in enumerate(shift_probs):
         # For static noise, treat shift_prob as deviation_range
         noise_type_to_use = "static_noise" if "static" in str(base_dir) else "tesselation_order"
-        print(f"[run_and_save_experiment] Saving results to {get_experiment_dir(tesselation_func, shift_prob > 0, N, noise_params=[shift_prob] if shift_prob > 0 else [0], noise_type=noise_type_to_use, base_dir=base_dir, theta=theta)} for prob={shift_prob:.3f}")
+        # With unified structure, always pass noise_params (use 0 for no noise)
+        noise_params = [shift_prob] if shift_prob != 0 else [0]
+        print(f"[run_and_save_experiment] Saving results to {get_experiment_dir(tesselation_func, shift_prob > 0, N, noise_params=noise_params, noise_type=noise_type_to_use, base_dir=base_dir, theta=theta)} for prob={shift_prob:.3f}")
         
         dev_start_time = time.time()
         dev_computed_samples = 0
@@ -334,7 +387,6 @@ def run_and_save_experiment_samples_tesselation(
         for sample_idx in range(samples):
             # Check if this sample already exists
             has_noise = shift_prob > 0
-            noise_params = [shift_prob] if has_noise else [0]
             exp_dir = get_experiment_dir(tesselation_func, has_noise, N, noise_params=noise_params, noise_type=noise_type_to_use, base_dir=base_dir, theta=theta)
             
             # Create experiment directory
@@ -478,7 +530,11 @@ def run_and_save_experiment_samples(
         
         # For static noise, use static_noise noise_type instead of angle
         noise_type_to_use = "static_noise" if "static" in str(base_dir) else "angle"
-        noise_params = [dev] if noise_type_to_use == "static_noise" else [dev, dev]
+        # With unified structure, always pass noise_params (use dev value, including 0)
+        if noise_type_to_use == "static_noise":
+            noise_params = [dev]
+        else:
+            noise_params = [dev, dev]
         exp_dir = get_experiment_dir(tesselation_func, has_noise, N, noise_params=noise_params, noise_type=noise_type_to_use, base_dir=base_dir, theta=theta)
         os.makedirs(exp_dir, exist_ok=True)
         print(f"[run_and_save_experiment] Saving results to {exp_dir} for dev={dev_str}")
@@ -666,11 +722,12 @@ def create_mean_probability_distributions(
             noise_params = [dev]
             param_name = "static_dev"
         
-        # Use flexible directory finding for static noise
+        # Use flexible directory finding for static noise to handle backward compatibility
         if noise_type == "static_noise":
             source_exp_dir, found_format = find_experiment_dir_flexible(tesselation_func, has_noise, N, noise_params=noise_params, noise_type=noise_type, base_dir=source_base_dir, theta=theta)
             target_exp_dir, _ = find_experiment_dir_flexible(tesselation_func, has_noise, N, noise_params=noise_params, noise_type=noise_type, base_dir=target_base_dir, theta=theta)
         else:
+            # For other noise types, use the unified structure
             source_exp_dir = get_experiment_dir(tesselation_func, has_noise, N, noise_params=noise_params, noise_type=noise_type, base_dir=source_base_dir, theta=theta)
             target_exp_dir = get_experiment_dir(tesselation_func, has_noise, N, noise_params=noise_params, noise_type=noise_type, base_dir=target_base_dir, theta=theta)
         
@@ -778,10 +835,11 @@ def load_mean_probability_distributions(
             noise_params = [dev]
             param_name = "static_dev"
             
-        # Use flexible directory finding for static noise
+        # Use flexible directory finding for static noise to handle backward compatibility
         if noise_type == "static_noise":
             exp_dir, found_format = find_experiment_dir_flexible(tesselation_func, has_noise, N, noise_params=noise_params, noise_type=noise_type, base_dir=base_dir, theta=theta)
         else:
+            # For other noise types, use the unified structure
             exp_dir = get_experiment_dir(tesselation_func, has_noise, N, noise_params=noise_params, noise_type=noise_type, base_dir=base_dir, theta=theta)
         
         print(f"  Dev {dev_idx+1}/{len(devs)} ({param_name}={dev_str}): Loading from {exp_dir}")
@@ -855,11 +913,12 @@ def check_mean_probability_distributions_exist(
             noise_params = [dev]
             param_name = "static_dev"
             
-        # Use flexible directory finding for static noise
+        # Use flexible directory finding for static noise to handle backward compatibility
         if noise_type == "static_noise":
             exp_dir, found_format = find_experiment_dir_flexible(tesselation_func, has_noise, N, noise_params=noise_params, noise_type=noise_type, base_dir=base_dir, theta=theta)
             print(f"  Checking dev {dev_idx+1}/{len(devs)} ({param_name}={dev_str}): {exp_dir} ({found_format} format)")
         else:
+            # For other noise types, use the unified structure
             exp_dir = get_experiment_dir(tesselation_func, has_noise, N, noise_params=noise_params, noise_type=noise_type, base_dir=base_dir, theta=theta)
             print(f"  Checking dev {dev_idx+1}/{len(devs)} ({param_name}={dev_str}): {exp_dir}")
         
@@ -957,10 +1016,11 @@ def smart_load_or_create_experiment(
             else:  # tesselation_order
                 noise_params = [param]
             
-            # Use flexible directory finding for static noise
+            # Use flexible directory finding for static noise to handle backward compatibility
             if noise_type == "static_noise":
                 exp_dir, found_format = find_experiment_dir_flexible(tesselation_func, has_noise, N, noise_params=noise_params, noise_type=noise_type, base_dir=samples_base_dir, theta=theta)
             else:
+                # For other noise types, use the unified structure
                 exp_dir = get_experiment_dir(tesselation_func, has_noise, N, noise_params=noise_params, noise_type=noise_type, base_dir=samples_base_dir, theta=theta)
             
             for sample_idx in range(samples):

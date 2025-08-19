@@ -70,7 +70,7 @@ BACKGROUND_LOG_FILE = "static_experiment_background.log"  # Log file for backgro
 BACKGROUND_PID_FILE = "static_experiment.pid"  # PID file to track background process
 
 # Experiment parameters
-N = 10000  # System size
+N = 106  # System size
 steps = N//4  # Time steps
 samples = 20  # Samples per deviation - changed from 1 to 5
 
@@ -106,8 +106,8 @@ devs = [
     0,              # No noise (single value format)
     ( theta/4 , 0.0),     
     (theta/2, 0.2),     
-    (theta, 0.5),     
-    (2*theta, 0.5)             
+    (theta, 0.8),     
+    (2*theta, 0.8)             
 ]
 
 # Note: Set USE_LOGLOG_PLOT = True in the plotting configuration above to use log-log scale
