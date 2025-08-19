@@ -71,9 +71,9 @@ def main():
     if use_multiprocess and max_processes:
         print(f"Max processes: {max_processes}")
     
-    # Create the archive
+    # Create the archive (without logger since this is manual/standalone usage)
     print("\nStarting archiving...")
-    archive_name = create_experiment_archive(args.N, args.samples, use_multiprocess, max_processes)
+    archive_name = create_experiment_archive(args.N, args.samples, use_multiprocess, max_processes, logger=None)
     
     if archive_name:
         print(f"\n✓ SUCCESS: Archive created: {archive_name}")

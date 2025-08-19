@@ -519,13 +519,31 @@ def create_single_archive(archive_args):
             "error": str(e)
         }
 
-def create_experiment_archive(N, samples, use_multiprocess=True, max_archive_processes=5):
+def create_experiment_archive(N, samples, use_multiprocess=True, max_archive_processes=5, logger=None):
     """
     Create a tar archive of experiment data folders for the specific N value.
     Now supports multiprocess archiving for faster compression of large datasets.
+    
+    Args:
+        N: System size
+        samples: Number of samples per deviation
+        use_multiprocess: Whether to use multiprocess archiving
+        max_archive_processes: Maximum number of processes for archiving
+        logger: Optional logger for logging archive operations
     """
+    def log_and_print(message, level="info"):
+        """Helper function to both print and log messages"""
+        print(message)
+        if logger:
+            if level == "info":
+                logger.info(message.replace("[ARCHIVE] ", "").replace("[WARNING] ", "").replace("[OK] ", "").replace("[ERROR] ", "").replace("[DEBUG] ", "").replace("[INFO] ", ""))
+            elif level == "warning":
+                logger.warning(message.replace("[WARNING] ", "").replace("[ARCHIVE] ", ""))
+            elif level == "error":
+                logger.error(message.replace("[ERROR] ", "").replace("[ARCHIVE] ", ""))
+    
     try:
-        print("\n[ARCHIVE] Creating tar archive of experiment data...")
+        log_and_print("\n[ARCHIVE] Creating tar archive of experiment data...")
         
         # Create archive filename with timestamp, N, and samples
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -534,17 +552,17 @@ def create_experiment_archive(N, samples, use_multiprocess=True, max_archive_pro
         # Check if the experiments_data_samples folder exists
         data_folder = "experiments_data_samples"
         if not os.path.exists(data_folder):
-            print(f"[WARNING] Data folder '{data_folder}' not found - skipping archive creation")
-            print("[INFO] This is normal if running on a different machine than where computation occurred")
+            log_and_print(f"[WARNING] Data folder '{data_folder}' not found - skipping archive creation", "warning")
+            log_and_print("[INFO] This is normal if running on a different machine than where computation occurred")
             return None
         
-        print(f"[ARCHIVE] Data folder found: {os.path.abspath(data_folder)}")
+        log_and_print(f"[ARCHIVE] Data folder found: {os.path.abspath(data_folder)}")
         
         n_folder_name = f"N_{N}"
         folders_to_archive = []
         
         # Find all folders containing N_{N} folders
-        print(f"[ARCHIVE] Looking for folders containing '{n_folder_name}'...")
+        log_and_print(f"[ARCHIVE] Looking for folders containing '{n_folder_name}'...")
         
         for root, dirs, files in os.walk(data_folder):
             if n_folder_name in dirs:
@@ -557,41 +575,41 @@ def create_experiment_archive(N, samples, use_multiprocess=True, max_archive_pro
                 
                 full_path = os.path.join(data_folder, folder_path)
                 folders_to_archive.append((full_path, folder_path))
-                print(f"  Found: {folder_path}")
+                log_and_print(f"  Found: {folder_path}")
         
         if not folders_to_archive:
-            print(f"[WARNING] No folders found containing '{n_folder_name}' - skipping archive creation")
-            print(f"[DEBUG] Directory contents of {data_folder}:")
+            log_and_print(f"[WARNING] No folders found containing '{n_folder_name}' - skipping archive creation", "warning")
+            log_and_print(f"[DEBUG] Directory contents of {data_folder}:")
             try:
                 for item in os.listdir(data_folder):
                     item_path = os.path.join(data_folder, item)
                     if os.path.isdir(item_path):
-                        print(f"  Directory: {item}")
+                        log_and_print(f"  Directory: {item}")
                         # List subdirectories to see if N_ folders exist deeper
                         try:
                             subdirs = [d for d in os.listdir(item_path) if os.path.isdir(os.path.join(item_path, d))]
                             if subdirs:
-                                print(f"    Subdirs: {subdirs[:5]}{'...' if len(subdirs) > 5 else ''}")  # Limit output
+                                log_and_print(f"    Subdirs: {subdirs[:5]}{'...' if len(subdirs) > 5 else ''}")  # Limit output
                         except:
                             pass
                     else:
-                        print(f"  File: {item}")
+                        log_and_print(f"  File: {item}")
             except Exception as e:
-                print(f"  Error listing directory: {e}")
-            print("[INFO] This is normal if the computation was run on a different machine (cluster)")
+                log_and_print(f"  Error listing directory: {e}")
+            log_and_print("[INFO] This is normal if the computation was run on a different machine (cluster)")
             return None
         
         total_folders = len(folders_to_archive)
-        print(f"[ARCHIVE] Found {total_folders} folders to archive")
+        log_and_print(f"[ARCHIVE] Found {total_folders} folders to archive")
         
         # Determine if we should use multiprocessing
         if not use_multiprocess or total_folders <= 1:
-            print(f"[ARCHIVE] Using single-process archiving (folders: {total_folders})")
+            log_and_print(f"[ARCHIVE] Using single-process archiving (folders: {total_folders})")
             
             # Create the tar archive with only N-specific folders
             with tarfile.open(final_archive_name, "w:gz") as tar:
                 for i, (full_path, archive_path) in enumerate(folders_to_archive, 1):
-                    print(f"  [{i}/{total_folders}] Adding to archive: {archive_path}")
+                    log_and_print(f"  [{i}/{total_folders}] Adding to archive: {archive_path}")
                     tar.add(full_path, arcname=os.path.join("experiments_data_samples", archive_path))
             
         else:
@@ -599,8 +617,8 @@ def create_experiment_archive(N, samples, use_multiprocess=True, max_archive_pro
             if max_archive_processes is None:
                 max_archive_processes = min(total_folders, mp.cpu_count())
             
-            print(f"[ARCHIVE] Using multiprocess archiving with {max_archive_processes} processes")
-            print(f"[ARCHIVE] Creating {total_folders} temporary archives...")
+            log_and_print(f"[ARCHIVE] Using multiprocess archiving with {max_archive_processes} processes")
+            log_and_print(f"[ARCHIVE] Creating {total_folders} temporary archives...")
             
             # Prepare arguments for multiprocessing
             temp_archives = []
@@ -632,10 +650,10 @@ def create_experiment_archive(N, samples, use_multiprocess=True, max_archive_pro
                             result = future.result()
                             if result["success"]:
                                 successful_archives.append(result)
-                                print(f"  [{completed}/{total_folders}] ✓ Created {result['archive_name']} ({result['size_mb']:.1f} MB)")
+                                log_and_print(f"  [{completed}/{total_folders}] ✓ Created {result['archive_name']} ({result['size_mb']:.1f} MB)")
                             else:
                                 failed_archives.append(result)
-                                print(f"  [{completed}/{total_folders}] ✗ Failed {result['archive_name']}: {result['error']}")
+                                log_and_print(f"  [{completed}/{total_folders}] ✗ Failed {result['archive_name']}: {result['error']}", "error")
                                 
                         except Exception as e:
                             failed_archives.append({
@@ -645,10 +663,10 @@ def create_experiment_archive(N, samples, use_multiprocess=True, max_archive_pro
                                 "size_mb": 0,
                                 "error": str(e)
                             })
-                            print(f"  [{completed}/{total_folders}] ✗ Exception creating {args[2]}: {e}")
+                            log_and_print(f"  [{completed}/{total_folders}] ✗ Exception creating {args[2]}: {e}", "error")
             
             except Exception as e:
-                print(f"[ERROR] Critical error in multiprocess archiving: {e}")
+                log_and_print(f"[ERROR] Critical error in multiprocess archiving: {e}", "error")
                 # Clean up any temp files that were created
                 for temp_name in temp_archives:
                     try:
@@ -658,20 +676,20 @@ def create_experiment_archive(N, samples, use_multiprocess=True, max_archive_pro
                         pass
                 raise
             
-            print(f"[ARCHIVE] Multiprocess archiving completed: {len(successful_archives)} successful, {len(failed_archives)} failed")
+            log_and_print(f"[ARCHIVE] Multiprocess archiving completed: {len(successful_archives)} successful, {len(failed_archives)} failed")
             
             if len(successful_archives) == 0:
-                print("[ERROR] No archives were created successfully")
+                log_and_print("[ERROR] No archives were created successfully", "error")
                 return None
             
             # Combine all successful archives into final archive
-            print(f"[ARCHIVE] Combining {len(successful_archives)} archives into final archive: {final_archive_name}")
+            log_and_print(f"[ARCHIVE] Combining {len(successful_archives)} archives into final archive: {final_archive_name}")
             
             try:
                 with tarfile.open(final_archive_name, "w:gz") as final_tar:
                     for i, result in enumerate(successful_archives, 1):
                         temp_archive_name = result["archive_name"]
-                        print(f"  [{i}/{len(successful_archives)}] Merging {temp_archive_name}")
+                        log_and_print(f"  [{i}/{len(successful_archives)}] Merging {temp_archive_name}")
                         
                         # Extract and re-add contents from temp archive
                         with tarfile.open(temp_archive_name, "r:gz") as temp_tar:
@@ -684,12 +702,12 @@ def create_experiment_archive(N, samples, use_multiprocess=True, max_archive_pro
                                     final_tar.addfile(member)
                 
                 # Clean up temporary archives
-                print("[ARCHIVE] Cleaning up temporary archives...")
+                log_and_print("[ARCHIVE] Cleaning up temporary archives...")
                 for result in successful_archives:
                     try:
                         os.remove(result["archive_name"])
                     except Exception as e:
-                        print(f"  Warning: Could not remove {result['archive_name']}: {e}")
+                        log_and_print(f"  Warning: Could not remove {result['archive_name']}: {e}", "warning")
                 
                 # Also clean up failed temp archives
                 for result in failed_archives:
@@ -700,7 +718,7 @@ def create_experiment_archive(N, samples, use_multiprocess=True, max_archive_pro
                         pass
                         
             except Exception as e:
-                print(f"[ERROR] Failed to combine archives: {e}")
+                log_and_print(f"[ERROR] Failed to combine archives: {e}", "error")
                 # Clean up temp files
                 for result in successful_archives:
                     try:
@@ -715,18 +733,21 @@ def create_experiment_archive(N, samples, use_multiprocess=True, max_archive_pro
             archive_size = os.path.getsize(final_archive_name)
             size_mb = archive_size / (1024 * 1024)
             
-            print(f"[OK] Archive created: {final_archive_name} ({size_mb:.1f} MB)")
-            print(f"[OK] Archived {total_folders} folders containing N={N} data")
-            print(f"[OK] Archive location: {os.path.abspath(final_archive_name)}")
+            log_and_print(f"[OK] Archive created: {final_archive_name} ({size_mb:.1f} MB)")
+            log_and_print(f"[OK] Archived {total_folders} folders containing N={N} data")
+            log_and_print(f"[OK] Archive location: {os.path.abspath(final_archive_name)}")
             
             return final_archive_name
         else:
-            print("[ERROR] Final archive was not created")
+            log_and_print("[ERROR] Final archive was not created", "error")
             return None
         
     except Exception as e:
-        print(f"[ERROR] Failed to create archive: {e}")
-        traceback.print_exc()
+        log_and_print(f"[ERROR] Failed to create archive: {e}", "error")
+        if logger:
+            logger.error(traceback.format_exc())
+        else:
+            traceback.print_exc()
         return None
 
 # @crash_safe_log(log_file_prefix="static_noise_experiment", heartbeat_interval=30.0)
@@ -1210,7 +1231,7 @@ def run_static_experiment():
         # Create tar archive if enabled (even in samples-only mode)
         if CREATE_TAR_ARCHIVE:
             master_logger.info("Creating tar archive...")
-            archive_name = create_experiment_archive(N, samples, USE_MULTIPROCESS_ARCHIVING, MAX_ARCHIVE_PROCESSES)
+            archive_name = create_experiment_archive(N, samples, USE_MULTIPROCESS_ARCHIVING, MAX_ARCHIVE_PROCESSES, master_logger)
             if archive_name:
                 master_logger.info(f"Archive created successfully: {archive_name}")
             else:
@@ -1414,7 +1435,7 @@ def run_static_experiment():
 
     # Create tar archive if enabled
     if CREATE_TAR_ARCHIVE:
-        archive_name = create_experiment_archive(N, samples, USE_MULTIPROCESS_ARCHIVING, MAX_ARCHIVE_PROCESSES)
+        archive_name = create_experiment_archive(N, samples, USE_MULTIPROCESS_ARCHIVING, MAX_ARCHIVE_PROCESSES, master_logger)
         if archive_name:
             print(f"[OK] Archive created successfully: {archive_name}")
         else:
