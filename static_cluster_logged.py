@@ -78,7 +78,7 @@ if os.environ.get('COMPUTE_STD_DATA'):
     COMPUTE_STD_DATA = os.environ.get('COMPUTE_STD_DATA').lower() == 'true'
 
 # Background execution switch - SAFER IMPLEMENTATION
-RUN_IN_BACKGROUND = True  # Set to True to automatically run the process in background
+RUN_IN_BACKGROUND = False  # Set to True to automatically run the process in background
 
 # Check if background execution has been disabled externally
 if os.environ.get('RUN_IN_BACKGROUND') == 'False':
