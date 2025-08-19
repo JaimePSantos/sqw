@@ -60,7 +60,7 @@ SAVE_FIGURES = False  # Set to False to disable saving figures to files
 CREATE_TAR_ARCHIVE = True  # Set to True to create tar archive of experiments_data_samples folder
 USE_MULTIPROCESS_ARCHIVING = True  # Set to True to use multiprocess archiving for faster compression
 MAX_ARCHIVE_PROCESSES = 5  # Max processes for archiving (None = auto-detect)
-EXCLUDE_SAMPLES_FROM_ARCHIVE = False  # Set to True to exclude raw sample files from archive (keeps only probDist and std)
+EXCLUDE_SAMPLES_FROM_ARCHIVE = True  # Set to True to exclude raw sample files from archive (keeps only probDist and std)
 
 # Computation control switches
 CALCULATE_SAMPLES_ONLY = False  # Set to True to only compute and save samples (skip analysis)
