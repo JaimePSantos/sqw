@@ -50,7 +50,7 @@ ARCHIVE_PROBDIST = True    # Set to True to archive experiments_data_samples_pro
 
 # Computation control switches - EXPLICIT CONTROL
 CALCULATE_SAMPLES_ONLY = False  # Set to True to only compute and save samples (skip analysis)
-SKIP_SAMPLE_COMPUTATION = False  # Set to True to skip sample computation (analysis only)
+SKIP_SAMPLE_COMPUTATION = True  # Set to True to skip sample computation (analysis only)
 
 # Detailed computation control (when not in samples-only or analysis-only modes)
 COMPUTE_RAW_SAMPLES = True      # Compute quantum walk samples 
