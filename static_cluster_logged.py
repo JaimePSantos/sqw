@@ -38,27 +38,44 @@ from logging_module.crash_safe_logging import crash_safe_log
 # ============================================================================
 
 # Plotting switch
-ENABLE_PLOTTING = False  # Set to False to disable plotting
-USE_LOGLOG_PLOT = False  # Set to True to use log-log scale for plotting
-PLOT_FINAL_PROBDIST = False  # Set to True to plot probability distributions at final time step
-SAVE_FIGURES = False  # Set to False to disable saving figures to files
+ENABLE_PLOTTING = True  # Set to False to disable plotting
+USE_LOGLOG_PLOT = True  # Set to True to use log-log scale for plotting
+PLOT_FINAL_PROBDIST = True  # Set to True to plot probability distributions at final time step
+SAVE_FIGURES = True  # Set to False to disable saving figures to files
 
-# Archive switch
-CREATE_TAR_ARCHIVE = True  # Set to True to create tar archive of experiments_data_samples folder
+# Archive switches
+CREATE_TAR_ARCHIVE = True  # Set to True to create tar archive
+ARCHIVE_SAMPLES = True     # Set to True to archive experiments_data_samples folder
+ARCHIVE_PROBDIST = True    # Set to True to archive experiments_data_samples_probDist folder
 
-# Computation control switches
+# Computation control switches - EXPLICIT CONTROL
 CALCULATE_SAMPLES_ONLY = True  # Set to True to only compute and save samples (skip analysis)
 SKIP_SAMPLE_COMPUTATION = False  # Set to True to skip sample computation (analysis only)
+
+# Detailed computation control (when not in samples-only or analysis-only modes)
+COMPUTE_RAW_SAMPLES = True      # Compute quantum walk samples 
+COMPUTE_PROBDIST = True         # Compute probability distributions from samples
+COMPUTE_STD_DATA = True         # Compute standard deviation data from probability distributions
 
 # Check for environment variable overrides (from safe_background_launcher.py)
 if os.environ.get('ENABLE_PLOTTING'):
     ENABLE_PLOTTING = os.environ.get('ENABLE_PLOTTING').lower() == 'true'
 if os.environ.get('CREATE_TAR_ARCHIVE'):
     CREATE_TAR_ARCHIVE = os.environ.get('CREATE_TAR_ARCHIVE').lower() == 'true'
+if os.environ.get('ARCHIVE_SAMPLES'):
+    ARCHIVE_SAMPLES = os.environ.get('ARCHIVE_SAMPLES').lower() == 'true'
+if os.environ.get('ARCHIVE_PROBDIST'):
+    ARCHIVE_PROBDIST = os.environ.get('ARCHIVE_PROBDIST').lower() == 'true'
 if os.environ.get('CALCULATE_SAMPLES_ONLY'):
     CALCULATE_SAMPLES_ONLY = os.environ.get('CALCULATE_SAMPLES_ONLY').lower() == 'true'
 if os.environ.get('SKIP_SAMPLE_COMPUTATION'):
     SKIP_SAMPLE_COMPUTATION = os.environ.get('SKIP_SAMPLE_COMPUTATION').lower() == 'true'
+if os.environ.get('COMPUTE_RAW_SAMPLES'):
+    COMPUTE_RAW_SAMPLES = os.environ.get('COMPUTE_RAW_SAMPLES').lower() == 'true'
+if os.environ.get('COMPUTE_PROBDIST'):
+    COMPUTE_PROBDIST = os.environ.get('COMPUTE_PROBDIST').lower() == 'true'
+if os.environ.get('COMPUTE_STD_DATA'):
+    COMPUTE_STD_DATA = os.environ.get('COMPUTE_STD_DATA').lower() == 'true'
 
 # Background execution switch - SAFER IMPLEMENTATION
 RUN_IN_BACKGROUND = True  # Set to True to automatically run the process in background
@@ -198,66 +215,92 @@ def create_experiment_archive(N, samples):
     try:
         print("\n[ARCHIVE] Creating tar archive of experiment data...")
         
-        # Create archive filename with timestamp, N, and samples
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        archive_name = f"experiments_data_samples_N{N}_samples{samples}_{timestamp}.tar.gz"
+        # Check what we're archiving
+        archive_items = []
+        if ARCHIVE_SAMPLES:
+            archive_items.append("samples")
+        if ARCHIVE_PROBDIST:
+            archive_items.append("probdist")
         
-        # Check if the experiments_data_samples folder exists
-        data_folder = "experiments_data_samples"
-        if not os.path.exists(data_folder):
-            print(f"[WARNING] Data folder '{data_folder}' not found - skipping archive creation")
+        if not archive_items:
+            print("[WARNING] No archive items selected (ARCHIVE_SAMPLES=False, ARCHIVE_PROBDIST=False)")
             return
         
-        print(f"[ARCHIVE] Data folder found: {os.path.abspath(data_folder)}")
+        print(f"[ARCHIVE] Archive contents: {', '.join(archive_items)}")
         
+        # Create archive filename with timestamp, N, samples, and content type
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        content_suffix = "_".join(archive_items)
+        archive_name = f"experiments_data_{content_suffix}_N{N}_samples{samples}_{timestamp}.tar.gz"
+        
+        # Data directories to potentially archive
+        data_directories = []
+        if ARCHIVE_SAMPLES:
+            data_directories.append(("experiments_data_samples", "samples"))
+        if ARCHIVE_PROBDIST:
+            data_directories.append(("experiments_data_samples_probDist", "probability distributions"))
+        
+        all_folders_to_archive = []
         n_folder_name = f"N_{N}"
-        folders_to_archive = []
         
-        # Find all folders containing N_{N} folders
-        print(f"[ARCHIVE] Looking for folders containing '{n_folder_name}'...")
-        
-        for root, dirs, files in os.walk(data_folder):
-            if n_folder_name in dirs:
-                # Get the relative path from experiments_data_samples
-                relative_root = os.path.relpath(root, data_folder)
-                if relative_root == ".":
-                    folder_path = n_folder_name
-                else:
-                    folder_path = os.path.join(relative_root, n_folder_name)
-                
-                full_path = os.path.join(data_folder, folder_path)
-                folders_to_archive.append((full_path, folder_path))
-                print(f"  Found: {folder_path}")
-        
-        if not folders_to_archive:
-            print(f"[WARNING] No folders found containing '{n_folder_name}' - skipping archive creation")
-            print(f"[DEBUG] Directory contents of {data_folder}:")
-            try:
-                for item in os.listdir(data_folder):
-                    item_path = os.path.join(data_folder, item)
-                    if os.path.isdir(item_path):
-                        print(f"  Directory: {item}")
-                        # List subdirectories to see if N_ folders exist deeper
-                        try:
-                            subdirs = [d for d in os.listdir(item_path) if os.path.isdir(os.path.join(item_path, d))]
-                            if subdirs:
-                                print(f"    Subdirs: {subdirs}")
-                        except:
-                            pass
+        # Process each data directory
+        for data_folder, folder_type in data_directories:
+            if not os.path.exists(data_folder):
+                print(f"[WARNING] {folder_type.capitalize()} folder '{data_folder}' not found - skipping")
+                continue
+            
+            print(f"[ARCHIVE] Processing {folder_type} folder: {os.path.abspath(data_folder)}")
+            
+            # Find all folders containing N_{N} folders
+            print(f"[ARCHIVE] Looking for folders containing '{n_folder_name}' in {folder_type}...")
+            
+            for root, dirs, files in os.walk(data_folder):
+                if n_folder_name in dirs:
+                    # Get the relative path from data folder
+                    relative_root = os.path.relpath(root, data_folder)
+                    if relative_root == ".":
+                        folder_path = n_folder_name
                     else:
-                        print(f"  File: {item}")
-            except Exception as e:
-                print(f"  Error listing directory: {e}")
+                        folder_path = os.path.join(relative_root, n_folder_name)
+                    
+                    full_path = os.path.join(data_folder, folder_path)
+                    archive_path = os.path.join(data_folder, folder_path)
+                    all_folders_to_archive.append((full_path, archive_path, folder_type))
+                    print(f"  Found: {folder_path} ({folder_type})")
+        
+        if not all_folders_to_archive:
+            print(f"[WARNING] No folders found containing '{n_folder_name}' in any data directories")
+            
+            # Debug information for each directory
+            for data_folder, folder_type in data_directories:
+                if os.path.exists(data_folder):
+                    print(f"[DEBUG] Directory contents of {data_folder}:")
+                    try:
+                        for item in os.listdir(data_folder):
+                            item_path = os.path.join(data_folder, item)
+                            if os.path.isdir(item_path):
+                                print(f"  Directory: {item}")
+                                # List subdirectories to see if N_ folders exist deeper
+                                try:
+                                    subdirs = [d for d in os.listdir(item_path) if os.path.isdir(os.path.join(item_path, d))]
+                                    if subdirs:
+                                        print(f"    Subdirs: {subdirs}")
+                                except:
+                                    pass
+                            else:
+                                print(f"  File: {item}")
+                    except Exception as e:
+                        print(f"  Error listing directory: {e}")
             return
         
         print(f"[ARCHIVE] Creating archive: {archive_name}")
         
         # Create the tar archive with only N-specific folders
         with tarfile.open(archive_name, "w:gz") as tar:
-            # Add the base experiments_data_samples structure but only with N-specific content
-            for full_path, archive_path in folders_to_archive:
-                print(f"  Adding to archive: {archive_path}")
-                tar.add(full_path, arcname=os.path.join("experiments_data_samples", archive_path))
+            # Add folders from each data directory
+            for full_path, archive_path, folder_type in all_folders_to_archive:
+                print(f"  Adding to archive: {archive_path} ({folder_type})")
+                tar.add(full_path, arcname=archive_path)
         
         # Get archive size
         archive_size = os.path.getsize(archive_name)
@@ -279,6 +322,22 @@ def run_static_experiment():
     if CALCULATE_SAMPLES_ONLY and SKIP_SAMPLE_COMPUTATION:
         raise ValueError("Invalid configuration: Cannot set both CALCULATE_SAMPLES_ONLY=True and SKIP_SAMPLE_COMPUTATION=True")
     
+    # Override detailed switches when using high-level modes
+    if CALCULATE_SAMPLES_ONLY:
+        COMPUTE_RAW_SAMPLES = True
+        COMPUTE_PROBDIST = False
+        COMPUTE_STD_DATA = False
+        print("SAMPLES ONLY mode: Forcing COMPUTE_RAW_SAMPLES=True, COMPUTE_PROBDIST=False, COMPUTE_STD_DATA=False")
+    
+    if SKIP_SAMPLE_COMPUTATION:
+        COMPUTE_RAW_SAMPLES = False
+        # Keep COMPUTE_PROBDIST and COMPUTE_STD_DATA as they were set (allows selective analysis)
+        print("ANALYSIS ONLY mode: Forcing COMPUTE_RAW_SAMPLES=False")
+    
+    if CREATE_TAR_ARCHIVE and not ARCHIVE_SAMPLES and not ARCHIVE_PROBDIST:
+        print("WARNING: Archive enabled but no content selected (ARCHIVE_SAMPLES=False, ARCHIVE_PROBDIST=False)")
+        print("         Archive creation will be skipped")
+    
     if SKIP_SAMPLE_COMPUTATION and not ENABLE_PLOTTING:
         print("WARNING: Analysis-only mode with plotting disabled - limited output will be generated")
     
@@ -290,10 +349,33 @@ def run_static_experiment():
         "Full Pipeline"
     )
     print(f"Execution mode: {mode_description}")
+    
+    # High-level computation control
     print(f"Sample computation: {'Enabled' if not SKIP_SAMPLE_COMPUTATION else 'Disabled'}")
     print(f"Analysis phase: {'Enabled' if not CALCULATE_SAMPLES_ONLY else 'Disabled'}")
+    
+    # Detailed computation control (when in full pipeline mode)
+    if not CALCULATE_SAMPLES_ONLY and not SKIP_SAMPLE_COMPUTATION:
+        print(f"  - Raw samples computation: {'Enabled' if COMPUTE_RAW_SAMPLES else 'Disabled'}")
+        print(f"  - Probability dist computation: {'Enabled' if COMPUTE_PROBDIST else 'Disabled'}")
+        print(f"  - Standard deviation computation: {'Enabled' if COMPUTE_STD_DATA else 'Disabled'}")
+    
     print(f"Plotting: {'Enabled' if ENABLE_PLOTTING else 'Disabled'}")
-    print(f"Archiving: {'Enabled' if CREATE_TAR_ARCHIVE else 'Disabled'}")
+    
+    # Archive configuration
+    if CREATE_TAR_ARCHIVE:
+        archive_items = []
+        if ARCHIVE_SAMPLES:
+            archive_items.append("samples")
+        if ARCHIVE_PROBDIST:
+            archive_items.append("probdist")
+        if archive_items:
+            print(f"Archiving: Enabled ({', '.join(archive_items)})")
+        else:
+            print("Archiving: Enabled but no content selected")
+    else:
+        print("Archiving: Disabled")
+    
     print(f"Background execution: {'Enabled' if RUN_IN_BACKGROUND else 'Disabled'}")
     print("=" * 40)
     
@@ -540,7 +622,7 @@ def run_static_experiment():
     experiment_time = 0
     completed_samples = 0
     
-    if not SKIP_SAMPLE_COMPUTATION:
+    if not SKIP_SAMPLE_COMPUTATION and COMPUTE_RAW_SAMPLES:
         print("=== SAMPLE COMPUTATION PHASE ===")
         print("Computing and saving quantum walk samples...")
         
@@ -623,9 +705,14 @@ def run_static_experiment():
         experiment_time = time.time() - start_time
         print(f"\n[COMPLETED] Sample computation completed in {experiment_time:.2f} seconds")
         print(f"Total samples computed: {completed_samples}")
-    else:
+    elif SKIP_SAMPLE_COMPUTATION:
         print("=== SKIPPING SAMPLE COMPUTATION ===")
         print("Sample computation disabled - proceeding to analysis phase")
+        experiment_time = 0
+        completed_samples = 0
+    else:
+        print("=== SKIPPING RAW SAMPLE COMPUTATION ===") 
+        print("Raw sample computation disabled (COMPUTE_RAW_SAMPLES=False) - proceeding to analysis phase")
         experiment_time = 0
         completed_samples = 0
 
@@ -663,47 +750,57 @@ def run_static_experiment():
     print("Loading existing samples and computing analysis...")
 
     # Smart load or create mean probability distributions
-    print("\n[DATA] Smart loading/creating mean probability distributions...")
-    try:
-        mean_results = smart_load_or_create_experiment(
-            graph_func=lambda n: None,  # Not used in static noise
-            tesselation_func=dummy_tesselation_func,
-            N=N,
-            steps=steps,
-            angles_or_angles_list=theta,  # Single theta value for static noise
-            tesselation_order_or_list=None,  # Not used in static noise
-            initial_state_func=uniform_initial_state,
-            initial_state_kwargs=initial_state_kwargs,
-            parameter_list=devs,
-            samples=samples,
-            noise_type="static_noise",
-            parameter_name="static_dev",
-            samples_base_dir="experiments_data_samples",
-            probdist_base_dir="experiments_data_samples_probDist",
-            theta=theta
-        )
-        print("[OK] Mean probability distributions ready for analysis")
-        
-    except Exception as e:
-        print(f"[WARNING] Warning: Could not smart load/create mean probability distributions: {e}")
+    mean_results = None
+    if COMPUTE_PROBDIST:
+        print("\n[DATA] Smart loading/creating mean probability distributions...")
+        try:
+            mean_results = smart_load_or_create_experiment(
+                graph_func=lambda n: None,  # Not used in static noise
+                tesselation_func=dummy_tesselation_func,
+                N=N,
+                steps=steps,
+                angles_or_angles_list=theta,  # Single theta value for static noise
+                tesselation_order_or_list=None,  # Not used in static noise
+                initial_state_func=uniform_initial_state,
+                initial_state_kwargs=initial_state_kwargs,
+                parameter_list=devs,
+                samples=samples,
+                noise_type="static_noise",
+                parameter_name="static_dev",
+                samples_base_dir="experiments_data_samples",
+                probdist_base_dir="experiments_data_samples_probDist",
+                theta=theta
+            )
+            print("[OK] Mean probability distributions ready for analysis")
+            
+        except Exception as e:
+            print(f"[WARNING] Warning: Could not smart load/create mean probability distributions: {e}")
+            mean_results = None
+    else:
+        print("\n[SKIPPED] Probability distribution computation disabled (COMPUTE_PROBDIST=False)")
         mean_results = None
 
     # Create or load standard deviation data
-    try:
-        stds = create_or_load_std_data(
-            mean_results, devs, N, steps, dummy_tesselation_func,
-            "experiments_data_samples_std", "static_noise", theta=theta
-        )
-        
-        # Print final std values for verification
-        for i, (dev, std_values) in enumerate(zip(devs, stds)):
-            if std_values and len(std_values) > 0:
-                print(f"Dev {dev:.3f}: Final std = {std_values[-1]:.3f}")
-            else:
-                print(f"Dev {dev:.3f}: No valid standard deviation data")
-                
-    except Exception as e:
-        print(f"[WARNING] Warning: Could not create/load standard deviation data: {e}")
+    stds = []
+    if COMPUTE_STD_DATA:
+        try:
+            stds = create_or_load_std_data(
+                mean_results, devs, N, steps, dummy_tesselation_func,
+                "experiments_data_samples_std", "static_noise", theta=theta
+            )
+            
+            # Print final std values for verification
+            for i, (dev, std_values) in enumerate(zip(devs, stds)):
+                if std_values and len(std_values) > 0:
+                    print(f"Dev {dev:.3f}: Final std = {std_values[-1]:.3f}")
+                else:
+                    print(f"Dev {dev:.3f}: No valid standard deviation data")
+                    
+        except Exception as e:
+            print(f"[WARNING] Warning: Could not create/load standard deviation data: {e}")
+            stds = []
+    else:
+        print("\n[SKIPPED] Standard deviation computation disabled (COMPUTE_STD_DATA=False)")
         stds = []
 
     # Plot standard deviation vs time if enabled
@@ -851,6 +948,13 @@ def run_static_experiment():
     print("2. Samples Only: Set CALCULATE_SAMPLES_ONLY = True")
     print("3. Analysis Only: Set SKIP_SAMPLE_COMPUTATION = True")
     print("4. Custom: Adjust individual toggles for plotting, archiving, etc.")
+    print()
+    print("Detailed computation control (Full Pipeline mode):")
+    print("- COMPUTE_RAW_SAMPLES: Generate quantum walk samples")
+    print("- COMPUTE_PROBDIST: Create probability distributions from samples")
+    print("- COMPUTE_STD_DATA: Calculate standard deviation data from prob dists")
+    print("Note: High-level modes (CALCULATE_SAMPLES_ONLY/SKIP_SAMPLE_COMPUTATION)")
+    print("      automatically override detailed switches for consistency")
     
     print("\n=== Static Noise Details ===")
     print("Static noise model:")
@@ -882,11 +986,35 @@ def run_static_experiment():
     print("\n=== Archive Features ===")
     print(f"- Create tar archive: {CREATE_TAR_ARCHIVE}")
     if CREATE_TAR_ARCHIVE:
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        archive_name = f"experiments_data_samples_N{N}_samples{samples}_{timestamp}.tar.gz"
-        print(f"- Archive will be saved as: experiments_data_samples_N{N}_samples{samples}_[timestamp].tar.gz")
-        print(f"- Archive contains only N={N} folders and their parent directory structure")
-        print("- This selective archiving reduces file size compared to archiving all N values")
+        print(f"- Archive samples data: {ARCHIVE_SAMPLES}")
+        print(f"- Archive probability distributions: {ARCHIVE_PROBDIST}")
+        
+        # Determine what's being archived
+        archive_items = []
+        if ARCHIVE_SAMPLES:
+            archive_items.append("samples")
+        if ARCHIVE_PROBDIST:
+            archive_items.append("probdist")
+        
+        if archive_items:
+            content_suffix = "_".join(archive_items)
+            archive_name = f"experiments_data_{content_suffix}_N{N}_samples{samples}_[timestamp].tar.gz"
+            print(f"- Archive will be saved as: {archive_name}")
+            print(f"- Archive contains only N={N} folders and their parent directory structure")
+            print("- This selective archiving reduces file size compared to archiving all N values")
+            
+            if ARCHIVE_SAMPLES:
+                print("- Samples data: Raw quantum walk samples from experiments_data_samples/")
+            if ARCHIVE_PROBDIST:
+                print("- Probability distributions: Mean probability distributions from experiments_data_samples_probDist/")
+        else:
+            print("- Warning: Archive enabled but no content selected (ARCHIVE_SAMPLES=False, ARCHIVE_PROBDIST=False)")
+    
+    print("\n=== Archive Content Control ===")
+    print("Archive content can be controlled with these switches:")
+    print("- ARCHIVE_SAMPLES: Include raw quantum walk samples")
+    print("- ARCHIVE_PROBDIST: Include computed probability distributions")
+    print("- Both can be True for complete archive, or set individually for specific content")
     
     return {
         "mode": "full_pipeline",

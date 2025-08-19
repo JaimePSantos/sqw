@@ -115,9 +115,9 @@ initial_state_kwargs = {"nodes": [N//2]}
 # 3. Mixed: devs = [0, (0.2, 0.3), 0.5] - can mix formats
 devs = [
     0,              # No noise
-    (theta/5, 0.1),     # max_dev=0.1, min_dev=0.01 (range [0.01, 0.1])
-    (theta/2, 0.2),     # max_dev=0.5, min_dev=0.1 (range [0.1, 0.5]) 
-    (theta, 0.5),     # max_dev=1.0, min_dev=0.5 (range [0.5, 1.0])
+    # (theta/5, 0.1),     # max_dev=0.1, min_dev=0.01 (range [0.01, 0.1])
+    # (theta/2, 0.2),     # max_dev=0.5, min_dev=0.1 (range [0.1, 0.5]) 
+    # (theta, 0.5),     # max_dev=1.0, min_dev=0.5 (range [0.5, 1.0])
     (2*theta, 0.5)     # max_dev=10.0, min_dev=1.0 (range [1.0, 10.0])
 ]
 

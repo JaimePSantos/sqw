@@ -37,31 +37,63 @@ def apply_mode_settings(mode):
             "CALCULATE_SAMPLES_ONLY": "False",
             "SKIP_SAMPLE_COMPUTATION": "False", 
             "ENABLE_PLOTTING": "True",
-            "CREATE_TAR_ARCHIVE": "True"
+            "CREATE_TAR_ARCHIVE": "True",
+            "ARCHIVE_SAMPLES": "True",
+            "ARCHIVE_PROBDIST": "True"
         },
         "samples": {
             "CALCULATE_SAMPLES_ONLY": "True",
             "SKIP_SAMPLE_COMPUTATION": "False",
             "ENABLE_PLOTTING": "False", 
-            "CREATE_TAR_ARCHIVE": "True"
+            "CREATE_TAR_ARCHIVE": "True",
+            "ARCHIVE_SAMPLES": "True",
+            "ARCHIVE_PROBDIST": "False"
         },
         "analysis": {
             "CALCULATE_SAMPLES_ONLY": "False",
             "SKIP_SAMPLE_COMPUTATION": "True",
             "ENABLE_PLOTTING": "True",
-            "CREATE_TAR_ARCHIVE": "True"
+            "CREATE_TAR_ARCHIVE": "True",
+            "ARCHIVE_SAMPLES": "False",
+            "ARCHIVE_PROBDIST": "True"
+        },
+        "probdist": {
+            "CALCULATE_SAMPLES_ONLY": "False",
+            "SKIP_SAMPLE_COMPUTATION": "False",
+            "COMPUTE_RAW_SAMPLES": "False",
+            "COMPUTE_PROBDIST": "True",
+            "COMPUTE_STD_DATA": "False",
+            "ENABLE_PLOTTING": "False",
+            "CREATE_TAR_ARCHIVE": "True",
+            "ARCHIVE_SAMPLES": "False",
+            "ARCHIVE_PROBDIST": "True"
+        },
+        "stddata": {
+            "CALCULATE_SAMPLES_ONLY": "False",
+            "SKIP_SAMPLE_COMPUTATION": "False",
+            "COMPUTE_RAW_SAMPLES": "False",
+            "COMPUTE_PROBDIST": "False",
+            "COMPUTE_STD_DATA": "True",
+            "ENABLE_PLOTTING": "True",
+            "CREATE_TAR_ARCHIVE": "False",
+            "ARCHIVE_SAMPLES": "False",
+            "ARCHIVE_PROBDIST": "False"
         },
         "quick": {
             "CALCULATE_SAMPLES_ONLY": "False", 
             "SKIP_SAMPLE_COMPUTATION": "True",
             "ENABLE_PLOTTING": "True",
-            "CREATE_TAR_ARCHIVE": "False"
+            "CREATE_TAR_ARCHIVE": "False",
+            "ARCHIVE_SAMPLES": "False",
+            "ARCHIVE_PROBDIST": "False"
         },
         "headless": {
             "CALCULATE_SAMPLES_ONLY": "False",
             "SKIP_SAMPLE_COMPUTATION": "False", 
             "ENABLE_PLOTTING": "False",
-            "CREATE_TAR_ARCHIVE": "True"
+            "CREATE_TAR_ARCHIVE": "True",
+            "ARCHIVE_SAMPLES": "True",
+            "ARCHIVE_PROBDIST": "True"
         }
     }
     
@@ -84,11 +116,27 @@ def show_help():
     print("  python safe_background_launcher.py [mode] [options]")
     print()
     print("Modes:")
-    print("  full      - Complete pipeline: samples + analysis + plots + archive")
-    print("  samples   - Only compute and save samples (for cluster)")
-    print("  analysis  - Only analyze existing samples (for local)")
+    print("  full      - Complete pipeline: samples + analysis + plots + archive (both)")
+    print("  samples   - Only compute and save samples (archives samples only)")
+    print("  analysis  - Only analyze existing samples (archives probdist only)")
+    print("  probdist  - Only compute probability distributions from existing samples")
+    print("  stddata   - Only compute standard deviation data with plotting")
     print("  quick     - Quick analysis without archiving")
-    print("  headless  - Full pipeline without plotting (for servers)")
+    print("  headless  - Full pipeline without plotting (archives both)")
+    print()
+    print("Archive Content by Mode:")
+    print("  full/headless - Archives both samples and probability distributions")
+    print("  samples       - Archives only raw samples data")
+    print("  analysis      - Archives only probability distributions")
+    print("  probdist      - Archives only probability distributions")
+    print("  stddata/quick - No archiving")
+    print()
+    print("Computation Control by Mode:")
+    print("  full/headless - All computation steps enabled")
+    print("  samples       - Only raw sample computation")
+    print("  analysis      - All analysis steps (probdist + stddata)")
+    print("  probdist      - Only probability distribution computation")
+    print("  stddata       - Only standard deviation computation + plotting")
     print()
     print("Options:")
     print("  --no-background  - Run in foreground mode")
@@ -97,11 +145,14 @@ def show_help():
     print()
     print("Examples:")
     print("  python safe_background_launcher.py samples")
-    print("  python safe_background_launcher.py analysis --no-background")
-    print("  python safe_background_launcher.py samples --force")
+    print("  python safe_background_launcher.py probdist --no-background")
+    print("  python safe_background_launcher.py stddata --force")
     print()
     print("Note: This launcher preserves all parameters (N, samples, devs, etc.)")
     print("      from the main static_cluster_logged.py file.")
+    print("      Fine-grained computation control can be customized by editing")
+    print("      COMPUTE_RAW_SAMPLES, COMPUTE_PROBDIST, and COMPUTE_STD_DATA")
+    print("      switches in the main script.")
 
 def get_script_parameters():
     """Read parameters from static_cluster_logged.py"""
@@ -334,7 +385,7 @@ def main():
             run_foreground = True
         elif arg == "--force":
             force_launch = True
-        elif arg in ["full", "samples", "analysis", "quick", "headless"]:
+        elif arg in ["full", "samples", "analysis", "probdist", "stddata", "quick", "headless"]:
             mode = arg
         else:
             print(f"Unknown argument: {arg}")
