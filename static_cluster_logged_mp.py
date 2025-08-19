@@ -98,11 +98,11 @@ RUN_IN_BACKGROUND = False  # Set to True to automatically run the process in bac
 # Check if background execution has been disabled externally
 if os.environ.get('RUN_IN_BACKGROUND') == 'False':
     RUN_IN_BACKGROUND = False
-BACKGROUND_LOG_FILE = "static_experiment_multiprocessing2.log"  # Log file for background execution
+BACKGROUND_LOG_FILE = "static_experiment_multiprocessing.log"  # Log file for background execution
 BACKGROUND_PID_FILE = "static_experiment_mp.pid"  # PID file to track background process
 
 # Experiment parameters
-N = 15000  # System size
+N = 20000  # System size
 steps = N//4  # Time steps - now we can handle the full computation with streaming
 samples = 5  # Samples per deviation - changed from 1 to 5
 
@@ -140,14 +140,13 @@ initial_state_kwargs = {"nodes": [N//2]}
 # CUSTOMIZE THIS LIST: Add or remove deviation values as needed
 # Format options:
 # 1. Single value: devs = [0, 0.1, 0.5] - backward compatibility (range [0, value])
-# 2. Tuple (max_dev, min_factor): devs = [(0.2, 0.3)] - new format (range [max_dev*min_factor, max_dev])
-# 3. Mixed: devs = [0, (0.2, 0.3), 0.5] - can mix formats
+# 2. Tuple (minVal, maxVal): devs = [(0.0, 0.2)] - direct range format
+# 3. Mixed: devs = [0, (0.0, 0.2), 0.5] - can mix formats
 devs = [
-    0,              # No noise
-    (theta/5, 0.1),     # max_dev=0.1, min_dev=0.01 (range [0.01, 0.1])
-    (theta/2, 0.2),     # max_dev=0.5, min_dev=0.1 (range [0.1, 0.5]) 
-    (theta, 0.5),     # max_dev=1.0, min_dev=0.5 (range [0.5, 1.0])
-    (2*theta, 0.5)     # max_dev=10.0, min_dev=1.0 (range [1.0, 10.0])
+    (0,0),              # No noise
+    ((theta - 0.9), (theta + 0.9)),           # Small noise range
+    ((theta - 0.5), (theta + 0.5)),           # Medium noise range  
+    ((theta - 0.1), (theta + 0.1)),           # Medium noise range  
 ]
 
 # Multiprocessing configuration
@@ -171,14 +170,9 @@ def setup_process_logging(dev_value, process_id):
     if isinstance(dev_value, str):
         dev_str = dev_value  # Already formatted as string
     elif isinstance(dev_value, (tuple, list)) and len(dev_value) == 2:
-        # New format: (max_dev, min_factor) or legacy (min, max)
-        if dev_value[1] <= 1.0 and dev_value[1] >= 0.0:
-            max_dev, min_factor = dev_value
-            min_dev = max_dev * min_factor
-            dev_str = f"max{max_dev:.3f}_min{min_dev:.3f}"
-        else:
-            min_val, max_val = dev_value
-            dev_str = f"min{min_val:.3f}_max{max_val:.3f}"
+        # Direct (minVal, maxVal) format
+        min_val, max_val = dev_value
+        dev_str = f"min{min_val:.3f}_max{max_val:.3f}"
     else:
         # Single value format
         dev_str = f"{float(dev_value):.3f}"
@@ -268,17 +262,10 @@ def compute_mean_probability_for_dev(dev_args):
         
         # Handle deviation format for has_noise check
         if isinstance(dev, (tuple, list)) and len(dev) == 2:
-            # New format: (max_dev, min_factor) or legacy (min, max)
-            if dev[1] <= 1.0 and dev[1] >= 0.0:
-                # New format
-                max_dev, min_factor = dev
-                has_noise = max_dev > 0
-                dev_str = f"max{max_dev:.3f}_min{max_dev * min_factor:.3f}"
-            else:
-                # Legacy format
-                min_val, max_val = dev
-                has_noise = max_val > 0
-                dev_str = f"min{min_val:.3f}_max{max_val:.3f}"
+            # Direct (minVal, maxVal) format
+            min_val, max_val = dev
+            has_noise = max_val > 0
+            dev_str = f"min{min_val:.3f}_max{max_val:.3f}"
         else:
             # Single value format
             has_noise = dev > 0
@@ -412,20 +399,15 @@ def compute_dev_samples(dev_args):
         
         # Setup experiment directory - handle new deviation format
         if isinstance(dev, (tuple, list)) and len(dev) == 2:
-            # New format: (max_dev, min_factor) or legacy (min, max)
-            if dev[1] <= 1.0 and dev[1] >= 0.0:
-                # New format
-                max_dev, min_factor = dev
-                has_noise = max_dev > 0
-            else:
-                # Legacy format
-                min_val, max_val = dev
-                has_noise = max_val > 0
+            # Direct (minVal, maxVal) format
+            min_val, max_val = dev
+            has_noise = max_val > 0
         else:
             # Single value format
             has_noise = dev > 0
         
-        noise_params = [dev] if has_noise else [0]
+        # With unified structure, we always include noise_params (including 0 for no noise)
+        noise_params = [dev]
         exp_dir = get_experiment_dir(dummy_tesselation_func, has_noise, N, 
                                    noise_params=noise_params, noise_type="static_noise", 
                                    base_dir="experiments_data_samples", theta=theta)
@@ -510,7 +492,7 @@ def compute_dev_samples(dev_args):
         dev_time = time.time() - dev_start_time
         # Format dev for display
         if isinstance(dev, tuple):
-            dev_str = f"max{dev[0]:.3f}_min{dev[0]*dev[1]:.3f}"
+            dev_str = f"min{dev[0]:.3f}_max{dev[1]:.3f}"
         else:
             dev_str = f"{dev:.4f}"
         logger.info(f"Deviation {dev_str} completed: {dev_computed_samples} samples in {dev_time:.1f}s")
@@ -604,7 +586,8 @@ def create_or_load_std_data(mean_results, devs, N, steps, tesselation_func, std_
             dev_str = f"{dev:.3f}"
         
         # Setup std data directory structure for static noise
-        noise_params = [dev] if has_noise else [0]  # Static noise uses single parameter
+        # With unified structure, we always include noise_params (including 0 for no noise)
+        noise_params = [dev]  # Static noise uses single parameter
         std_dir = get_experiment_dir(tesselation_func, has_noise, N, 
                                    noise_params=noise_params, noise_type=noise_type, 
                                    base_dir=std_base_dir, theta=theta)
@@ -1739,9 +1722,37 @@ def run_static_experiment():
         # Print final std values for verification
         for i, (dev, std_values) in enumerate(zip(devs, stds)):
             if std_values and len(std_values) > 0:
-                print(f"Dev {dev:.3f}: Final std = {std_values[-1]:.3f}")
+                # Format dev for display
+                if isinstance(dev, tuple) and len(dev) == 2:
+                    if dev[1] <= 1.0 and dev[1] >= 0.0:
+                        # New format: (max_dev, min_factor)
+                        max_dev, min_factor = dev
+                        dev_label = f"max{max_dev:.3f}_min{max_dev*min_factor:.3f}"
+                    else:
+                        # Legacy format: (min, max)
+                        min_val, max_val = dev
+                        dev_label = f"min{min_val:.3f}_max{max_val:.3f}"
+                else:
+                    # Single value format
+                    dev_label = f"{dev:.3f}"
+                
+                print(f"Dev {dev_label}: Final std = {std_values[-1]:.3f}")
             else:
-                print(f"Dev {dev:.3f}: No valid standard deviation data")
+                # Format dev for display
+                if isinstance(dev, tuple) and len(dev) == 2:
+                    if dev[1] <= 1.0 and dev[1] >= 0.0:
+                        # New format: (max_dev, min_factor)
+                        max_dev, min_factor = dev
+                        dev_label = f"max{max_dev:.3f}_min{max_dev*min_factor:.3f}"
+                    else:
+                        # Legacy format: (min, max)
+                        min_val, max_val = dev
+                        dev_label = f"min{min_val:.3f}_max{max_val:.3f}"
+                else:
+                    # Single value format
+                    dev_label = f"{dev:.3f}"
+                
+                print(f"Dev {dev_label}: No valid standard deviation data")
                 
     except Exception as e:
         print(f"[WARNING] Warning: Could not create/load standard deviation data: {e}")
@@ -1761,20 +1772,46 @@ def run_static_experiment():
                     if len(std_values) > 0:
                         time_steps = list(range(len(std_values)))
                         
-                        # Filter out zero values for log-log plot
+                        # Format dev for display
+                        if isinstance(dev, tuple) and len(dev) == 2:
+                            if dev[1] <= 1.0 and dev[1] >= 0.0:
+                                # New format: (max_dev, min_factor)
+                                max_dev, min_factor = dev
+                                dev_label = f"max{max_dev:.3f}_min{max_dev*min_factor:.3f}"
+                            else:
+                                # Legacy format: (min, max)
+                                min_val, max_val = dev
+                                dev_label = f"min{min_val:.3f}_max{max_val:.3f}"
+                        else:
+                            # Single value format
+                            dev_label = f"{dev:.3f}"
+                        
+                        # Handle zero values for log-log plot
                         if USE_LOGLOG_PLOT:
-                            # Remove zero values which can't be plotted on log scale
-                            filtered_data = [(t, s) for t, s in zip(time_steps, std_values) if t > 0 and s > 0]
-                            if filtered_data:
-                                filtered_times, filtered_stds = zip(*filtered_data)
+                            # Check if this is a zero standard deviation case (noiseless)
+                            if all(s == 0 for s in std_values):
+                                # For noiseless case (std = 0), plot at bottom of y-axis
+                                # Use a small epsilon value to make it visible on log scale
+                                epsilon = 1e-3  # Small value for visualization
+                                filtered_times = [t for t in time_steps if t > 0]
+                                filtered_stds = [epsilon] * len(filtered_times)
                                 plt.loglog(filtered_times, filtered_stds, 
-                                         label=f'Static deviation = {dev:.3f}', 
-                                         marker='o', markersize=3, linewidth=2)
+                                         label=f'Static deviation = {dev_label} (noiseless)', 
+                                         marker='s', markersize=4, linewidth=2, 
+                                         linestyle='--', alpha=0.8)
+                            else:
+                                # Remove zero values which can't be plotted on log scale
+                                filtered_data = [(t, s) for t, s in zip(time_steps, std_values) if t > 0 and s > 0]
+                                if filtered_data:
+                                    filtered_times, filtered_stds = zip(*filtered_data)
+                                    plt.loglog(filtered_times, filtered_stds, 
+                                             label=f'Static deviation = {dev_label}', 
+                                             marker='o', markersize=3, linewidth=2)
 
 
                         else:
                             plt.plot(time_steps, std_values, 
-                                   label=f'Static deviation = {dev:.3f}', 
+                                   label=f'Static deviation = {dev_label}', 
                                    marker='o', markersize=3, linewidth=2)
                 
                 plt.xlabel('Time Step', fontsize=12)
@@ -1829,9 +1866,23 @@ def run_static_experiment():
                     if dev_mean_prob_dists and len(dev_mean_prob_dists) > final_step and dev_mean_prob_dists[final_step] is not None:
                         final_prob_dist = dev_mean_prob_dists[final_step].flatten()
                         
+                        # Format dev for display
+                        if isinstance(dev, tuple) and len(dev) == 2:
+                            if dev[1] <= 1.0 and dev[1] >= 0.0:
+                                # New format: (max_dev, min_factor)
+                                max_dev, min_factor = dev
+                                dev_label = f"max{max_dev:.3f}_min{max_dev*min_factor:.3f}"
+                            else:
+                                # Legacy format: (min, max)
+                                min_val, max_val = dev
+                                dev_label = f"min{min_val:.3f}_max{max_val:.3f}"
+                        else:
+                            # Single value format
+                            dev_label = f"{dev:.3f}"
+                        
                         # Plot the probability distribution with log y-axis
                         plt.semilogy(domain, final_prob_dist, 
-                                   label=f'Static deviation = {dev:.3f}', 
+                                   label=f'Static deviation = {dev_label}', 
                                    linewidth=2, alpha=0.8)
                 
                 plt.xlabel('Position', fontsize=12)

@@ -53,14 +53,14 @@ from logging_module.crash_safe_logging import crash_safe_log
 # Plotting switch
 ENABLE_PLOTTING = True  # Set to False to disable plotting
 USE_LOGLOG_PLOT = True  # Set to True to use log-log scale for plotting
-PLOT_FINAL_PROBDIST = True  # Set to True to plot probability distributions at final time step
+PLOT_FINAL_PROBDIST = False  # Set to True to plot probability distributions at final time step
 SAVE_FIGURES = False  # Set to False to disable saving figures to files
 
 # Archive switch
 CREATE_TAR_ARCHIVE = False  # Set to True to create tar archive of experiments_data_samples folder
-USE_MULTIPROCESS_ARCHIVING = False  # Set to True to use multiprocess archiving for faster compression
+USE_MULTIPROCESS_ARCHIVING = True  # Set to True to use multiprocess archiving for faster compression
 MAX_ARCHIVE_PROCESSES = 5  # Max processes for archiving (None = auto-detect)
-EXCLUDE_SAMPLES_FROM_ARCHIVE = False  # Set to True to exclude raw sample files from archive (keeps only probDist and std)
+EXCLUDE_SAMPLES_FROM_ARCHIVE = True  # Set to True to exclude raw sample files from archive (keeps only probDist and std)
 
 # Computation control switches
 CALCULATE_SAMPLES_ONLY = False  # Set to True to only compute and save samples (skip analysis)
@@ -98,12 +98,12 @@ RUN_IN_BACKGROUND = False  # Set to True to automatically run the process in bac
 # Check if background execution has been disabled externally
 if os.environ.get('RUN_IN_BACKGROUND') == 'False':
     RUN_IN_BACKGROUND = False
-BACKGROUND_LOG_FILE = "static_experiment_multiprocessing2.log"  # Log file for background execution
+BACKGROUND_LOG_FILE = "static_experiment_multiprocessing.log"  # Log file for background execution
 BACKGROUND_PID_FILE = "static_experiment_mp.pid"  # PID file to track background process
 
 # Experiment parameters
 N = 100  # System size
-steps = N//2  # Time steps - now we can handle the full computation with streaming
+steps = N//4  # Time steps - now we can handle the full computation with streaming
 samples = 5  # Samples per deviation - changed from 1 to 5
 
 # Memory management warning (updated for streaming)
@@ -133,20 +133,21 @@ if os.environ.get('FORCE_N_VALUE'):
         pass
 
 # Quantum walk parameters (for static noise, we only need theta)
-theta = math.pi/2  # Base theta parameter for static noise
+theta = math.pi/3  # Base theta parameter for static noise
 initial_state_kwargs = {"nodes": [N//2]}
 
 # Deviation values for static noise experiments
 # CUSTOMIZE THIS LIST: Add or remove deviation values as needed
 # Format options:
 # 1. Single value: devs = [0, 0.1, 0.5] - backward compatibility (range [0, value])
-# 2. Tuple (max_dev, min_factor): devs = [(0.2, 0.3)] - new format (range [max_dev*min_factor, max_dev])
-# 3. Mixed: devs = [0, (0.2, 0.3), 0.5] - can mix formats
+# 2. Tuple (minVal, maxVal): devs = [(0.0, 0.2)] - direct range format
+# 3. Mixed: devs = [0, (0.0, 0.2), 0.5] - can mix formats
 devs = [
     (0,0),              # No noise
-    (0.1,0),              # No noise
-    (0.5,0),              # No noise
-    (1,0),              # No noise
+    (0, 0.2),           # Small noise range
+    (0, 0.6),           # Medium noise range  
+    (0, 0.8),           # Medium noise range  
+    (0, 1),           # Medium noise range  
 ]
 
 # Multiprocessing configuration
@@ -170,14 +171,9 @@ def setup_process_logging(dev_value, process_id):
     if isinstance(dev_value, str):
         dev_str = dev_value  # Already formatted as string
     elif isinstance(dev_value, (tuple, list)) and len(dev_value) == 2:
-        # New format: (max_dev, min_factor) or legacy (min, max)
-        if dev_value[1] <= 1.0 and dev_value[1] >= 0.0:
-            max_dev, min_factor = dev_value
-            min_dev = max_dev * min_factor
-            dev_str = f"max{max_dev:.3f}_min{min_dev:.3f}"
-        else:
-            min_val, max_val = dev_value
-            dev_str = f"min{min_val:.3f}_max{max_val:.3f}"
+        # Direct (minVal, maxVal) format
+        min_val, max_val = dev_value
+        dev_str = f"min{min_val:.3f}_max{max_val:.3f}"
     else:
         # Single value format
         dev_str = f"{float(dev_value):.3f}"
@@ -267,17 +263,10 @@ def compute_mean_probability_for_dev(dev_args):
         
         # Handle deviation format for has_noise check
         if isinstance(dev, (tuple, list)) and len(dev) == 2:
-            # New format: (max_dev, min_factor) or legacy (min, max)
-            if dev[1] <= 1.0 and dev[1] >= 0.0:
-                # New format
-                max_dev, min_factor = dev
-                has_noise = max_dev > 0
-                dev_str = f"max{max_dev:.3f}_min{max_dev * min_factor:.3f}"
-            else:
-                # Legacy format
-                min_val, max_val = dev
-                has_noise = max_val > 0
-                dev_str = f"min{min_val:.3f}_max{max_val:.3f}"
+            # Direct (minVal, maxVal) format
+            min_val, max_val = dev
+            has_noise = max_val > 0
+            dev_str = f"min{min_val:.3f}_max{max_val:.3f}"
         else:
             # Single value format
             has_noise = dev > 0
@@ -411,15 +400,9 @@ def compute_dev_samples(dev_args):
         
         # Setup experiment directory - handle new deviation format
         if isinstance(dev, (tuple, list)) and len(dev) == 2:
-            # New format: (max_dev, min_factor) or legacy (min, max)
-            if dev[1] <= 1.0 and dev[1] >= 0.0:
-                # New format
-                max_dev, min_factor = dev
-                has_noise = max_dev > 0
-            else:
-                # Legacy format
-                min_val, max_val = dev
-                has_noise = max_val > 0
+            # Direct (minVal, maxVal) format
+            min_val, max_val = dev
+            has_noise = max_val > 0
         else:
             # Single value format
             has_noise = dev > 0
@@ -510,7 +493,7 @@ def compute_dev_samples(dev_args):
         dev_time = time.time() - dev_start_time
         # Format dev for display
         if isinstance(dev, tuple):
-            dev_str = f"max{dev[0]:.3f}_min{dev[0]*dev[1]:.3f}"
+            dev_str = f"min{dev[0]:.3f}_max{dev[1]:.3f}"
         else:
             dev_str = f"{dev:.4f}"
         logger.info(f"Deviation {dev_str} completed: {dev_computed_samples} samples in {dev_time:.1f}s")

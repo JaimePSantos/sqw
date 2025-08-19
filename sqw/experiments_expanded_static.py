@@ -69,8 +69,7 @@ def create_noise_lists(theta, red_edge_list, blue_edge_list, deviation_range):
     - blue_edge_list: list of edges in blue tessellation
     - deviation_range: either:
         - single value (backward compatibility): random range [0, value]
-        - tuple (max_dev, min_factor): max_dev is max deviation, min_factor (0-1) determines min as (max_dev * min_factor)
-        - tuple (min, max): explicit min/max range (legacy support when both > 1)
+        - tuple (minVal, maxVal): direct range for random.uniform(minVal, maxVal)
     
     Returns:
     - red_noise_list: list of theta values for red edges (theta + random_dev)
@@ -81,16 +80,8 @@ def create_noise_lists(theta, red_edge_list, blue_edge_list, deviation_range):
     
     # Handle different formats for deviation_range
     if isinstance(deviation_range, (tuple, list)) and len(deviation_range) == 2:
-        # Check if this is the new format (max_dev, min_factor) where min_factor <= 1
-        if deviation_range[1] <= 1.0 and deviation_range[1] >= 0.0:
-            # New format: (max_deviation, min_factor)
-            max_dev, min_factor = deviation_range
-            max_dev = abs(max_dev)
-            dev_min = max_dev * min_factor
-            dev_max = max_dev
-        else:
-            # Legacy format: explicit (min, max) range
-            dev_min, dev_max = deviation_range
+        # Direct (minVal, maxVal) format
+        dev_min, dev_max = deviation_range
     else:
         # Backward compatibility: single value means [0, value]
         dev_min, dev_max = 0, abs(deviation_range)
@@ -248,8 +239,7 @@ def running_streaming(N, theta, num_steps,
     - initial_nodes: list of initial nodes (empty list = uniform superposition)
     - deviation_range: noise deviation range - can be:
         * single value: random range [0, value]
-        * tuple (max_dev, min_factor): min_dev = max_dev * min_factor, max_dev = max_dev
-        * tuple (min, max): explicit range (legacy, when both > 1)
+        * tuple (minVal, maxVal): direct range for random.uniform(minVal, maxVal)
     - step_callback: function(step_idx, state) called for each step
     
     Returns:

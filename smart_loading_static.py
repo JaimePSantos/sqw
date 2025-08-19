@@ -132,24 +132,17 @@ def format_deviation_for_filename(deviation_range, use_legacy_format=False):
     Convert deviation_range to a filename-safe string format.
     
     Args:
-        deviation_range: Either single value, or tuple (max_dev, min_factor)
+        deviation_range: Either single value, or tuple (min_val, max_val)
         use_legacy_format: If True, use simple format for single values (e.g., "1.000" instead of "max1.000_min0.000")
     
     Returns:
         String representation for use in filenames
     """
     if isinstance(deviation_range, (tuple, list)) and len(deviation_range) == 2:
-        # Check if this is the new format (max_dev, min_factor) where min_factor <= 1
-        if deviation_range[1] <= 1.0 and deviation_range[1] >= 0.0:
-            # New format: (max_deviation, min_factor)
-            max_dev, min_factor = deviation_range
-            max_dev = abs(max_dev)
-            min_dev = max_dev * min_factor
-            return f"max{max_dev:.3f}_min{min_dev:.3f}"
-        else:
-            # Legacy format: explicit (min, max) range
-            min_val, max_val = deviation_range
-            return f"min{min_val:.3f}_max{max_val:.3f}"
+        # Always treat tuples as (min_val, max_val) format for static noise
+        # This ensures [(0,0), (0,0.1), (0,0.5), (0,1)] get different paths
+        min_val, max_val = deviation_range
+        return f"min{min_val:.3f}_max{max_val:.3f}"
     else:
         # Single value format
         if use_legacy_format:
