@@ -144,9 +144,10 @@ initial_state_kwargs = {"nodes": [N//2]}
 # 3. Mixed: devs = [0, (0.0, 0.2), 0.5] - can mix formats
 devs = [
     (0,0),              # No noise
-    ((theta - 0.9), (theta + 0.9)),           # Small noise range
-    ((theta - 0.5), (theta + 0.5)),           # Medium noise range  
-    ((theta - 0.1), (theta + 0.1)),           # Medium noise range  
+    (0, 0.2),           # Small noise range
+    (0, 0.6),           # Medium noise range  
+    (0, 0.8),           # Medium noise range  
+    (0, 1),           # Medium noise range  
 ]
 
 # Multiprocessing configuration
