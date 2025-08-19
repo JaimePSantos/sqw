@@ -19,6 +19,14 @@ This modular approach allows you to:
 - Split long computations into manageable chunks
 """
 
+# ============================================================================
+# MODULE LEVEL FUNCTIONS (for multiprocessing serialization)
+# ============================================================================
+
+def dummy_tesselation_func(N):
+    """Dummy tessellation function for static noise (tessellations are built-in)"""
+    return None
+
 import time
 import math
 import numpy as np
@@ -28,7 +36,12 @@ import subprocess
 import signal
 import tarfile
 import traceback
+import pickle
+import gc
 from datetime import datetime
+import multiprocessing as mp
+from concurrent.futures import ProcessPoolExecutor, as_completed
+import logging
 
 # Import crash-safe logging decorator
 from logging_module.crash_safe_logging import crash_safe_log
@@ -39,43 +52,45 @@ from logging_module.crash_safe_logging import crash_safe_log
 
 # Plotting switch
 ENABLE_PLOTTING = False  # Set to False to disable plotting
-USE_LOGLOG_PLOT = False  # Set to True to use log-log scale for plotting
+USE_LOGLOG_PLOT = False # Set to True to use log-log scale for plotting
 PLOT_FINAL_PROBDIST = False  # Set to True to plot probability distributions at final time step
 SAVE_FIGURES = False  # Set to False to disable saving figures to files
 
-# Archive switches
-CREATE_TAR_ARCHIVE = True  # Set to True to create tar archive
-ARCHIVE_SAMPLES = True     # Set to True to archive experiments_data_samples folder
-ARCHIVE_PROBDIST = True    # Set to True to archive experiments_data_samples_probDist folder
+# Archive switch
+CREATE_TAR_ARCHIVE = True  # Set to True to create tar archive of experiments_data_samples folder
+USE_MULTIPROCESS_ARCHIVING = True  # Set to True to use multiprocess archiving for faster compression
+MAX_ARCHIVE_PROCESSES = 5  # Max processes for archiving (None = auto-detect)
+EXCLUDE_SAMPLES_FROM_ARCHIVE = True  # Set to True to exclude raw sample files from archive (keeps only probDist and std)
 
-# Computation control switches - EXPLICIT CONTROL
+# Computation control switches
 CALCULATE_SAMPLES_ONLY = False  # Set to True to only compute and save samples (skip analysis)
 SKIP_SAMPLE_COMPUTATION = False  # Set to True to skip sample computation (analysis only)
-
-# Detailed computation control (when not in samples-only or analysis-only modes)
-COMPUTE_RAW_SAMPLES = True      # Compute quantum walk samples 
-COMPUTE_PROBDIST = True         # Compute probability distributions from samples
-COMPUTE_STD_DATA = False         # Compute standard deviation data from probability distributions
 
 # Check for environment variable overrides (from safe_background_launcher.py)
 if os.environ.get('ENABLE_PLOTTING'):
     ENABLE_PLOTTING = os.environ.get('ENABLE_PLOTTING').lower() == 'true'
 if os.environ.get('CREATE_TAR_ARCHIVE'):
     CREATE_TAR_ARCHIVE = os.environ.get('CREATE_TAR_ARCHIVE').lower() == 'true'
-if os.environ.get('ARCHIVE_SAMPLES'):
-    ARCHIVE_SAMPLES = os.environ.get('ARCHIVE_SAMPLES').lower() == 'true'
-if os.environ.get('ARCHIVE_PROBDIST'):
-    ARCHIVE_PROBDIST = os.environ.get('ARCHIVE_PROBDIST').lower() == 'true'
+if os.environ.get('USE_MULTIPROCESS_ARCHIVING'):
+    USE_MULTIPROCESS_ARCHIVING = os.environ.get('USE_MULTIPROCESS_ARCHIVING').lower() == 'true'
+if os.environ.get('MAX_ARCHIVE_PROCESSES'):
+    try:
+        MAX_ARCHIVE_PROCESSES = int(os.environ.get('MAX_ARCHIVE_PROCESSES'))
+    except ValueError:
+        pass
+if os.environ.get('EXCLUDE_SAMPLES_FROM_ARCHIVE'):
+    EXCLUDE_SAMPLES_FROM_ARCHIVE = os.environ.get('EXCLUDE_SAMPLES_FROM_ARCHIVE').lower() == 'true'
+if os.environ.get('USE_MULTIPROCESS_MEAN_PROB'):
+    USE_MULTIPROCESS_MEAN_PROB = os.environ.get('USE_MULTIPROCESS_MEAN_PROB').lower() == 'true'
+if os.environ.get('MAX_MEAN_PROB_PROCESSES'):
+    try:
+        MAX_MEAN_PROB_PROCESSES = int(os.environ.get('MAX_MEAN_PROB_PROCESSES'))
+    except ValueError:
+        pass
 if os.environ.get('CALCULATE_SAMPLES_ONLY'):
     CALCULATE_SAMPLES_ONLY = os.environ.get('CALCULATE_SAMPLES_ONLY').lower() == 'true'
 if os.environ.get('SKIP_SAMPLE_COMPUTATION'):
     SKIP_SAMPLE_COMPUTATION = os.environ.get('SKIP_SAMPLE_COMPUTATION').lower() == 'true'
-if os.environ.get('COMPUTE_RAW_SAMPLES'):
-    COMPUTE_RAW_SAMPLES = os.environ.get('COMPUTE_RAW_SAMPLES').lower() == 'true'
-if os.environ.get('COMPUTE_PROBDIST'):
-    COMPUTE_PROBDIST = os.environ.get('COMPUTE_PROBDIST').lower() == 'true'
-if os.environ.get('COMPUTE_STD_DATA'):
-    COMPUTE_STD_DATA = os.environ.get('COMPUTE_STD_DATA').lower() == 'true'
 
 # Background execution switch - SAFER IMPLEMENTATION
 RUN_IN_BACKGROUND = False  # Set to True to automatically run the process in background
@@ -83,19 +98,27 @@ RUN_IN_BACKGROUND = False  # Set to True to automatically run the process in bac
 # Check if background execution has been disabled externally
 if os.environ.get('RUN_IN_BACKGROUND') == 'False':
     RUN_IN_BACKGROUND = False
-BACKGROUND_LOG_FILE = "static_experiment_background.log"  # Log file for background execution
-BACKGROUND_PID_FILE = "static_experiment.pid"  # PID file to track background process
+BACKGROUND_LOG_FILE = "static_experiment_multiprocessing.log"  # Log file for background execution
+BACKGROUND_PID_FILE = "static_experiment_mp.pid"  # PID file to track background process
 
 # Experiment parameters
 N = 20000  # System size
-steps = N//4  # Time steps
+steps = N//4  # Time steps - now we can handle the full computation with streaming
 samples = 5  # Samples per deviation - changed from 1 to 5
+
+# Memory management warning (updated for streaming)
+print(f"[COMPUTATION SCALE] N={N}, steps={steps}, samples={samples}")
+print(f"[STREAMING MODE] Memory-efficient computation saves states incrementally")
+if N > 10000 and steps > 1000:
+    print(f"[WARNING] LARGE COMPUTATION: This will take significant time but use reasonable memory")
+    print("   Streaming approach keeps memory usage low regardless of problem size")
+    print("   Each process uses ~100MB instead of several GB")
 
 # Check for forced parameter overrides from launcher
 if os.environ.get('FORCE_SAMPLES_COUNT'):
     try:
         forced_samples = int(os.environ.get('FORCE_SAMPLES_COUNT'))
-        print(f"🔒 FORCED: Using samples = {forced_samples} (launcher override)")
+        print(f"[FORCED] Using samples = {forced_samples} (launcher override)")
         samples = forced_samples
     except ValueError:
         pass
@@ -103,7 +126,7 @@ if os.environ.get('FORCE_SAMPLES_COUNT'):
 if os.environ.get('FORCE_N_VALUE'):
     try:
         forced_N = int(os.environ.get('FORCE_N_VALUE'))
-        print(f"🔒 FORCED: Using N = {forced_N} (launcher override)")
+        print(f"[FORCED] Using N = {forced_N} (launcher override)")
         N = forced_N
         steps = N//4  # Recalculate steps
     except ValueError:
@@ -113,11 +136,398 @@ if os.environ.get('FORCE_N_VALUE'):
 theta = math.pi/3  # Base theta parameter for static noise
 initial_state_kwargs = {"nodes": [N//2]}
 
-# List of static noise deviations
-devs = [0, 0.1, 0.5,1, 10]
+# Deviation values for static noise experiments
+# CUSTOMIZE THIS LIST: Add or remove deviation values as needed
+# Format options:
+# 1. Single value: devs = [0, 0.1, 0.5] - backward compatibility (range [0, value])
+# 2. Tuple (minVal, maxVal): devs = [(0.0, 0.2)] - direct range format
+# 3. Mixed: devs = [0, (0.0, 0.2), 0.5] - can mix formats
+devs = [
+    (0,0),              # No noise
+    (0, 0.2),           # Small noise range
+    (0, 0.6),           # Medium noise range  
+    (0, 0.8),           # Medium noise range  
+    (0, 1),           # Medium noise range  
+]
 
-# Note: Set USE_LOGLOG_PLOT = True in the plotting configuration above to use log-log scale
-# This is useful for identifying power-law behavior in the standard deviation growth
+# Multiprocessing configuration
+# With streaming approach, memory is no longer the bottleneck, so we can use more processes
+MAX_PROCESSES = min(len(devs), mp.cpu_count())  # Use all available CPUs
+PROCESS_LOG_DIR = "process_logs"  # Directory for individual process logs
+
+# Mean probability multiprocessing configuration
+USE_MULTIPROCESS_MEAN_PROB = True  # Set to True to use multiprocessing for mean probability calculation
+MAX_MEAN_PROB_PROCESSES = 5  # Max processes for mean probability calculation (None = auto-detect)
+
+# ============================================================================
+# MULTIPROCESSING LOGGING SETUP
+# ============================================================================
+
+def setup_process_logging(dev_value, process_id):
+    """Setup logging for individual processes"""
+    os.makedirs(PROCESS_LOG_DIR, exist_ok=True)
+    
+    # Format dev_value for filename (handle both old and new formats)
+    if isinstance(dev_value, str):
+        dev_str = dev_value  # Already formatted as string
+    elif isinstance(dev_value, (tuple, list)) and len(dev_value) == 2:
+        # Direct (minVal, maxVal) format
+        min_val, max_val = dev_value
+        dev_str = f"min{min_val:.3f}_max{max_val:.3f}"
+    else:
+        # Single value format
+        dev_str = f"{float(dev_value):.3f}"
+    
+    log_filename = os.path.join(PROCESS_LOG_DIR, f"process_dev_{dev_str}_pid_{process_id}.log")
+    
+    # Create logger for this process
+    logger = logging.getLogger(f"dev_{dev_str}")
+    logger.setLevel(logging.INFO)
+    
+    # Remove any existing handlers
+    for handler in logger.handlers[:]:
+        logger.removeHandler(handler)
+    
+    # Create file handler
+    file_handler = logging.FileHandler(log_filename, mode='w')
+    file_handler.setLevel(logging.INFO)
+    
+    # Create console handler
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(logging.INFO)
+    
+    # Create formatter
+    formatter = logging.Formatter('[%(asctime)s] [PID:%(process)d] [DEV:%(name)s] %(levelname)s: %(message)s')
+    file_handler.setFormatter(formatter)
+    console_handler.setFormatter(formatter)
+    
+    # Add handlers to logger
+    logger.addHandler(file_handler)
+    logger.addHandler(console_handler)
+    
+    return logger, log_filename
+
+def setup_master_logging():
+    """Setup logging for the master process"""
+    master_log_filename = "static_experiment_multiprocess.log"
+    
+    # Create master logger
+    master_logger = logging.getLogger("master")
+    master_logger.setLevel(logging.INFO)
+    
+    # Remove any existing handlers
+    for handler in master_logger.handlers[:]:
+        master_logger.removeHandler(handler)
+    
+    # Create file handler
+    file_handler = logging.FileHandler(master_log_filename, mode='w')
+    file_handler.setLevel(logging.INFO)
+    
+    # Create console handler
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(logging.INFO)
+    
+    # Create formatter
+    formatter = logging.Formatter('[%(asctime)s] [MASTER] %(levelname)s: %(message)s')
+    file_handler.setFormatter(formatter)
+    console_handler.setFormatter(formatter)
+    
+    # Add handlers to logger
+    master_logger.addHandler(file_handler)
+    master_logger.addHandler(console_handler)
+    
+    return master_logger, master_log_filename
+
+# ============================================================================
+# MULTIPROCESSING WORKER FUNCTIONS
+# ============================================================================
+
+def compute_mean_probability_for_dev(dev_args):
+    """Worker function to compute mean probability distributions for a single deviation value in a separate process"""
+    dev, process_id, N, steps, samples, source_base_dir, target_base_dir, noise_type, theta, tesselation_func = dev_args
+    
+    # Setup logging for this process
+    dev_str = f"{dev}" if isinstance(dev, (int, float)) else f"{dev[0]}_{dev[1]}" if isinstance(dev, (tuple, list)) else str(dev)
+    logger, log_file = setup_process_logging(f"meanprob_{dev_str}", process_id)
+    
+    try:
+        logger.info(f"Starting mean probability computation for deviation {dev}")
+        logger.info(f"Parameters: N={N}, steps={steps}, samples={samples}")
+        
+        # Import required modules
+        import pickle
+        from sqw.states import amp2prob
+        from smart_loading_static import find_experiment_dir_flexible, get_experiment_dir
+        
+        dev_start_time = time.time()
+        
+        # Handle deviation format for has_noise check
+        if isinstance(dev, (tuple, list)) and len(dev) == 2:
+            # Direct (minVal, maxVal) format
+            min_val, max_val = dev
+            has_noise = max_val > 0
+            dev_str = f"min{min_val:.3f}_max{max_val:.3f}"
+        else:
+            # Single value format
+            has_noise = dev > 0
+            dev_str = f"{dev:.3f}"
+        
+        if noise_type == "static_noise":
+            noise_params = [dev]
+            param_name = "static_dev"
+        
+        # Get source and target directories
+        if noise_type == "static_noise":
+            source_exp_dir, found_format = find_experiment_dir_flexible(tesselation_func, has_noise, N, noise_params=noise_params, noise_type=noise_type, base_dir=source_base_dir, theta=theta)
+            target_exp_dir, _ = find_experiment_dir_flexible(tesselation_func, has_noise, N, noise_params=noise_params, noise_type=noise_type, base_dir=target_base_dir, theta=theta)
+        else:
+            source_exp_dir = get_experiment_dir(tesselation_func, has_noise, N, noise_params=noise_params, noise_type=noise_type, base_dir=source_base_dir, theta=theta)
+            target_exp_dir = get_experiment_dir(tesselation_func, has_noise, N, noise_params=noise_params, noise_type=noise_type, base_dir=target_base_dir, theta=theta)
+        
+        os.makedirs(target_exp_dir, exist_ok=True)
+        logger.info(f"Processing {steps} steps for {param_name}={dev_str}")
+        logger.info(f"Source: {source_exp_dir}")
+        logger.info(f"Target: {target_exp_dir}")
+        
+        processed_steps = 0
+        
+        for step_idx in range(steps):
+            # Check if mean probability file already exists
+            mean_filename = f"mean_step_{step_idx}.pkl"
+            mean_filepath = os.path.join(target_exp_dir, mean_filename)
+            
+            if os.path.exists(mean_filepath):
+                processed_steps += 1
+                if step_idx % 100 == 0:
+                    logger.info(f"    Step {step_idx+1}/{steps} already exists, skipping")
+                continue
+            
+            step_dir = os.path.join(source_exp_dir, f"step_{step_idx}")
+            
+            # Load all samples for this step
+            sample_states = []
+            valid_samples = 0
+            for sample_idx in range(samples):
+                filename = f"final_step_{step_idx}_sample{sample_idx}.pkl"
+                filepath = os.path.join(step_dir, filename)
+                
+                if os.path.exists(filepath):
+                    with open(filepath, "rb") as f:
+                        state = pickle.load(f)
+                    sample_states.append(state)
+                    valid_samples += 1
+                else:
+                    logger.warning(f"Sample file not found: {filepath}")
+            
+            if sample_states and valid_samples > 0:
+                # Convert quantum states to probability distributions
+                prob_distributions = []
+                for i, state in enumerate(sample_states):
+                    prob_dist = amp2prob(state)  # |amplitude|^2
+                    prob_distributions.append(prob_dist)
+                    # Clear state from memory
+                    sample_states[i] = None
+                
+                # Calculate mean probability distribution
+                mean_prob_dist = np.mean(prob_distributions, axis=0)
+                
+                # Clear prob_distributions to save memory
+                del prob_distributions
+                
+                # Save mean probability distribution
+                with open(mean_filepath, "wb") as f:
+                    pickle.dump(mean_prob_dist, f, protocol=pickle.HIGHEST_PROTOCOL)
+                
+                processed_steps += 1
+                
+                if step_idx % 100 == 0 or step_idx == steps - 1:
+                    logger.info(f"    Step {step_idx+1}/{steps} processed (valid samples: {valid_samples})")
+            else:
+                logger.warning(f"No valid samples found for step {step_idx}")
+        
+        dev_time = time.time() - dev_start_time
+        logger.info(f"Deviation {dev_str} completed: {processed_steps}/{steps} steps in {dev_time:.1f}s")
+        
+        return {
+            "dev": dev,
+            "process_id": process_id,
+            "processed_steps": processed_steps,
+            "total_steps": steps,
+            "total_time": dev_time,
+            "log_file": log_file,
+            "success": True,
+            "error": None
+        }
+        
+    except Exception as e:
+        # Format dev for display
+        if isinstance(dev, tuple):
+            dev_str = f"max{dev[0]:.3f}_min{dev[0]*dev[1]:.3f}"
+        else:
+            dev_str = f"{dev:.4f}"
+        error_msg = f"Error in mean probability process for dev {dev_str}: {str(e)}"
+        logger.error(error_msg)
+        logger.error(traceback.format_exc())
+        
+        return {
+            "dev": dev,
+            "process_id": process_id,
+            "processed_steps": 0,
+            "total_steps": steps,
+            "total_time": 0,
+            "log_file": log_file,
+            "success": False,
+            "error": error_msg
+        }
+
+def compute_dev_samples(dev_args):
+    """Worker function to compute samples for a single deviation value in a separate process"""
+    dev, process_id, N, steps, samples, theta, initial_state_kwargs = dev_args
+    
+    # Setup logging for this process - need to format dev for logging
+    dev_str = f"{dev}" if isinstance(dev, (int, float)) else f"{dev[0]}_{dev[1]}" if isinstance(dev, (tuple, list)) else str(dev)
+    logger, log_file = setup_process_logging(dev_str, process_id)
+    
+    try:
+        logger.info(f"Starting computation for deviation {dev}")
+        logger.info(f"Parameters: N={N}, steps={steps}, samples={samples}, theta={theta:.4f}")
+        
+        # Import required modules (each process needs its own imports)
+        from sqw.experiments_expanded_static import running_streaming
+        from smart_loading_static import get_experiment_dir
+        import pickle
+        import gc  # For garbage collection
+        
+        # Setup experiment directory - handle new deviation format
+        if isinstance(dev, (tuple, list)) and len(dev) == 2:
+            # Direct (minVal, maxVal) format
+            min_val, max_val = dev
+            has_noise = max_val > 0
+        else:
+            # Single value format
+            has_noise = dev > 0
+        
+        # With unified structure, we always include noise_params (including 0 for no noise)
+        noise_params = [dev]
+        exp_dir = get_experiment_dir(dummy_tesselation_func, has_noise, N, 
+                                   noise_params=noise_params, noise_type="static_noise", 
+                                   base_dir="experiments_data_samples", theta=theta)
+        os.makedirs(exp_dir, exist_ok=True)
+        
+        logger.info(f"Experiment directory: {exp_dir}")
+        
+        dev_start_time = time.time()
+        dev_computed_samples = 0
+        
+        for sample_idx in range(samples):
+            sample_start_time = time.time()
+            
+            # Check if this sample already exists (all step files)
+            sample_exists = True
+            for step_idx in range(steps):
+                step_dir = os.path.join(exp_dir, f"step_{step_idx}")
+                filename = f"final_step_{step_idx}_sample{sample_idx}.pkl"
+                filepath = os.path.join(step_dir, filename)
+                if not os.path.exists(filepath):
+                    sample_exists = False
+                    break
+            
+            if sample_exists:
+                logger.info(f"Sample {sample_idx+1}/{samples} already exists, skipping")
+                dev_computed_samples += 1
+                continue
+            
+            logger.info(f"Computing sample {sample_idx+1}/{samples}...")
+            
+            # Extract initial nodes from initial_state_kwargs
+            initial_nodes = initial_state_kwargs.get('nodes', [])
+            
+            # Create step callback function for streaming saves
+            def save_step_callback(step_idx, state):
+                """Callback function to save each step as it's computed"""
+                step_dir = os.path.join(exp_dir, f"step_{step_idx}")
+                os.makedirs(step_dir, exist_ok=True)
+                
+                filename = f"final_step_{step_idx}_sample{sample_idx}.pkl"
+                filepath = os.path.join(step_dir, filename)
+                
+                with open(filepath, 'wb') as f:
+                    pickle.dump(state, f)
+                
+                # Progress logging for large computations
+                if step_idx % 100 == 0 or step_idx == steps:
+                    logger.info(f"    Saved step {step_idx}/{steps}")
+            
+            # Memory-efficient streaming approach
+            try:
+                # Run the quantum walk experiment using streaming approach
+                logger.info(f"  Running streaming quantum walk: N={N}, steps={steps}, dev={dev}")
+                
+                final_state = running_streaming(
+                    N, theta, steps,
+                    initial_nodes=initial_nodes,
+                    deviation_range=dev,
+                    step_callback=save_step_callback
+                )
+                
+                logger.info(f"  Streaming computation completed, all {steps+1} steps saved incrementally")
+                
+                # No need to explicitly delete anything - streaming approach doesn't accumulate states
+                
+            except MemoryError as mem_error:
+                logger.error(f"Memory error during computation: {mem_error}")
+                logger.error("Consider reducing N, steps, or running fewer processes simultaneously")
+                raise
+            except Exception as comp_error:
+                logger.error(f"Computation error: {comp_error}")
+                raise
+            
+            dev_computed_samples += 1
+            sample_time = time.time() - sample_start_time
+            
+            # Force garbage collection to free memory
+            gc.collect()
+            
+            logger.info(f"Sample {sample_idx+1}/{samples} completed in {sample_time:.1f}s")
+        
+        dev_time = time.time() - dev_start_time
+        # Format dev for display
+        if isinstance(dev, tuple):
+            dev_str = f"min{dev[0]:.3f}_max{dev[1]:.3f}"
+        else:
+            dev_str = f"{dev:.4f}"
+        logger.info(f"Deviation {dev_str} completed: {dev_computed_samples} samples in {dev_time:.1f}s")
+        
+        return {
+            "dev": dev,
+            "process_id": process_id,
+            "computed_samples": dev_computed_samples,
+            "total_time": dev_time,
+            "log_file": log_file,
+            "success": True,
+            "error": None
+        }
+        
+    except Exception as e:
+        import traceback
+        # Format dev for display
+        if isinstance(dev, tuple):
+            dev_str = f"max{dev[0]:.3f}_min{dev[0]*dev[1]:.3f}"
+        else:
+            dev_str = f"{dev:.4f}"
+        error_msg = f"Error in process for dev {dev_str}: {str(e)}"
+        logger.error(error_msg)
+        logger.error(traceback.format_exc())
+        
+        return {
+            "dev": dev,
+            "process_id": process_id,
+            "computed_samples": 0,
+            "total_time": 0,
+            "log_file": log_file,
+            "success": False,
+            "error": error_msg
+        }
 
 # ============================================================================
 # STANDARD DEVIATION DATA MANAGEMENT
@@ -158,9 +568,27 @@ def create_or_load_std_data(mean_results, devs, N, steps, tesselation_func, std_
     domain = np.arange(N) - N//2  # Center domain around 0
     
     for i, dev in enumerate(devs):
+        # Handle new deviation format for has_noise check
+        if isinstance(dev, (tuple, list)) and len(dev) == 2:
+            # New format: (max_dev, min_factor) or legacy (min, max)
+            if dev[1] <= 1.0 and dev[1] >= 0.0:
+                # New format
+                max_dev, min_factor = dev
+                has_noise = max_dev > 0
+                dev_str = f"max{max_dev:.3f}_min{max_dev * min_factor:.3f}"
+            else:
+                # Legacy format
+                min_val, max_val = dev
+                has_noise = max_val > 0
+                dev_str = f"min{min_val:.3f}_max{max_val:.3f}"
+        else:
+            # Single value format
+            has_noise = dev > 0
+            dev_str = f"{dev:.3f}"
+        
         # Setup std data directory structure for static noise
-        has_noise = dev > 0
-        noise_params = [dev] if has_noise else [0]  # Static noise uses single parameter
+        # With unified structure, we always include noise_params (including 0 for no noise)
+        noise_params = [dev]  # Static noise uses single parameter
         std_dir = get_experiment_dir(tesselation_func, has_noise, N, 
                                    noise_params=noise_params, noise_type=noise_type, 
                                    base_dir=std_base_dir, theta=theta)
@@ -173,14 +601,14 @@ def create_or_load_std_data(mean_results, devs, N, steps, tesselation_func, std_
             try:
                 with open(std_filepath, 'rb') as f:
                     std_values = pickle.load(f)
-                print(f"  [OK] Loaded std data for dev {dev:.3f}")
+                print(f"  [OK] Loaded std data for dev {dev_str}")
                 stds.append(std_values)
                 continue
             except Exception as e:
-                print(f"  [WARNING] Could not load std data for dev {dev:.3f}: {e}")
+                print(f"  [WARNING] Could not load std data for dev {dev_str}: {e}")
         
         # Compute std data from mean probability distributions
-        print(f"  [COMPUTING] Computing std data for dev {dev:.3f}...")
+        print(f"  [COMPUTING] Computing std data for dev {dev_str}...")
         try:
             # Get mean probability distributions for this deviation
             if mean_results and i < len(mean_results) and mean_results[i]:
@@ -195,65 +623,110 @@ def create_or_load_std_data(mean_results, devs, N, steps, tesselation_func, std_
                         pickle.dump(std_values, f)
                     
                     stds.append(std_values)
-                    print(f"  [OK] Computed and saved std data for dev {dev:.3f} (final std = {std_values[-1]:.3f})")
+                    print(f"  [OK] Computed and saved std data for dev {dev_str} (final std = {std_values[-1]:.3f})")
                 else:
-                    print(f"  [ERROR] No valid probability distributions found for dev {dev:.3f}")
+                    print(f"  [ERROR] No valid probability distributions found for dev {dev_str}")
                     stds.append([])
             else:
-                print(f"  [ERROR] No mean results available for dev {dev:.3f}")
+                print(f"  [ERROR] No mean results available for dev {dev_str}")
                 stds.append([])
                 
         except Exception as e:
-            print(f"  [ERROR] Error computing std data for dev {dev:.3f}: {e}")
+            print(f"  [ERROR] Error computing std data for dev {dev_str}: {e}")
             stds.append([])
     
     print(f"[OK] Standard deviation data management completed!")
     return stds
 
-def create_experiment_archive(N, samples):
-    """Create a tar archive of experiment data folders for the specific N value."""
+def create_single_archive(archive_args):
+    """Worker function to create a single archive in a separate process"""
+    root_path, archive_path, temp_archive_name = archive_args
+    
     try:
-        print("\n[ARCHIVE] Creating tar archive of experiment data...")
+        # Create individual archive
+        with tarfile.open(temp_archive_name, "w:gz") as tar:
+            tar.add(root_path, arcname=archive_path)
         
-        # Check what we're archiving
-        archive_items = []
-        if ARCHIVE_SAMPLES:
-            archive_items.append("samples")
-        if ARCHIVE_PROBDIST:
-            archive_items.append("probdist")
+        # Get archive size
+        archive_size = os.path.getsize(temp_archive_name)
+        size_mb = archive_size / (1024 * 1024)
         
-        if not archive_items:
-            print("[WARNING] No archive items selected (ARCHIVE_SAMPLES=False, ARCHIVE_PROBDIST=False)")
-            return
+        return {
+            "success": True,
+            "archive_name": temp_archive_name,
+            "archive_path": archive_path,
+            "size_mb": size_mb,
+            "error": None
+        }
         
-        print(f"[ARCHIVE] Archive contents: {', '.join(archive_items)}")
+    except Exception as e:
+        return {
+            "success": False,
+            "archive_name": temp_archive_name,
+            "archive_path": archive_path,
+            "size_mb": 0,
+            "error": str(e)
+        }
+
+def create_experiment_archive(N, samples, use_multiprocess=True, max_archive_processes=5, exclude_samples=False, logger=None):
+    """
+    Create a tar archive of experiment data folders for the specific N value.
+    Now supports multiprocess archiving for faster compression of large datasets.
+    Includes both samples and probability distribution folders.
+    
+    Args:
+        N: System size
+        samples: Number of samples per deviation
+        use_multiprocess: Whether to use multiprocess archiving
+        max_archive_processes: Maximum number of processes for archiving
+        exclude_samples: If True, exclude raw sample files from archive (keep only probDist and std)
+        logger: Optional logger for logging archive operations
+    """
+    def log_and_print(message, level="info"):
+        """Helper function to both print and log messages"""
+        print(message)
+        if logger:
+            if level == "info":
+                logger.info(message.replace("[ARCHIVE] ", "").replace("[WARNING] ", "").replace("[OK] ", "").replace("[ERROR] ", "").replace("[DEBUG] ", "").replace("[INFO] ", ""))
+            elif level == "warning":
+                logger.warning(message.replace("[WARNING] ", "").replace("[ARCHIVE] ", ""))
+            elif level == "error":
+                logger.error(message.replace("[ERROR] ", "").replace("[ARCHIVE] ", ""))
+    
+    try:
+        log_and_print("\n[ARCHIVE] Creating tar archive of experiment data...")
         
-        # Create archive filename with timestamp, N, samples, and content type
+        # Create archive filename with timestamp, N, and samples
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        content_suffix = "_".join(archive_items)
-        archive_name = f"experiments_data_{content_suffix}_N{N}_samples{samples}_{timestamp}.tar.gz"
+        final_archive_name = f"experiments_data_N{N}_samples{samples}_{timestamp}.tar.gz"
         
-        # Data directories to potentially archive
-        data_directories = []
-        if ARCHIVE_SAMPLES:
-            data_directories.append(("experiments_data_samples", "samples"))
-        if ARCHIVE_PROBDIST:
-            data_directories.append(("experiments_data_samples_probDist", "probability distributions"))
+        # Define data folders to check based on exclude_samples flag
+        if exclude_samples:
+            log_and_print("[ARCHIVE] Excluding raw sample files from archive (keeping only processed data)")
+            data_folders = [
+                "experiments_data_samples_probDist",  # Mean probability distributions
+                "experiments_data_samples_std"        # Standard deviation data
+            ]
+        else:
+            data_folders = [
+                "experiments_data_samples",           # Raw sample data
+                "experiments_data_samples_probDist",  # Mean probability distributions
+                "experiments_data_samples_std"        # Standard deviation data
+            ]
         
-        all_folders_to_archive = []
         n_folder_name = f"N_{N}"
+        all_folders_to_archive = []
         
-        # Process each data directory
-        for data_folder, folder_type in data_directories:
+        # Find all folders containing N_{N} folders
+        for data_folder in data_folders:
             if not os.path.exists(data_folder):
-                print(f"[WARNING] {folder_type.capitalize()} folder '{data_folder}' not found - skipping")
+                log_and_print(f"[INFO] Data folder '{data_folder}' not found - skipping")
                 continue
+                
+            log_and_print(f"[ARCHIVE] Checking folder: {os.path.abspath(data_folder)}")
+            log_and_print(f"[ARCHIVE] Looking for folders containing '{n_folder_name}'...")
             
-            print(f"[ARCHIVE] Processing {folder_type} folder: {os.path.abspath(data_folder)}")
-            
-            # Find all folders containing N_{N} folders
-            print(f"[ARCHIVE] Looking for folders containing '{n_folder_name}' in {folder_type}...")
-            
+            folder_found = False
             for root, dirs, files in os.walk(data_folder):
                 if n_folder_name in dirs:
                     # Get the relative path from data folder
@@ -264,89 +737,375 @@ def create_experiment_archive(N, samples):
                         folder_path = os.path.join(relative_root, n_folder_name)
                     
                     full_path = os.path.join(data_folder, folder_path)
-                    archive_path = os.path.join(data_folder, folder_path)
-                    all_folders_to_archive.append((full_path, archive_path, folder_type))
-                    print(f"  Found: {folder_path} ({folder_type})")
+                    archive_path = os.path.join(data_folder, folder_path)  # Keep the full structure
+                    all_folders_to_archive.append((full_path, archive_path))
+                    log_and_print(f"  Found: {archive_path}")
+                    folder_found = True
+            
+            if not folder_found:
+                log_and_print(f"[INFO] No '{n_folder_name}' folders found in {data_folder}")
         
         if not all_folders_to_archive:
-            print(f"[WARNING] No folders found containing '{n_folder_name}' in any data directories")
+            log_and_print(f"[WARNING] No folders found containing '{n_folder_name}' in any data directory - skipping archive creation", "warning")
+            log_and_print("[INFO] This is normal if running on a different machine than where computation occurred")
+            return None
+        
+        total_folders = len(all_folders_to_archive)
+        log_and_print(f"[ARCHIVE] Found {total_folders} folders to archive across all data directories")
+        
+        # Determine if we should use multiprocessing
+        if not use_multiprocess or total_folders <= 1:
+            log_and_print(f"[ARCHIVE] Using single-process archiving (folders: {total_folders})")
             
-            # Debug information for each directory
-            for data_folder, folder_type in data_directories:
-                if os.path.exists(data_folder):
-                    print(f"[DEBUG] Directory contents of {data_folder}:")
-                    try:
-                        for item in os.listdir(data_folder):
-                            item_path = os.path.join(data_folder, item)
-                            if os.path.isdir(item_path):
-                                print(f"  Directory: {item}")
-                                # List subdirectories to see if N_ folders exist deeper
-                                try:
-                                    subdirs = [d for d in os.listdir(item_path) if os.path.isdir(os.path.join(item_path, d))]
-                                    if subdirs:
-                                        print(f"    Subdirs: {subdirs}")
-                                except:
-                                    pass
+            # Create the tar archive with all folders
+            with tarfile.open(final_archive_name, "w:gz") as tar:
+                for i, (full_path, archive_path) in enumerate(all_folders_to_archive, 1):
+                    log_and_print(f"  [{i}/{total_folders}] Adding to archive: {archive_path}")
+                    tar.add(full_path, arcname=archive_path)
+            
+        else:
+            # Multiprocess archiving approach
+            if max_archive_processes is None:
+                max_archive_processes = min(total_folders, mp.cpu_count())
+            
+            log_and_print(f"[ARCHIVE] Using multiprocess archiving with {max_archive_processes} processes")
+            log_and_print(f"[ARCHIVE] Creating {total_folders} temporary archives...")
+            
+            # Prepare arguments for multiprocessing
+            temp_archives = []
+            archive_args = []
+            
+            for i, (full_path, archive_path) in enumerate(all_folders_to_archive):
+                temp_archive_name = f"temp_archive_N{N}_{i}_{timestamp}.tar.gz"
+                temp_archives.append(temp_archive_name)
+                archive_args.append((full_path, archive_path, temp_archive_name))
+            
+            # Create individual archives in parallel
+            successful_archives = []
+            failed_archives = []
+            
+            try:
+                with ProcessPoolExecutor(max_workers=max_archive_processes) as executor:
+                    # Submit all archiving jobs
+                    future_to_args = {}
+                    for args in archive_args:
+                        future = executor.submit(create_single_archive, args)
+                        future_to_args[future] = args
+                    
+                    # Collect results as they complete
+                    completed = 0
+                    for future in as_completed(future_to_args):
+                        completed += 1
+                        args = future_to_args[future]
+                        try:
+                            result = future.result()
+                            if result["success"]:
+                                successful_archives.append(result)
+                                log_and_print(f"  [{completed}/{total_folders}] [OK] Created {result['archive_name']} ({result['size_mb']:.1f} MB)")
                             else:
-                                print(f"  File: {item}")
+                                failed_archives.append(result)
+                                log_and_print(f"  [{completed}/{total_folders}] [FAILED] Failed {result['archive_name']}: {result['error']}", "error")
+                                
+                        except Exception as e:
+                            failed_archives.append({
+                                "success": False,
+                                "archive_name": args[2],
+                                "archive_path": args[1],
+                                "size_mb": 0,
+                                "error": str(e)
+                            })
+                            log_and_print(f"  [{completed}/{total_folders}] [EXCEPTION] Exception creating {args[2]}: {e}", "error")
+            
+            except Exception as e:
+                log_and_print(f"[ERROR] Critical error in multiprocess archiving: {e}", "error")
+                # Clean up any temp files that were created
+                for temp_name in temp_archives:
+                    try:
+                        if os.path.exists(temp_name):
+                            os.remove(temp_name)
+                    except:
+                        pass
+                raise
+            
+            log_and_print(f"[ARCHIVE] Multiprocess archiving completed: {len(successful_archives)} successful, {len(failed_archives)} failed")
+            
+            if len(successful_archives) == 0:
+                log_and_print("[ERROR] No archives were created successfully", "error")
+                return None
+            
+            # Combine all successful archives into final archive
+            log_and_print(f"[ARCHIVE] Combining {len(successful_archives)} archives into final archive: {final_archive_name}")
+            
+            try:
+                with tarfile.open(final_archive_name, "w:gz") as final_tar:
+                    for i, result in enumerate(successful_archives, 1):
+                        temp_archive_name = result["archive_name"]
+                        log_and_print(f"  [{i}/{len(successful_archives)}] Merging {temp_archive_name}")
+                        
+                        # Extract and re-add contents from temp archive
+                        with tarfile.open(temp_archive_name, "r:gz") as temp_tar:
+                            for member in temp_tar.getmembers():
+                                fileobj = temp_tar.extractfile(member)
+                                if fileobj:
+                                    final_tar.addfile(member, fileobj)
+                                else:
+                                    # Handle directories
+                                    final_tar.addfile(member)
+                
+                # Clean up temporary archives
+                log_and_print("[ARCHIVE] Cleaning up temporary archives...")
+                for result in successful_archives:
+                    try:
+                        os.remove(result["archive_name"])
                     except Exception as e:
-                        print(f"  Error listing directory: {e}")
-            return
+                        log_and_print(f"  Warning: Could not remove {result['archive_name']}: {e}", "warning")
+                
+                # Also clean up failed temp archives
+                for result in failed_archives:
+                    try:
+                        if os.path.exists(result["archive_name"]):
+                            os.remove(result["archive_name"])
+                    except:
+                        pass
+                        
+            except Exception as e:
+                log_and_print(f"[ERROR] Failed to combine archives: {e}", "error")
+                # Clean up temp files
+                for result in successful_archives:
+                    try:
+                        if os.path.exists(result["archive_name"]):
+                            os.remove(result["archive_name"])
+                    except:
+                        pass
+                raise
         
-        print(f"[ARCHIVE] Creating archive: {archive_name}")
-        
-        # Create the tar archive with only N-specific folders
-        with tarfile.open(archive_name, "w:gz") as tar:
-            # Add folders from each data directory
-            for full_path, archive_path, folder_type in all_folders_to_archive:
-                print(f"  Adding to archive: {archive_path} ({folder_type})")
-                tar.add(full_path, arcname=archive_path)
-        
-        # Get archive size
-        archive_size = os.path.getsize(archive_name)
-        size_mb = archive_size / (1024 * 1024)
-        
-        print(f"[OK] Archive created: {archive_name} ({size_mb:.1f} MB)")
-        print(f"[OK] Archived {len(folders_to_archive)} folders containing N={N} data")
-        print(f"[OK] Archive location: {os.path.abspath(archive_name)}")
+        # Get final archive size and report success
+        if os.path.exists(final_archive_name):
+            archive_size = os.path.getsize(final_archive_name)
+            size_mb = archive_size / (1024 * 1024)
+            
+            log_and_print(f"[OK] Archive created: {final_archive_name} ({size_mb:.1f} MB)")
+            log_and_print(f"[OK] Archived {total_folders} folders containing N={N} data")
+            log_and_print(f"[OK] Included: samples, probability distributions, and standard deviation data")
+            log_and_print(f"[OK] Archive location: {os.path.abspath(final_archive_name)}")
+            
+            return final_archive_name
+        else:
+            log_and_print("[ERROR] Final archive was not created", "error")
+            return None
         
     except Exception as e:
-        print(f"[ERROR] Failed to create archive: {e}")
-        traceback.print_exc()
+        log_and_print(f"[ERROR] Failed to create archive: {e}", "error")
+        if logger:
+            logger.error(traceback.format_exc())
+        else:
+            traceback.print_exc()
+        return None
+
+def create_mean_probability_distributions_multiprocess(
+    tesselation_func,
+    N,
+    steps,
+    devs,
+    samples,
+    source_base_dir="experiments_data_samples",
+    target_base_dir="experiments_data_samples_probDist",
+    noise_type="static_noise",
+    theta=None,
+    use_multiprocess=True,
+    max_processes=None,
+    logger=None
+):
+    """
+    Create mean probability distributions using multiprocessing for parallel computation.
+    Each deviation is processed in a separate process for maximum efficiency.
+    
+    Args:
+        tesselation_func: Function to create tesselation (dummy for static noise)
+        N: System size
+        steps: Number of time steps
+        devs: List of deviation values
+        samples: Number of samples per deviation
+        source_base_dir: Base directory containing sample data
+        target_base_dir: Base directory to save probability distributions
+        noise_type: Type of noise ("static_noise")
+        theta: Theta parameter for static noise
+        use_multiprocess: Whether to use multiprocessing
+        max_processes: Maximum number of processes (None = auto-detect)
+        logger: Optional logger for logging operations
+    
+    Returns:
+        List of results from each process
+    """
+    def log_and_print(message, level="info"):
+        """Helper function to both print and log messages"""
+        print(message)
+        if logger:
+            if level == "info":
+                logger.info(message.replace("[MEAN_PROB] ", "").replace("[WARNING] ", "").replace("[OK] ", "").replace("[ERROR] ", ""))
+            elif level == "warning":
+                logger.warning(message.replace("[WARNING] ", "").replace("[MEAN_PROB] ", ""))
+            elif level == "error":
+                logger.error(message.replace("[ERROR] ", "").replace("[MEAN_PROB] ", ""))
+    
+    log_and_print("\n[MEAN_PROB] Creating mean probability distributions...")
+    start_time = time.time()
+    
+    # Check if multiprocessing should be used
+    if not use_multiprocess or len(devs) <= 1:
+        log_and_print(f"[MEAN_PROB] Using single-process mode for {len(devs)} deviations")
+        
+        # Fall back to original sequential method
+        from smart_loading_static import create_mean_probability_distributions
+        create_mean_probability_distributions(
+            tesselation_func, N, steps, devs, samples,
+            source_base_dir, target_base_dir, noise_type, theta
+        )
+        
+        total_time = time.time() - start_time
+        log_and_print(f"[OK] Mean probability distributions created in {total_time:.1f}s (sequential)")
+        return []
+    
+    # Multiprocessing approach
+    if max_processes is None:
+        max_processes = min(len(devs), mp.cpu_count())
+    
+    log_and_print(f"[MEAN_PROB] Using multiprocess mode with {max_processes} processes for {len(devs)} deviations")
+    
+    # Prepare arguments for each process
+    process_args = []
+    for process_id, dev in enumerate(devs):
+        args = (dev, process_id, N, steps, samples, source_base_dir, target_base_dir, noise_type, theta, tesselation_func)
+        process_args.append(args)
+    
+    # Track process information
+    process_info = {}
+    for i, (dev, process_id, *_) in enumerate(process_args):
+        # Format dev for filename
+        if isinstance(dev, (tuple, list)) and len(dev) == 2:
+            if dev[1] <= 1.0 and dev[1] >= 0.0:
+                max_dev, min_factor = dev
+                min_dev = max_dev * min_factor
+                dev_str = f"max{max_dev:.3f}_min{min_dev:.3f}"
+            else:
+                min_val, max_val = dev
+                dev_str = f"min{min_val:.3f}_max{max_val:.3f}"
+        else:
+            dev_str = f"{float(dev):.3f}"
+        
+        log_file = os.path.join(PROCESS_LOG_DIR, f"process_dev_meanprob_{dev_str}_pid_{process_id}.log")
+        process_info[dev] = {
+            "process_id": process_id,
+            "log_file": log_file,
+            "start_time": None,
+            "end_time": None,
+            "status": "pending"
+        }
+    
+    process_results = []
+    
+    try:
+        with ProcessPoolExecutor(max_workers=max_processes) as executor:
+            # Submit all jobs
+            future_to_dev = {}
+            for args in process_args:
+                dev = args[0]
+                future = executor.submit(compute_mean_probability_for_dev, args)
+                future_to_dev[future] = dev
+                process_info[dev]["start_time"] = time.time()
+                process_info[dev]["status"] = "running"
+                
+                # Format dev for display
+                if isinstance(dev, tuple):
+                    dev_str = f"max{dev[0]:.3f}_min{dev[0]*dev[1]:.3f}"
+                else:
+                    dev_str = f"{dev:.4f}"
+                log_and_print(f"[MEAN_PROB] Process launched for dev={dev_str}")
+            
+            # Collect results as they complete
+            completed = 0
+            for future in as_completed(future_to_dev):
+                dev = future_to_dev[future]
+                completed += 1
+                try:
+                    result = future.result()
+                    process_results.append(result)
+                    process_info[dev]["end_time"] = time.time()
+                    process_info[dev]["status"] = "completed" if result["success"] else "failed"
+                    
+                    # Format dev for display
+                    if isinstance(dev, tuple):
+                        dev_str = f"max{dev[0]:.3f}_min{dev[0]*dev[1]:.3f}"
+                    else:
+                        dev_str = f"{dev:.4f}"
+                    
+                    if result["success"]:
+                        log_and_print(f"[MEAN_PROB] [{completed}/{len(devs)}] [OK] dev={dev_str}: {result['processed_steps']}/{result['total_steps']} steps in {result['total_time']:.1f}s")
+                    else:
+                        log_and_print(f"[MEAN_PROB] [{completed}/{len(devs)}] [FAILED] dev={dev_str}: FAILED - {result['error']}", "error")
+                        
+                except Exception as e:
+                    process_info[dev]["end_time"] = time.time()
+                    process_info[dev]["status"] = "failed"
+                    
+                    if isinstance(dev, tuple):
+                        dev_str = f"max{dev[0]:.3f}_min{dev[0]*dev[1]:.3f}"
+                    else:
+                        dev_str = f"{dev:.4f}"
+                    
+                    error_msg = f"Exception in mean probability process for dev {dev_str}: {str(e)}"
+                    log_and_print(f"[MEAN_PROB] [{completed}/{len(devs)}] [EXCEPTION] {error_msg}", "error")
+                    
+                    result = {
+                        "dev": dev,
+                        "process_id": process_info[dev]["process_id"],
+                        "processed_steps": 0,
+                        "total_steps": steps,
+                        "total_time": 0,
+                        "log_file": process_info[dev]["log_file"],
+                        "success": False,
+                        "error": error_msg
+                    }
+                    process_results.append(result)
+    
+    except Exception as e:
+        log_and_print(f"[ERROR] Critical error in mean probability multiprocessing: {str(e)}", "error")
+        if logger:
+            logger.error(traceback.format_exc())
+        raise
+    
+    total_time = time.time() - start_time
+    
+    # Log final results
+    successful_processes = sum(1 for r in process_results if r["success"])
+    failed_processes = len(process_results) - successful_processes
+    
+    log_and_print(f"[OK] Mean probability distributions multiprocessing completed in {total_time:.1f}s")
+    log_and_print(f"[OK] Results: {successful_processes} successful, {failed_processes} failed processes")
+    
+    if logger:
+        logger.info("MEAN PROBABILITY DISTRIBUTIONS PROCESS SUMMARY:")
+        for result in process_results:
+            dev = result["dev"]
+            if isinstance(dev, tuple):
+                dev_str = f"max{dev[0]:.3f}_min{dev[0]*dev[1]:.3f}"
+            else:
+                dev_str = f"{dev:.4f}"
+            
+            if result["success"]:
+                logger.info(f"  [OK] dev={dev_str}: {result['processed_steps']}/{result['total_steps']} steps in {result['total_time']:.1f}s")
+            else:
+                logger.error(f"  [FAILED] dev={dev_str}: FAILED - {result['error']}")
+    
+    return process_results
 
 # @crash_safe_log(log_file_prefix="static_noise_experiment", heartbeat_interval=30.0)
 def run_static_experiment():
     """Run the static noise quantum walk experiment with configurable execution modes."""
     
-    # Declare global variables that will be modified
-    global COMPUTE_RAW_SAMPLES, COMPUTE_PROBDIST, COMPUTE_STD_DATA
-    global ARCHIVE_SAMPLES, ARCHIVE_PROBDIST
-    
     # Validate configuration
     if CALCULATE_SAMPLES_ONLY and SKIP_SAMPLE_COMPUTATION:
         raise ValueError("Invalid configuration: Cannot set both CALCULATE_SAMPLES_ONLY=True and SKIP_SAMPLE_COMPUTATION=True")
-    
-    # Override detailed switches when using high-level modes
-    if CALCULATE_SAMPLES_ONLY:
-        COMPUTE_RAW_SAMPLES = True
-        COMPUTE_PROBDIST = False
-        COMPUTE_STD_DATA = False
-        # Also override archive settings to match what's being computed
-        ARCHIVE_PROBDIST = False  # Can't archive what's not computed
-        print("SAMPLES ONLY mode: Forcing COMPUTE_RAW_SAMPLES=True, COMPUTE_PROBDIST=False, COMPUTE_STD_DATA=False")
-        print("                   Also forcing ARCHIVE_PROBDIST=False (not computing probdist)")
-    
-    if SKIP_SAMPLE_COMPUTATION:
-        COMPUTE_RAW_SAMPLES = False
-        # Also override archive settings to match what's being computed
-        ARCHIVE_SAMPLES = False  # Can't archive what's not computed
-        # Keep COMPUTE_PROBDIST and COMPUTE_STD_DATA as they were set (allows selective analysis)
-        print("ANALYSIS ONLY mode: Forcing COMPUTE_RAW_SAMPLES=False")
-        print("                    Also forcing ARCHIVE_SAMPLES=False (not computing samples)")
-    
-    if CREATE_TAR_ARCHIVE and not ARCHIVE_SAMPLES and not ARCHIVE_PROBDIST:
-        print("WARNING: Archive enabled but no content selected (ARCHIVE_SAMPLES=False, ARCHIVE_PROBDIST=False)")
-        print("         Archive creation will be skipped")
     
     if SKIP_SAMPLE_COMPUTATION and not ENABLE_PLOTTING:
         print("WARNING: Analysis-only mode with plotting disabled - limited output will be generated")
@@ -359,33 +1118,20 @@ def run_static_experiment():
         "Full Pipeline"
     )
     print(f"Execution mode: {mode_description}")
-    
-    # High-level computation control
     print(f"Sample computation: {'Enabled' if not SKIP_SAMPLE_COMPUTATION else 'Disabled'}")
     print(f"Analysis phase: {'Enabled' if not CALCULATE_SAMPLES_ONLY else 'Disabled'}")
-    
-    # Detailed computation control (when in full pipeline mode)
-    if not CALCULATE_SAMPLES_ONLY and not SKIP_SAMPLE_COMPUTATION:
-        print(f"  - Raw samples computation: {'Enabled' if COMPUTE_RAW_SAMPLES else 'Disabled'}")
-        print(f"  - Probability dist computation: {'Enabled' if COMPUTE_PROBDIST else 'Disabled'}")
-        print(f"  - Standard deviation computation: {'Enabled' if COMPUTE_STD_DATA else 'Disabled'}")
-    
+    print(f"Mean probability multiprocessing: {'Enabled' if USE_MULTIPROCESS_MEAN_PROB else 'Disabled'}")
+    if USE_MULTIPROCESS_MEAN_PROB:
+        mean_prob_processes = MAX_MEAN_PROB_PROCESSES or "auto-detect"
+        print(f"Max mean probability processes: {mean_prob_processes}")
     print(f"Plotting: {'Enabled' if ENABLE_PLOTTING else 'Disabled'}")
-    
-    # Archive configuration
+    print(f"Archiving: {'Enabled' if CREATE_TAR_ARCHIVE else 'Disabled'}")
     if CREATE_TAR_ARCHIVE:
-        archive_items = []
-        if ARCHIVE_SAMPLES:
-            archive_items.append("samples")
-        if ARCHIVE_PROBDIST:
-            archive_items.append("probdist")
-        if archive_items:
-            print(f"Archiving: Enabled ({', '.join(archive_items)})")
-        else:
-            print("Archiving: Enabled but no content selected")
-    else:
-        print("Archiving: Disabled")
-    
+        print(f"Multiprocess archiving: {'Enabled' if USE_MULTIPROCESS_ARCHIVING else 'Disabled'}")
+        if USE_MULTIPROCESS_ARCHIVING:
+            archive_processes = MAX_ARCHIVE_PROCESSES or "auto-detect"
+            print(f"Max archive processes: {archive_processes}")
+        print(f"Exclude samples from archive: {'Yes (processed data only)' if EXCLUDE_SAMPLES_FROM_ARCHIVE else 'No (include all data)'}")
     print(f"Background execution: {'Enabled' if RUN_IN_BACKGROUND else 'Disabled'}")
     print("=" * 40)
     
@@ -615,126 +1361,232 @@ def run_static_experiment():
 
     print("Starting static noise quantum walk experiment...")
     
+    # Memory safety check (updated for streaming approach)
+    # With streaming, we only hold one state at a time, not all states
+    estimated_memory_per_process_mb = (N * 16 * 3) / (1024 * 1024)  # ~3 states max (current + temp calculations)
+    total_estimated_memory_mb = estimated_memory_per_process_mb * MAX_PROCESSES
+    
+    print(f"Memory estimation (streaming approach):")
+    print(f"  Per process: ~{estimated_memory_per_process_mb:.0f} MB (single state + overhead)")
+    print(f"  Total (all processes): ~{total_estimated_memory_mb:.0f} MB")
+    print(f"  Traditional approach would need: ~{(steps * N * 16 * 2 * MAX_PROCESSES) / (1024 * 1024):.0f} MB")
+    
+    if total_estimated_memory_mb > 8000:  # This threshold is much less likely to be hit now
+        print("[WARNING] High memory usage predicted!")
+        print("   Consider reducing N or MAX_PROCESSES")
+    else:
+        print("[OK] Memory usage looks reasonable with streaming approach")
+    
     print(f"Experiment parameters: N={N}, steps={steps}, samples={samples}")
-    print("IMMEDIATE SAVE MODE: Each sample will be saved as soon as it's computed!")
+    print(f"Multiprocessing: Using up to {MAX_PROCESSES} processes for {len(devs)} deviations")
+    print("MULTIPROCESS MODE: Each deviation will run in a separate process!")
+    
+    # Setup master logging
+    master_logger, master_log_file = setup_master_logging()
+    master_logger.info("=" * 60)
+    master_logger.info("MULTIPROCESS STATIC NOISE EXPERIMENT STARTED")
+    master_logger.info("=" * 60)
+    master_logger.info(f"Parameters: N={N}, steps={steps}, samples={samples}")
+    master_logger.info(f"Deviations: {devs}")
+    master_logger.info(f"Max processes: {MAX_PROCESSES}")
+    master_logger.info(f"Master log file: {master_log_file}")
     
     # Start timing the main experiment
     start_time = time.time()
     total_samples = len(devs) * samples
     completed_samples = 0
 
-    # Create a dummy tessellation function for static noise
-    def dummy_tesselation_func(N):
-        """Dummy tessellation function for static noise (tessellations are built-in)"""
-        return None
-
-    # Sample computation phase
+    # Sample computation phase with multiprocessing
     experiment_time = 0
-    completed_samples = 0
+    process_results = []
     
-    if not SKIP_SAMPLE_COMPUTATION and COMPUTE_RAW_SAMPLES:
-        print("=== SAMPLE COMPUTATION PHASE ===")
-        print("Computing and saving quantum walk samples...")
+    if not SKIP_SAMPLE_COMPUTATION:
+        master_logger.info("=" * 40)
+        master_logger.info("MULTIPROCESS SAMPLE COMPUTATION PHASE")
+        master_logger.info("=" * 40)
         
-        # Run experiments with immediate saving for each sample
-        for dev_idx, dev in enumerate(devs):
-            print(f"\n=== Processing static noise deviation {dev:.4f} ({dev_idx+1}/{len(devs)}) ===")
-            
-            # Setup experiment directory
-            has_noise = dev > 0
-            noise_params = [dev] if has_noise else [0]  # Static noise uses single parameter
-            exp_dir = get_experiment_dir(dummy_tesselation_func, has_noise, N, noise_params=noise_params, noise_type="static_noise", base_dir="experiments_data_samples", theta=theta)
-            os.makedirs(exp_dir, exist_ok=True)
-            
-            dev_start_time = time.time()
-            dev_computed_samples = 0
-            
-            for sample_idx in range(samples):
-                sample_start_time = time.time()
+        # Prepare arguments for each process
+        process_args = []
+        for process_id, dev in enumerate(devs):
+            args = (dev, process_id, N, steps, samples, theta, initial_state_kwargs)
+            process_args.append(args)
+        
+        master_logger.info(f"Launching {len(process_args)} processes...")
+        
+        # Track process information
+        process_info = {}
+        for i, (dev, process_id, *_) in enumerate(process_args):
+            # Format dev for filename (handle both old and new formats)
+            if isinstance(dev, (tuple, list)) and len(dev) == 2:
+                # New format: (max_dev, min_factor) or legacy (min, max)
+                if dev[1] <= 1.0 and dev[1] >= 0.0:
+                    max_dev, min_factor = dev
+                    min_dev = max_dev * min_factor
+                    dev_str = f"max{max_dev:.3f}_min{min_dev:.3f}"
+                else:
+                    min_val, max_val = dev
+                    dev_str = f"min{min_val:.3f}_max{max_val:.3f}"
+            else:
+                # Single value format
+                dev_str = f"{float(dev):.3f}"
                 
-                # Check if this sample already exists (all step files)
-                sample_exists = True
-                for step_idx in range(steps):
-                    step_dir = os.path.join(exp_dir, f"step_{step_idx}")
-                    filename = f"final_step_{step_idx}_sample{sample_idx}.pkl"
-                    filepath = os.path.join(step_dir, filename)
-                    if not os.path.exists(filepath):
-                        sample_exists = False
-                        break
+            log_file = os.path.join(PROCESS_LOG_DIR, f"process_dev_{dev_str}_pid_{process_id}.log")
+            process_info[dev] = {
+                "process_id": process_id,
+                "log_file": log_file,
+                "start_time": None,
+                "end_time": None,
+                "status": "pending"
+            }
+        
+        # Execute processes concurrently
+        try:
+            with ProcessPoolExecutor(max_workers=MAX_PROCESSES) as executor:
+                # Submit all jobs
+                future_to_dev = {}
+                for args in process_args:
+                    dev = args[0]
+                    future = executor.submit(compute_dev_samples, args)
+                    future_to_dev[future] = dev
+                    process_info[dev]["start_time"] = time.time()
+                    process_info[dev]["status"] = "running"
+                    # Format dev for display
+                    if isinstance(dev, tuple):
+                        dev_str = f"max{dev[0]:.3f}_min{dev[0]*dev[1]:.3f}"
+                    else:
+                        dev_str = f"{dev:.4f}"
+                    master_logger.info(f"Process launched for dev={dev_str} (PID will be assigned)")
                 
-                if sample_exists:
-                    print(f"  [OK] Sample {sample_idx+1}/{samples} already exists, skipping")
-                    completed_samples += 1
-                    continue
-                
-                print(f"  [COMPUTING] Computing sample {sample_idx+1}/{samples}...")
-                
-                # For static noise, we don't need to generate angle sequences
-                # The noise is applied internally by the running function
-                deviation_range = dev
-                
-                # Extract initial nodes from initial_state_kwargs
-                initial_nodes = initial_state_kwargs.get('nodes', [])
-                
-                # Run the quantum walk experiment for this sample using static noise
-                walk_result = running(
-                    N, theta, steps,
-                    initial_nodes=initial_nodes,
-                    deviation_range=deviation_range,
-                    return_all_states=True
-                )
-                
-                # Save each step immediately
-                for step_idx in range(steps):
-                    step_dir = os.path.join(exp_dir, f"step_{step_idx}")
-                    os.makedirs(step_dir, exist_ok=True)
-                    
-                    filename = f"final_step_{step_idx}_sample{sample_idx}.pkl"
-                    filepath = os.path.join(step_dir, filename)
-                    
-                    with open(filepath, 'wb') as f:
-                        pickle.dump(walk_result[step_idx], f)
-                
-                dev_computed_samples += 1
-                completed_samples += 1
-                sample_time = time.time() - sample_start_time
-                
-                # Progress report
-                progress_pct = (completed_samples / total_samples) * 100
-                elapsed_time = time.time() - start_time
-                estimated_total_time = elapsed_time * total_samples / completed_samples if completed_samples > 0 else 0
-                remaining_time = estimated_total_time - elapsed_time if estimated_total_time > elapsed_time else 0
-                
-                print(f"  [OK] Sample {sample_idx+1}/{samples} saved in {sample_time:.1f}s")
-                print(f"     Progress: {completed_samples}/{total_samples} ({progress_pct:.1f}%)")
-                print(f"     Elapsed: {elapsed_time:.1f}s, Remaining: ~{remaining_time:.1f}s")
-            
-            dev_time = time.time() - dev_start_time
-            print(f"[OK] Static noise deviation {dev:.4f} completed: {dev_computed_samples} new samples in {dev_time:.1f}s")
+                # Collect results as they complete
+                for future in as_completed(future_to_dev):
+                    dev = future_to_dev[future]
+                    try:
+                        result = future.result()
+                        process_results.append(result)
+                        process_info[dev]["end_time"] = time.time()
+                        
+                        if result["success"]:
+                            process_info[dev]["status"] = "completed"
+                            completed_samples += result["computed_samples"]
+                            # Format dev for display
+                            if isinstance(dev, tuple):
+                                dev_str = f"max{dev[0]:.3f}_min{dev[0]*dev[1]:.3f}"
+                            else:
+                                dev_str = f"{dev:.4f}"
+                            master_logger.info(f"[OK] Process for dev={dev_str} completed successfully")
+                            master_logger.info(f"  Computed samples: {result['computed_samples']}")
+                            master_logger.info(f"  Time: {result['total_time']:.1f}s")
+                            master_logger.info(f"  Log file: {result['log_file']}")
+                        else:
+                            process_info[dev]["status"] = "failed"
+                            # Format dev for display
+                            if isinstance(dev, tuple):
+                                dev_str = f"max{dev[0]:.3f}_min{dev[0]*dev[1]:.3f}"
+                            else:
+                                dev_str = f"{dev:.4f}"
+                            master_logger.error(f"[FAILED] Process for dev={dev_str} failed")
+                            master_logger.error(f"  Error: {result['error']}")
+                            master_logger.error(f"  Log file: {result['log_file']}")
+                            
+                    except Exception as e:
+                        import traceback
+                        process_info[dev]["status"] = "failed"
+                        process_info[dev]["end_time"] = time.time()
+                        # Format dev for display
+                        if isinstance(dev, tuple):
+                            dev_str = f"max{dev[0]:.3f}_min{dev[0]*dev[1]:.3f}"
+                        else:
+                            dev_str = f"{dev:.4f}"
+                        error_msg = f"Exception in process for dev={dev_str}: {str(e)}"
+                        master_logger.error(error_msg)
+                        master_logger.error(traceback.format_exc())
+                        
+                        process_results.append({
+                            "dev": dev,
+                            "process_id": -1,
+                            "computed_samples": 0,
+                            "total_time": 0,
+                            "log_file": "unknown",
+                            "success": False,
+                            "error": error_msg
+                        })
+        
+        except Exception as e:
+            import traceback
+            master_logger.error(f"Critical error in multiprocessing: {str(e)}")
+            master_logger.error(traceback.format_exc())
+            raise
 
         experiment_time = time.time() - start_time
-        print(f"\n[COMPLETED] Sample computation completed in {experiment_time:.2f} seconds")
+        
+        # Log final results
+        master_logger.info("=" * 40)
+        master_logger.info("MULTIPROCESS COMPUTATION COMPLETED")
+        master_logger.info("=" * 40)
+        master_logger.info(f"Total execution time: {experiment_time:.2f} seconds")
+        master_logger.info(f"Total samples computed: {completed_samples}/{total_samples}")
+        
+        # Log individual process results
+        master_logger.info("\nPROCESS SUMMARY:")
+        successful_processes = 0
+        failed_processes = 0
+        
+        for result in process_results:
+            dev = result["dev"]
+            # Format dev for display
+            if isinstance(dev, tuple):
+                dev_str = f"max{dev[0]:.3f}_min{dev[0]*dev[1]:.3f}"
+            else:
+                dev_str = f"{dev:.4f}"
+            
+            if result["success"]:
+                successful_processes += 1
+                master_logger.info(f"  [OK] dev={dev_str}: {result['computed_samples']} samples in {result['total_time']:.1f}s")
+            else:
+                failed_processes += 1
+                master_logger.error(f"  [FAILED] dev={dev_str}: FAILED - {result['error']}")
+        
+        master_logger.info(f"\nRESULTS: {successful_processes} successful, {failed_processes} failed processes")
+        
+        # Log process log file locations
+        master_logger.info("\nPROCESS LOG FILES:")
+        for dev, info in process_info.items():
+            # Format dev for display
+            if isinstance(dev, tuple):
+                dev_str = f"max{dev[0]:.3f}_min{dev[0]*dev[1]:.3f}"
+            else:
+                dev_str = f"{dev:.4f}"
+            master_logger.info(f"  dev={dev_str}: {info['log_file']}")
+        
+        print(f"\n[COMPLETED] Multiprocess sample computation completed in {experiment_time:.2f} seconds")
         print(f"Total samples computed: {completed_samples}")
-    elif SKIP_SAMPLE_COMPUTATION:
+        print(f"Successful processes: {successful_processes}/{len(devs)}")
+        print(f"Master log file: {master_log_file}")
+        print(f"Process log directory: {PROCESS_LOG_DIR}")
+        
+    else:
+        master_logger.info("SKIPPING SAMPLE COMPUTATION")
         print("=== SKIPPING SAMPLE COMPUTATION ===")
         print("Sample computation disabled - proceeding to analysis phase")
-        experiment_time = 0
-        completed_samples = 0
-    else:
-        print("=== SKIPPING RAW SAMPLE COMPUTATION ===") 
-        print("Raw sample computation disabled (COMPUTE_RAW_SAMPLES=False) - proceeding to analysis phase")
         experiment_time = 0
         completed_samples = 0
 
     # Early exit if only computing samples
     if CALCULATE_SAMPLES_ONLY:
+        master_logger.info("SAMPLES ONLY MODE - ANALYSIS SKIPPED")
         print("\n=== SAMPLES ONLY MODE - ANALYSIS SKIPPED ===")
         print("Sample computation completed. Skipping analysis and plotting.")
         
         # Create tar archive if enabled (even in samples-only mode)
         if CREATE_TAR_ARCHIVE:
-            create_experiment_archive(N, samples)
+            master_logger.info("Creating tar archive...")
+            archive_name = create_experiment_archive(N, samples, USE_MULTIPROCESS_ARCHIVING, MAX_ARCHIVE_PROCESSES, EXCLUDE_SAMPLES_FROM_ARCHIVE, master_logger)
+            if archive_name:
+                master_logger.info(f"Archive created successfully: {archive_name}")
+            else:
+                master_logger.warning("Archive creation failed or was skipped")
         else:
+            master_logger.info("Archiving disabled")
             print("Archiving disabled (CREATE_TAR_ARCHIVE=False)")
         
         print("To run analysis on existing samples, set:")
@@ -742,6 +1594,9 @@ def run_static_experiment():
         print("  SKIP_SAMPLE_COMPUTATION = True")
         
         total_time = time.time() - start_time
+        master_logger.info(f"Total execution time: {total_time:.2f} seconds")
+        master_logger.info("Experiment completed (samples only mode)")
+        
         print(f"Total execution time: {total_time:.2f} seconds")
         
         return {
@@ -752,65 +1607,156 @@ def run_static_experiment():
             "samples": samples,
             "total_time": total_time,
             "theta": theta,
-            "completed_samples": completed_samples
+            "completed_samples": completed_samples,
+            "multiprocessing": True,
+            "mean_prob_multiprocessing": USE_MULTIPROCESS_MEAN_PROB,
+            "max_mean_prob_processes": MAX_MEAN_PROB_PROCESSES,
+            "archiving_enabled": CREATE_TAR_ARCHIVE,
+            "multiprocess_archiving": USE_MULTIPROCESS_ARCHIVING,
+            "max_archive_processes": MAX_ARCHIVE_PROCESSES,
+            "process_results": process_results,
+            "master_log_file": master_log_file,
+            "process_log_dir": PROCESS_LOG_DIR
         }
 
     # Analysis phase
     print("\n=== ANALYSIS PHASE ===")
     print("Loading existing samples and computing analysis...")
 
-    # Smart load or create mean probability distributions
-    mean_results = None
-    if COMPUTE_PROBDIST:
-        print("\n[DATA] Smart loading/creating mean probability distributions...")
-        try:
-            mean_results = smart_load_or_create_experiment(
-                graph_func=lambda n: None,  # Not used in static noise
-                tesselation_func=dummy_tesselation_func,
-                N=N,
-                steps=steps,
-                angles_or_angles_list=theta,  # Single theta value for static noise
-                tesselation_order_or_list=None,  # Not used in static noise
-                initial_state_func=uniform_initial_state,
-                initial_state_kwargs=initial_state_kwargs,
-                parameter_list=devs,
-                samples=samples,
-                noise_type="static_noise",
-                parameter_name="static_dev",
-                samples_base_dir="experiments_data_samples",
-                probdist_base_dir="experiments_data_samples_probDist",
-                theta=theta
+    # Smart load or create mean probability distributions with multiprocessing support
+    print("\n[DATA] Smart loading/creating mean probability distributions...")
+    master_logger.info("=" * 40)
+    master_logger.info("ANALYSIS PHASE - MEAN PROBABILITY DISTRIBUTIONS")
+    master_logger.info("=" * 40)
+    
+    try:
+        # First, try to load existing mean probability distributions
+        from smart_loading_static import (
+            check_mean_probability_distributions_exist, 
+            load_mean_probability_distributions
+        )
+        
+        if check_mean_probability_distributions_exist(dummy_tesselation_func, N, steps, devs, 
+                                                    "experiments_data_samples_probDist", "static_noise", theta):
+            print("[OK] Found existing mean probability distributions - loading directly!")
+            master_logger.info("Loading existing mean probability distributions")
+            mean_results = load_mean_probability_distributions(
+                dummy_tesselation_func, N, steps, devs, 
+                "experiments_data_samples_probDist", "static_noise", theta
             )
-            print("[OK] Mean probability distributions ready for analysis")
+            print("[OK] Mean probability distributions loaded successfully")
+            master_logger.info("Mean probability distributions loaded successfully")
+        else:
+            # Need to create mean probability distributions
+            print("[INFO] Mean probability distributions not found - creating from samples...")
+            master_logger.info("Creating mean probability distributions from samples")
             
-        except Exception as e:
-            print(f"[WARNING] Warning: Could not smart load/create mean probability distributions: {e}")
-            mean_results = None
-    else:
-        print("\n[SKIPPED] Probability distribution computation disabled (COMPUTE_PROBDIST=False)")
+            # Check if multiprocessing is enabled and beneficial
+            if USE_MULTIPROCESS_MEAN_PROB and len(devs) > 1:
+                if MAX_MEAN_PROB_PROCESSES is None:
+                    mean_prob_processes = min(len(devs), mp.cpu_count())
+                else:
+                    mean_prob_processes = MAX_MEAN_PROB_PROCESSES
+                
+                print(f"[MULTIPROCESS] Creating mean probability distributions using {mean_prob_processes} processes")
+                master_logger.info(f"Using multiprocess mean probability calculation with {mean_prob_processes} processes")
+                
+                # Use multiprocessing approach
+                mean_prob_results = create_mean_probability_distributions_multiprocess(
+                    tesselation_func=dummy_tesselation_func,
+                    N=N,
+                    steps=steps,
+                    devs=devs,
+                    samples=samples,
+                    source_base_dir="experiments_data_samples",
+                    target_base_dir="experiments_data_samples_probDist",
+                    noise_type="static_noise",
+                    theta=theta,
+                    use_multiprocess=True,
+                    max_processes=mean_prob_processes,
+                    logger=master_logger
+                )
+                
+                # Log process results
+                successful_mean_prob = sum(1 for r in mean_prob_results if r["success"])
+                failed_mean_prob = len(mean_prob_results) - successful_mean_prob
+                master_logger.info(f"Mean probability multiprocessing: {successful_mean_prob} successful, {failed_mean_prob} failed")
+                
+                if successful_mean_prob < len(devs):
+                    print(f"[WARNING] Some mean probability processes failed ({failed_mean_prob}/{len(devs)})")
+                    master_logger.warning(f"Some mean probability processes failed: {failed_mean_prob}/{len(devs)}")
+            else:
+                print("[INFO] Using sequential mean probability calculation")
+                master_logger.info("Using sequential mean probability calculation")
+                
+                # Use sequential approach
+                from smart_loading_static import create_mean_probability_distributions
+                create_mean_probability_distributions(
+                    dummy_tesselation_func, N, steps, devs, samples,
+                    "experiments_data_samples", "experiments_data_samples_probDist", 
+                    "static_noise", theta
+                )
+            
+            # Load the created distributions
+            print("[DATA] Loading newly created mean probability distributions...")
+            mean_results = load_mean_probability_distributions(
+                dummy_tesselation_func, N, steps, devs, 
+                "experiments_data_samples_probDist", "static_noise", theta
+            )
+            print("[OK] Mean probability distributions created and loaded successfully")
+            master_logger.info("Mean probability distributions created and loaded successfully")
+        
+    except Exception as e:
+        error_msg = f"Warning: Could not smart load/create mean probability distributions: {e}"
+        print(f"[WARNING] {error_msg}")
+        master_logger.error(error_msg)
+        master_logger.error(traceback.format_exc())
         mean_results = None
 
     # Create or load standard deviation data
-    stds = []
-    if COMPUTE_STD_DATA:
-        try:
-            stds = create_or_load_std_data(
-                mean_results, devs, N, steps, dummy_tesselation_func,
-                "experiments_data_samples_std", "static_noise", theta=theta
-            )
-            
-            # Print final std values for verification
-            for i, (dev, std_values) in enumerate(zip(devs, stds)):
-                if std_values and len(std_values) > 0:
-                    print(f"Dev {dev:.3f}: Final std = {std_values[-1]:.3f}")
+    try:
+        stds = create_or_load_std_data(
+            mean_results, devs, N, steps, dummy_tesselation_func,
+            "experiments_data_samples_std", "static_noise", theta=theta
+        )
+        
+        # Print final std values for verification
+        for i, (dev, std_values) in enumerate(zip(devs, stds)):
+            if std_values and len(std_values) > 0:
+                # Format dev for display
+                if isinstance(dev, tuple) and len(dev) == 2:
+                    if dev[1] <= 1.0 and dev[1] >= 0.0:
+                        # New format: (max_dev, min_factor)
+                        max_dev, min_factor = dev
+                        dev_label = f"max{max_dev:.3f}_min{max_dev*min_factor:.3f}"
+                    else:
+                        # Legacy format: (min, max)
+                        min_val, max_val = dev
+                        dev_label = f"min{min_val:.3f}_max{max_val:.3f}"
                 else:
-                    print(f"Dev {dev:.3f}: No valid standard deviation data")
-                    
-        except Exception as e:
-            print(f"[WARNING] Warning: Could not create/load standard deviation data: {e}")
-            stds = []
-    else:
-        print("\n[SKIPPED] Standard deviation computation disabled (COMPUTE_STD_DATA=False)")
+                    # Single value format
+                    dev_label = f"{dev:.3f}"
+                
+                print(f"Dev {dev_label}: Final std = {std_values[-1]:.3f}")
+            else:
+                # Format dev for display
+                if isinstance(dev, tuple) and len(dev) == 2:
+                    if dev[1] <= 1.0 and dev[1] >= 0.0:
+                        # New format: (max_dev, min_factor)
+                        max_dev, min_factor = dev
+                        dev_label = f"max{max_dev:.3f}_min{max_dev*min_factor:.3f}"
+                    else:
+                        # Legacy format: (min, max)
+                        min_val, max_val = dev
+                        dev_label = f"min{min_val:.3f}_max{max_val:.3f}"
+                else:
+                    # Single value format
+                    dev_label = f"{dev:.3f}"
+                
+                print(f"Dev {dev_label}: No valid standard deviation data")
+                
+    except Exception as e:
+        print(f"[WARNING] Warning: Could not create/load standard deviation data: {e}")
         stds = []
 
     # Plot standard deviation vs time if enabled
@@ -827,20 +1773,46 @@ def run_static_experiment():
                     if len(std_values) > 0:
                         time_steps = list(range(len(std_values)))
                         
-                        # Filter out zero values for log-log plot
+                        # Format dev for display
+                        if isinstance(dev, tuple) and len(dev) == 2:
+                            if dev[1] <= 1.0 and dev[1] >= 0.0:
+                                # New format: (max_dev, min_factor)
+                                max_dev, min_factor = dev
+                                dev_label = f"max{max_dev:.3f}_min{max_dev*min_factor:.3f}"
+                            else:
+                                # Legacy format: (min, max)
+                                min_val, max_val = dev
+                                dev_label = f"min{min_val:.3f}_max{max_val:.3f}"
+                        else:
+                            # Single value format
+                            dev_label = f"{dev:.3f}"
+                        
+                        # Handle zero values for log-log plot
                         if USE_LOGLOG_PLOT:
-                            # Remove zero values which can't be plotted on log scale
-                            filtered_data = [(t, s) for t, s in zip(time_steps, std_values) if t > 0 and s > 0]
-                            if filtered_data:
-                                filtered_times, filtered_stds = zip(*filtered_data)
+                            # Check if this is a zero standard deviation case (noiseless)
+                            if all(s == 0 for s in std_values):
+                                # For noiseless case (std = 0), plot at bottom of y-axis
+                                # Use a small epsilon value to make it visible on log scale
+                                epsilon = 1e-3  # Small value for visualization
+                                filtered_times = [t for t in time_steps if t > 0]
+                                filtered_stds = [epsilon] * len(filtered_times)
                                 plt.loglog(filtered_times, filtered_stds, 
-                                         label=f'Static deviation = {dev:.3f}', 
-                                         marker='o', markersize=3, linewidth=2)
+                                         label=f'Static deviation = {dev_label} (noiseless)', 
+                                         marker='s', markersize=4, linewidth=2, 
+                                         linestyle='--', alpha=0.8)
+                            else:
+                                # Remove zero values which can't be plotted on log scale
+                                filtered_data = [(t, s) for t, s in zip(time_steps, std_values) if t > 0 and s > 0]
+                                if filtered_data:
+                                    filtered_times, filtered_stds = zip(*filtered_data)
+                                    plt.loglog(filtered_times, filtered_stds, 
+                                             label=f'Static deviation = {dev_label}', 
+                                             marker='o', markersize=3, linewidth=2)
 
 
                         else:
                             plt.plot(time_steps, std_values, 
-                                   label=f'Static deviation = {dev:.3f}', 
+                                   label=f'Static deviation = {dev_label}', 
                                    marker='o', markersize=3, linewidth=2)
                 
                 plt.xlabel('Time Step', fontsize=12)
@@ -895,9 +1867,23 @@ def run_static_experiment():
                     if dev_mean_prob_dists and len(dev_mean_prob_dists) > final_step and dev_mean_prob_dists[final_step] is not None:
                         final_prob_dist = dev_mean_prob_dists[final_step].flatten()
                         
+                        # Format dev for display
+                        if isinstance(dev, tuple) and len(dev) == 2:
+                            if dev[1] <= 1.0 and dev[1] >= 0.0:
+                                # New format: (max_dev, min_factor)
+                                max_dev, min_factor = dev
+                                dev_label = f"max{max_dev:.3f}_min{max_dev*min_factor:.3f}"
+                            else:
+                                # Legacy format: (min, max)
+                                min_val, max_val = dev
+                                dev_label = f"min{min_val:.3f}_max{max_val:.3f}"
+                        else:
+                            # Single value format
+                            dev_label = f"{dev:.3f}"
+                        
                         # Plot the probability distribution with log y-axis
                         plt.semilogy(domain, final_prob_dist, 
-                                   label=f'Static deviation = {dev:.3f}', 
+                                   label=f'Static deviation = {dev_label}', 
                                    linewidth=2, alpha=0.8)
                 
                 plt.xlabel('Position', fontsize=12)
@@ -932,10 +1918,17 @@ def run_static_experiment():
 
     # Create tar archive if enabled
     if CREATE_TAR_ARCHIVE:
-        create_experiment_archive(N, samples)
+        archive_name = create_experiment_archive(N, samples, USE_MULTIPROCESS_ARCHIVING, MAX_ARCHIVE_PROCESSES, EXCLUDE_SAMPLES_FROM_ARCHIVE, master_logger)
+        if archive_name:
+            print(f"[OK] Archive created successfully: {archive_name}")
+        else:
+            print("[WARNING] Archive creation failed or was skipped")
+    else:
+        print("[INFO] Archiving disabled (CREATE_TAR_ARCHIVE=False)")
 
     print("Static noise experiment completed successfully!")
     total_time = time.time() - start_time
+    master_logger.info(f"EXPERIMENT COMPLETED - Total time: {total_time:.2f} seconds")
     print(f"Total execution time: {total_time:.2f} seconds")
     
     print("\n=== Performance Summary ===")
@@ -944,27 +1937,46 @@ def run_static_experiment():
     print(f"Time steps: {steps}")
     print(f"Samples per deviation: {samples}")
     print(f"Number of deviations: {len(devs)}")
+    print(f"Multiprocessing: {MAX_PROCESSES} max processes")
     
     if not SKIP_SAMPLE_COMPUTATION:
         print(f"Total quantum walks computed: {completed_samples}")
+        successful_processes = len([r for r in process_results if r["success"]])
+        print(f"Successful processes: {successful_processes}/{len(devs)}")
         if experiment_time > 0 and completed_samples > 0:
             print(f"Average time per quantum walk: {experiment_time / completed_samples:.3f} seconds")
     else:
         print(f"Expected quantum walks: {len(devs) * samples} (sample computation skipped)")
     
+    print("\n=== Multiprocessing Log Files ===")
+    print(f"Master log: {master_log_file}")
+    print(f"Process logs directory: {PROCESS_LOG_DIR}")
+    if process_results:
+        print("Individual process logs:")
+        for result in process_results:
+            status = "[OK]" if result["success"] else "[FAILED]"
+            # Format dev properly for both single values and tuples
+            dev = result['dev']
+            if isinstance(dev, (tuple, list)) and len(dev) == 2:
+                # New format: (max_dev, min_factor) or legacy (min, max)
+                if dev[1] <= 1.0 and dev[1] >= 0.0:
+                    max_dev, min_factor = dev
+                    min_dev = max_dev * min_factor
+                    dev_str = f"max{max_dev:.4f}_min{min_dev:.4f}"
+                else:
+                    min_val, max_val = dev
+                    dev_str = f"min{min_val:.4f}_max{max_val:.4f}"
+            else:
+                # Single value format
+                dev_str = f"{float(dev):.4f}"
+            print(f"  {status} dev={dev_str}: {result['log_file']}")
+
     print("\n=== Execution Modes ===")
     print("Available execution modes:")
     print("1. Full Pipeline (default): Compute samples + analysis + plots + archive")
     print("2. Samples Only: Set CALCULATE_SAMPLES_ONLY = True")
     print("3. Analysis Only: Set SKIP_SAMPLE_COMPUTATION = True")
     print("4. Custom: Adjust individual toggles for plotting, archiving, etc.")
-    print()
-    print("Detailed computation control (Full Pipeline mode):")
-    print("- COMPUTE_RAW_SAMPLES: Generate quantum walk samples")
-    print("- COMPUTE_PROBDIST: Create probability distributions from samples")
-    print("- COMPUTE_STD_DATA: Calculate standard deviation data from prob dists")
-    print("Note: High-level modes (CALCULATE_SAMPLES_ONLY/SKIP_SAMPLE_COMPUTATION)")
-    print("      automatically override detailed switches for consistency")
     
     print("\n=== Static Noise Details ===")
     print("Static noise model:")
@@ -973,6 +1985,7 @@ def run_static_experiment():
     print("- Each sample generates different random noise for edge parameters")
     print("- Mean probability distributions average over all samples")
     print("- Tessellations are built-in (alpha and beta patterns)")
+    print("- MULTIPROCESSING: Each deviation value runs in separate process")
     
     print("\n=== Plotting Features ===")
     print(f"- Plotting enabled: {ENABLE_PLOTTING}")
@@ -996,35 +2009,17 @@ def run_static_experiment():
     print("\n=== Archive Features ===")
     print(f"- Create tar archive: {CREATE_TAR_ARCHIVE}")
     if CREATE_TAR_ARCHIVE:
-        print(f"- Archive samples data: {ARCHIVE_SAMPLES}")
-        print(f"- Archive probability distributions: {ARCHIVE_PROBDIST}")
-        
-        # Determine what's being archived
-        archive_items = []
-        if ARCHIVE_SAMPLES:
-            archive_items.append("samples")
-        if ARCHIVE_PROBDIST:
-            archive_items.append("probdist")
-        
-        if archive_items:
-            content_suffix = "_".join(archive_items)
-            archive_name = f"experiments_data_{content_suffix}_N{N}_samples{samples}_[timestamp].tar.gz"
-            print(f"- Archive will be saved as: {archive_name}")
-            print(f"- Archive contains only N={N} folders and their parent directory structure")
-            print("- This selective archiving reduces file size compared to archiving all N values")
-            
-            if ARCHIVE_SAMPLES:
-                print("- Samples data: Raw quantum walk samples from experiments_data_samples/")
-            if ARCHIVE_PROBDIST:
-                print("- Probability distributions: Mean probability distributions from experiments_data_samples_probDist/")
-        else:
-            print("- Warning: Archive enabled but no content selected (ARCHIVE_SAMPLES=False, ARCHIVE_PROBDIST=False)")
-    
-    print("\n=== Archive Content Control ===")
-    print("Archive content can be controlled with these switches:")
-    print("- ARCHIVE_SAMPLES: Include raw quantum walk samples")
-    print("- ARCHIVE_PROBDIST: Include computed probability distributions")
-    print("- Both can be True for complete archive, or set individually for specific content")
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        archive_name = f"experiments_data_samples_N{N}_samples{samples}_{timestamp}.tar.gz"
+        print(f"- Archive will be saved as: experiments_data_samples_N{N}_samples{samples}_[timestamp].tar.gz")
+        print(f"- Archive contains only N={N} folders and their parent directory structure")
+        print("- This selective archiving reduces file size compared to archiving all N values")
+        print(f"- Multiprocess archiving: {USE_MULTIPROCESS_ARCHIVING}")
+        if USE_MULTIPROCESS_ARCHIVING:
+            archive_processes = MAX_ARCHIVE_PROCESSES or "auto-detect"
+            print(f"- Max archive processes: {archive_processes}")
+            print("- Multiprocess archiving creates temporary archives in parallel, then combines them")
+            print("- This significantly speeds up archiving of large datasets with many folders")
     
     return {
         "mode": "full_pipeline",
@@ -1038,15 +2033,36 @@ def run_static_experiment():
         "sample_computation_enabled": not SKIP_SAMPLE_COMPUTATION,
         "analysis_enabled": not CALCULATE_SAMPLES_ONLY,
         "plotting_enabled": ENABLE_PLOTTING,
-        "archiving_enabled": CREATE_TAR_ARCHIVE
+        "mean_prob_multiprocessing": USE_MULTIPROCESS_MEAN_PROB,
+        "max_mean_prob_processes": MAX_MEAN_PROB_PROCESSES,
+        "archiving_enabled": CREATE_TAR_ARCHIVE,
+        "multiprocess_archiving": USE_MULTIPROCESS_ARCHIVING,
+        "max_archive_processes": MAX_ARCHIVE_PROCESSES,
+        "multiprocessing": True,
+        "max_processes": MAX_PROCESSES,
+        "process_results": process_results,
+        "master_log_file": master_log_file,
+        "process_log_dir": PROCESS_LOG_DIR
     }
 
 if __name__ == "__main__":
+    # Multiprocessing protection for Windows
+    mp.set_start_method('spawn', force=True)
+    
     try:
         run_static_experiment()
     except Exception as e:
         error_msg = f"Fatal error in run_static_experiment: {e}"
         print(error_msg)
+        
+        # Try to log to master logger if available
+        try:
+            master_logger = logging.getLogger("master")
+            if master_logger.handlers:
+                master_logger.error(error_msg)
+                master_logger.error(traceback.format_exc())
+        except:
+            pass
         
         # If we're in background mode, write the error to the log file
         if os.environ.get('IS_BACKGROUND_PROCESS'):
