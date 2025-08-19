@@ -55,7 +55,7 @@ SKIP_SAMPLE_COMPUTATION = False  # Set to True to skip sample computation (analy
 # Detailed computation control (when not in samples-only or analysis-only modes)
 COMPUTE_RAW_SAMPLES = True      # Compute quantum walk samples 
 COMPUTE_PROBDIST = True         # Compute probability distributions from samples
-COMPUTE_STD_DATA = True         # Compute standard deviation data from probability distributions
+COMPUTE_STD_DATA = False         # Compute standard deviation data from probability distributions
 
 # Check for environment variable overrides (from safe_background_launcher.py)
 if os.environ.get('ENABLE_PLOTTING'):
