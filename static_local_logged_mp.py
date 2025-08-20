@@ -134,7 +134,7 @@ BACKGROUND_PID_FILE = "static_experiment_mp.pid"  # PID file to track background
 
 # Experiment parameters
 N = 100  # System size
-steps = N//4  # Time steps - now we can handle the full computation with streaming
+steps = N//5  # Time steps - now we can handle the full computation with streaming
 samples = 5  # Samples per deviation - changed from 1 to 5
 
 # Resource monitoring and management
@@ -245,31 +245,26 @@ def log_system_resources(logger=None, prefix="[SYSTEM]"):
         msg = f"{prefix} Memory: {memory.percent:.1f}% used ({memory.available / (1024**3):.1f}GB free), CPU: {cpu_percent:.1f}%"
         if logger:
             logger.info(msg)
-        print(msg)
         
         # Check for concerning resource usage
         if memory.percent > 90:
             warning_msg = f"{prefix} WARNING: High memory usage ({memory.percent:.1f}%)"
             if logger:
                 logger.warning(warning_msg)
-            print(warning_msg)
         
         if cpu_percent > 95:
             warning_msg = f"{prefix} WARNING: High CPU usage ({cpu_percent:.1f}%)"
             if logger:
                 logger.warning(warning_msg)
-            print(warning_msg)
             
     except ImportError:
         msg = f"{prefix} psutil not available - cannot monitor resources"
         if logger:
             logger.info(msg)
-        print(msg)
     except Exception as e:
         msg = f"{prefix} Error monitoring resources: {e}"
         if logger:
             logger.error(msg)
-        print(msg)
 
 def log_progress_update(phase, completed, total, start_time, logger=None):
     """Log detailed progress update with ETA"""
@@ -285,7 +280,6 @@ def log_progress_update(phase, completed, total, start_time, logger=None):
     
     if logger:
         logger.info(msg)
-    print(msg)
 
 # ============================================================================
 # MULTIPROCESSING LOGGING SETUP
@@ -480,11 +474,17 @@ def compute_mean_probability_for_dev(dev_args):
             
             # Log progress more frequently and monitor resources
             current_time = time.time()
-            if step_idx % 100 == 0 or current_time - last_log_time >= 60:  # Every 100 steps or 1 minute
+            # Log every 100 steps, but only log time-based updates if it's been more than 5 minutes
+            # AND we're not already logging for the 100-step interval
+            should_log_progress = (step_idx % 100 == 0)
+            should_log_resources = (current_time - last_log_time >= 300)  # Every 5 minutes
+            
+            if should_log_progress:
                 logger.info(f"    Step {step_idx+1}/{steps} processing... (processed: {processed_steps})")
-                if current_time - last_log_time >= 300:  # Every 5 minutes
-                    log_system_resources(logger, "[WORKER]")
-                    last_log_time = current_time
+            
+            if should_log_resources:
+                log_system_resources(logger, "[WORKER]")
+                last_log_time = current_time
             
             step_dir = os.path.join(source_exp_dir, f"step_{step_idx}")
             
@@ -524,10 +524,13 @@ def compute_mean_probability_for_dev(dev_args):
                 
                 processed_steps += 1
                 
+                # Only log completion every 100 steps or on final step
                 if step_idx % 100 == 0 or step_idx == steps - 1:
                     logger.info(f"    Step {step_idx+1}/{steps} processed (valid samples: {valid_samples})")
             else:
-                logger.warning(f"No valid samples found for step {step_idx}")
+                # Only log missing samples every 100 steps to avoid spam
+                if step_idx % 100 == 0:
+                    logger.warning(f"No valid samples found for step {step_idx+1}")
         
         dev_time = time.time() - dev_start_time
         logger.info(f"Deviation {dev_str} completed: {processed_steps}/{steps} steps in {dev_time:.1f}s")
@@ -886,8 +889,7 @@ def create_experiment_archive(N, samples, use_multiprocess=True, max_archive_pro
         logger: Optional logger for logging archive operations
     """
     def log_and_print(message, level="info"):
-        """Helper function to both print and log messages"""
-        print(message)
+        """Helper function to log messages (cluster-safe, no print)"""
         if logger:
             if level == "info":
                 logger.info(message.replace("[ARCHIVE] ", "").replace("[WARNING] ", "").replace("[OK] ", "").replace("[ERROR] ", "").replace("[DEBUG] ", "").replace("[INFO] ", ""))
@@ -1141,8 +1143,7 @@ def create_mean_probability_distributions_multiprocess(
         List of results from each process
     """
     def log_and_print(message, level="info"):
-        """Helper function to both print and log messages"""
-        print(message)
+        """Helper function to log messages (cluster-safe, no print)"""
         if logger:
             if level == "info":
                 logger.info(message.replace("[MEAN_PROB] ", "").replace("[WARNING] ", "").replace("[OK] ", "").replace("[ERROR] ", ""))
