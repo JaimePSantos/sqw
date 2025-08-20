@@ -38,9 +38,10 @@ import tarfile
 import traceback
 import pickle
 import gc
+import psutil
 from datetime import datetime
 import multiprocessing as mp
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor, as_completed, TimeoutError
 import logging
 
 # Import crash-safe logging decorator
@@ -106,13 +107,32 @@ N = 20000  # System size
 steps = N//4  # Time steps - now we can handle the full computation with streaming
 samples = 5  # Samples per deviation - changed from 1 to 5
 
-# Memory management warning (updated for streaming)
+# Resource monitoring and management
 print(f"[COMPUTATION SCALE] N={N}, steps={steps}, samples={samples}")
-print(f"[STREAMING MODE] Memory-efficient computation saves states incrementally")
+print(f"[STREAMING MODE] Memory-efficient sparse matrix computation saves states incrementally")
+
+# Estimate computational requirements
+total_qw_simulations = len([(0,0), (0, 0.2), (0, 0.6), (0, 0.8), (0, 1)]) * samples
+estimated_time_per_sim = (N * steps) / 1000000  # rough estimate in minutes
+total_estimated_time = total_qw_simulations * estimated_time_per_sim
+
+print(f"[RESOURCE ESTIMATE] Total quantum walks: {total_qw_simulations}")
+print(f"[RESOURCE ESTIMATE] Estimated time: {total_estimated_time:.1f} minutes")
+
 if N > 10000 and steps > 1000:
-    print(f"[WARNING] LARGE COMPUTATION: This will take significant time but use reasonable memory")
-    print("   Streaming approach keeps memory usage low regardless of problem size")
-    print("   Each process uses ~100MB instead of several GB")
+    print(f"[WARNING] LARGE COMPUTATION: This will take significant time")
+    print("   Consider running with fewer samples first to test")
+    print("   Each process uses sparse matrix streaming to minimize memory usage")
+    print(f"   Estimated memory per process: ~{2.0:.1f}MB (sparse matrices + state)")  # From our test
+
+# Monitor initial system resources
+try:
+    import psutil
+    memory = psutil.virtual_memory()
+    print(f"[SYSTEM] Available memory: {memory.available / (1024**3):.1f}GB")
+    print(f"[SYSTEM] CPU count: {mp.cpu_count()}")
+except ImportError:
+    print("[SYSTEM] psutil not available - install for resource monitoring")
 
 # Check for forced parameter overrides from launcher
 if os.environ.get('FORCE_SAMPLES_COUNT'):
@@ -148,16 +168,24 @@ devs = [
     (0, 0.6),           # Medium noise range  
     (0, 0.8),           # Medium noise range  
     (0, 1),           # Medium noise range  
-]
+]   
 
-# Multiprocessing configuration
-# With streaming approach, memory is no longer the bottleneck, so we can use more processes
-MAX_PROCESSES = min(len(devs), mp.cpu_count())  # Use all available CPUs
+# Multiprocessing configuration - Conservative for cluster stability
+# For large computations, use fewer processes to avoid resource exhaustion
+cpu_count = mp.cpu_count()
+if N > 10000:
+    # Use fewer processes for very large problems to avoid memory/time limits
+    MAX_PROCESSES = min(len(devs), max(1, cpu_count // 2))
+    print(f"[CONSERVATIVE] Using {MAX_PROCESSES} processes (half of {cpu_count} CPUs) for large N={N}")
+else:
+    MAX_PROCESSES = min(len(devs), cpu_count)
+    print(f"[STANDARD] Using {MAX_PROCESSES} processes out of {cpu_count} CPUs")
+
 PROCESS_LOG_DIR = "process_logs"  # Directory for individual process logs
 
 # Mean probability multiprocessing configuration
 USE_MULTIPROCESS_MEAN_PROB = True  # Set to True to use multiprocessing for mean probability calculation
-MAX_MEAN_PROB_PROCESSES = 5  # Max processes for mean probability calculation (None = auto-detect)
+MAX_MEAN_PROB_PROCESSES = min(5, MAX_PROCESSES)  # Don't exceed main process limit
 
 # ============================================================================
 # MULTIPROCESSING LOGGING SETUP
@@ -237,6 +265,50 @@ def setup_master_logging():
     master_logger.addHandler(console_handler)
     
     return master_logger, master_log_filename
+
+# ============================================================================
+# RESOURCE MONITORING AND RECOVERY FUNCTIONS
+# ============================================================================
+
+def monitor_system_resources():
+    """Monitor system memory and CPU usage"""
+    try:
+        memory = psutil.virtual_memory()
+        cpu_percent = psutil.cpu_percent()
+        return {
+            'memory_percent': memory.percent,
+            'memory_available_gb': memory.available / (1024**3),
+            'cpu_percent': cpu_percent
+        }
+    except:
+        return {'memory_percent': 0, 'memory_available_gb': 0, 'cpu_percent': 0}
+
+def check_sample_exists(exp_dir, sample_id):
+    """Check if a specific sample already exists"""
+    sample_file = os.path.join(exp_dir, f"sample_{sample_id}.pkl")
+    return os.path.exists(sample_file)
+
+def get_completed_samples(exp_dir, total_samples):
+    """Get list of completed samples to enable resuming"""
+    completed = []
+    for i in range(total_samples):
+        if check_sample_exists(exp_dir, i):
+            completed.append(i)
+    return completed
+
+def log_resource_usage(logger, prefix=""):
+    """Log current resource usage"""
+    try:
+        resources = monitor_system_resources()
+        logger.info(f"{prefix}Resource usage: Memory {resources['memory_percent']:.1f}%, "
+                   f"Available {resources['memory_available_gb']:.1f}GB, "
+                   f"CPU {resources['cpu_percent']:.1f}%")
+    except Exception as e:
+        logger.warning(f"Could not monitor resources: {e}")
+
+# ============================================================================
+# MULTIPROCESSING WORKER FUNCTIONS
+# ============================================================================
 
 # ============================================================================
 # MULTIPROCESSING WORKER FUNCTIONS
@@ -393,7 +465,8 @@ def compute_dev_samples(dev_args):
         logger.info(f"Parameters: N={N}, steps={steps}, samples={samples}, theta={theta:.4f}")
         
         # Import required modules (each process needs its own imports)
-        from sqw.experiments_expanded_static import running_streaming
+        # Import the memory-efficient sparse implementation
+        from sqw.experiments_sparse import running_streaming_sparse
         from smart_loading_static import get_experiment_dir
         import pickle
         import gc  # For garbage collection
@@ -454,25 +527,43 @@ def compute_dev_samples(dev_args):
                 with open(filepath, 'wb') as f:
                     pickle.dump(state, f)
                 
+                # Explicitly delete state reference to help memory management
+                del state
+                gc.collect()
+                
                 # Progress logging for large computations
                 if step_idx % 100 == 0 or step_idx == steps:
                     logger.info(f"    Saved step {step_idx}/{steps}")
+                    # Log memory usage at checkpoints
+                    resources = monitor_system_resources()
+                    logger.info(f"    Memory usage: {resources['memory_percent']:.1f}%, Available: {resources['memory_available_gb']:.1f}GB")
             
             # Memory-efficient streaming approach
             try:
-                # Run the quantum walk experiment using streaming approach
-                logger.info(f"  Running streaming quantum walk: N={N}, steps={steps}, dev={dev}")
+                # Log memory before starting computation
+                resources_before = monitor_system_resources()
+                logger.info(f"  Starting computation - Memory: {resources_before['memory_percent']:.1f}%, Available: {resources_before['memory_available_gb']:.1f}GB")
                 
-                final_state = running_streaming(
+                # Run the quantum walk experiment using sparse streaming approach
+                logger.info(f"  Running sparse streaming quantum walk: N={N}, steps={steps}, dev={dev}")
+                
+                final_state = running_streaming_sparse(
                     N, theta, steps,
                     initial_nodes=initial_nodes,
                     deviation_range=dev,
                     step_callback=save_step_callback
                 )
                 
-                logger.info(f"  Streaming computation completed, all {steps+1} steps saved incrementally")
+                # Log memory after completion
+                resources_after = monitor_system_resources()
+                logger.info(f"  Sparse streaming computation completed, all {steps+1} steps saved incrementally")
+                logger.info(f"  Final memory usage: {resources_after['memory_percent']:.1f}%, Available: {resources_after['memory_available_gb']:.1f}GB")
                 
-                # No need to explicitly delete anything - streaming approach doesn't accumulate states
+                # Explicitly delete final state reference and force cleanup
+                del final_state
+                gc.collect()
+                
+                # No need to explicitly delete anything else - streaming approach doesn't accumulate states
                 
             except MemoryError as mem_error:
                 logger.error(f"Memory error during computation: {mem_error}")
@@ -1439,83 +1530,106 @@ def run_static_experiment():
                 "status": "pending"
             }
         
-        # Execute processes concurrently
-        try:
-            with ProcessPoolExecutor(max_workers=MAX_PROCESSES) as executor:
-                # Submit all jobs
-                future_to_dev = {}
-                for args in process_args:
-                    dev = args[0]
-                    future = executor.submit(compute_dev_samples, args)
-                    future_to_dev[future] = dev
-                    process_info[dev]["start_time"] = time.time()
-                    process_info[dev]["status"] = "running"
-                    # Format dev for display
-                    if isinstance(dev, tuple):
-                        dev_str = f"max{dev[0]:.3f}_min{dev[0]*dev[1]:.3f}"
-                    else:
-                        dev_str = f"{dev:.4f}"
-                    master_logger.info(f"Process launched for dev={dev_str} (PID will be assigned)")
+        # Execute processes concurrently with robust error handling
+        max_retries = 3
+        retry_delay = 30  # seconds
+        
+        for attempt in range(max_retries):
+            try:
+                master_logger.info(f"Starting process pool attempt {attempt + 1}/{max_retries}")
                 
-                # Collect results as they complete
-                for future in as_completed(future_to_dev):
-                    dev = future_to_dev[future]
-                    try:
-                        result = future.result()
-                        process_results.append(result)
-                        process_info[dev]["end_time"] = time.time()
-                        
-                        if result["success"]:
-                            process_info[dev]["status"] = "completed"
-                            completed_samples += result["computed_samples"]
-                            # Format dev for display
-                            if isinstance(dev, tuple):
-                                dev_str = f"max{dev[0]:.3f}_min{dev[0]*dev[1]:.3f}"
-                            else:
-                                dev_str = f"{dev:.4f}"
-                            master_logger.info(f"[OK] Process for dev={dev_str} completed successfully")
-                            master_logger.info(f"  Computed samples: {result['computed_samples']}")
-                            master_logger.info(f"  Time: {result['total_time']:.1f}s")
-                            master_logger.info(f"  Log file: {result['log_file']}")
-                        else:
-                            process_info[dev]["status"] = "failed"
-                            # Format dev for display
-                            if isinstance(dev, tuple):
-                                dev_str = f"max{dev[0]:.3f}_min{dev[0]*dev[1]:.3f}"
-                            else:
-                                dev_str = f"{dev:.4f}"
-                            master_logger.error(f"[FAILED] Process for dev={dev_str} failed")
-                            master_logger.error(f"  Error: {result['error']}")
-                            master_logger.error(f"  Log file: {result['log_file']}")
-                            
-                    except Exception as e:
-                        import traceback
-                        process_info[dev]["status"] = "failed"
-                        process_info[dev]["end_time"] = time.time()
+                with ProcessPoolExecutor(max_workers=MAX_PROCESSES) as executor:
+                    # Submit all jobs
+                    future_to_dev = {}
+                    for args in process_args:
+                        dev = args[0]
+                        future = executor.submit(compute_dev_samples, args)
+                        future_to_dev[future] = dev
+                        process_info[dev]["start_time"] = time.time()
+                        process_info[dev]["status"] = "running"
                         # Format dev for display
                         if isinstance(dev, tuple):
                             dev_str = f"max{dev[0]:.3f}_min{dev[0]*dev[1]:.3f}"
                         else:
                             dev_str = f"{dev:.4f}"
-                        error_msg = f"Exception in process for dev={dev_str}: {str(e)}"
-                        master_logger.error(error_msg)
-                        master_logger.error(traceback.format_exc())
-                        
-                        process_results.append({
-                            "dev": dev,
-                            "process_id": -1,
-                            "computed_samples": 0,
-                            "total_time": 0,
-                            "log_file": "unknown",
-                            "success": False,
-                            "error": error_msg
-                        })
-        
-        except Exception as e:
-            import traceback
-            master_logger.error(f"Critical error in multiprocessing: {str(e)}")
-            master_logger.error(traceback.format_exc())
-            raise
+                        master_logger.info(f"Process launched for dev={dev_str} (PID will be assigned)")
+                    
+                    # Collect results as they complete
+                    for future in as_completed(future_to_dev, timeout=7200):  # 2 hour timeout
+                        dev = future_to_dev[future]
+                        try:
+                            result = future.result()
+                            process_results.append(result)
+                            process_info[dev]["end_time"] = time.time()
+                            
+                            if result["success"]:
+                                process_info[dev]["status"] = "completed"
+                                completed_samples += result["computed_samples"]
+                                # Format dev for display
+                                if isinstance(dev, tuple):
+                                    dev_str = f"max{dev[0]:.3f}_min{dev[0]*dev[1]:.3f}"
+                                else:
+                                    dev_str = f"{dev:.4f}"
+                                master_logger.info(f"[OK] Process for dev={dev_str} completed successfully")
+                                master_logger.info(f"  Computed samples: {result['computed_samples']}")
+                                master_logger.info(f"  Time: {result['total_time']:.1f}s")
+                                master_logger.info(f"  Log file: {result['log_file']}")
+                            else:
+                                process_info[dev]["status"] = "failed"
+                                # Format dev for display
+                                if isinstance(dev, tuple):
+                                    dev_str = f"max{dev[0]:.3f}_min{dev[0]*dev[1]:.3f}"
+                                else:
+                                    dev_str = f"{dev:.4f}"
+                                master_logger.error(f"[FAILED] Process for dev={dev_str} failed")
+                                master_logger.error(f"  Error: {result['error']}")
+                                master_logger.error(f"  Log file: {result['log_file']}")
+                                
+                        except Exception as e:
+                            import traceback
+                            process_info[dev]["status"] = "failed"
+                            process_info[dev]["end_time"] = time.time()
+                            # Format dev for display
+                            if isinstance(dev, tuple):
+                                dev_str = f"max{dev[0]:.3f}_min{dev[0]*dev[1]:.3f}"
+                            else:
+                                dev_str = f"{dev:.4f}"
+                            error_msg = f"Exception in process for dev={dev_str}: {str(e)}"
+                            master_logger.error(error_msg)
+                            master_logger.error(traceback.format_exc())
+                            
+                            process_results.append({
+                                "dev": dev,
+                                "process_id": -1,
+                                "computed_samples": 0,
+                                "total_time": 0,
+                                "log_file": "unknown",
+                                "success": False,
+                                "error": error_msg
+                            })
+                
+                # If we get here, all processes completed (successfully or not)
+                master_logger.info(f"Process pool attempt {attempt + 1} completed")
+                break
+                
+            except Exception as e:
+                import traceback
+                master_logger.error(f"Process pool attempt {attempt + 1} failed: {str(e)}")
+                master_logger.error(traceback.format_exc())
+                
+                if attempt < max_retries - 1:
+                    master_logger.info(f"Retrying in {retry_delay} seconds...")
+                    time.sleep(retry_delay)
+                    # Reset process info for retry
+                    for dev in process_info:
+                        process_info[dev]["status"] = "pending"
+                        process_info[dev]["start_time"] = None
+                        process_info[dev]["end_time"] = None
+                    process_results.clear()
+                    completed_samples = 0
+                else:
+                    master_logger.error("All retry attempts failed")
+                    raise
 
         experiment_time = time.time() - start_time
         

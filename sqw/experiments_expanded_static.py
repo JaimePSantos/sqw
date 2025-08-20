@@ -271,9 +271,14 @@ def running_streaming(N, theta, num_steps,
     # Evolve state step by step, calling callback for each step
     psi = psi0.copy()
     for i in range(num_steps):
-        psi = dot(U, psi)
+        # Apply evolution operator
+        psi_new = dot(U, psi)
         
-        # Call callback with current step and state
+        # Replace old state with new one to minimize memory usage
+        psi = psi_new
+        del psi_new  # Explicit cleanup
+        
+        # Call callback with current step and state copy
         if step_callback:
             step_callback(i + 1, psi.copy())
     
