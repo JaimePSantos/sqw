@@ -7,6 +7,15 @@ This script runs static noise experiments for quantum walks with configurable pa
 
 Now uses smart loading from smart_loading_static module.
 
+IMPROVED ROBUSTNESS AND LOGGING:
+- Added proper timeout handling for mean probability computation phase
+- Enhanced logging with progress updates, resource monitoring, and ETA calculation
+- Added graceful shutdown handling with signal handlers (SIGINT, SIGTERM, SIGHUP)
+- Improved error recovery and partial result handling
+- Added system resource monitoring (memory, CPU usage)
+- More frequent progress updates with timestamps
+- Better error messages and troubleshooting information
+
 Execution Modes:
 1. Full Pipeline (default): Compute samples + analysis + plots + archive
 2. Samples Only: Set CALCULATE_SAMPLES_ONLY = True to only compute and save samples
@@ -46,6 +55,27 @@ import logging
 
 # Import crash-safe logging decorator
 from logging_module.crash_safe_logging import crash_safe_log
+
+# ============================================================================
+# SIGNAL HANDLING FOR GRACEFUL SHUTDOWN
+# ============================================================================
+
+# Global flag for graceful shutdown
+SHUTDOWN_REQUESTED = False
+
+def signal_handler(signum, frame):
+    """Handle shutdown signals gracefully"""
+    global SHUTDOWN_REQUESTED
+    SHUTDOWN_REQUESTED = True
+    print(f"\n[SHUTDOWN] Received signal {signum}. Initiating graceful shutdown...")
+    print("[SHUTDOWN] Waiting for current processes to complete...")
+    print("[SHUTDOWN] This may take a few minutes. Do not force-kill unless necessary.")
+
+# Register signal handlers
+signal.signal(signal.SIGINT, signal_handler)   # Ctrl+C
+signal.signal(signal.SIGTERM, signal_handler)  # Termination signal
+if hasattr(signal, 'SIGHUP'):
+    signal.signal(signal.SIGHUP, signal_handler)  # Hangup signal (Unix)
 
 # ============================================================================
 # CONFIGURATION PARAMETERS
@@ -188,12 +218,74 @@ PROCESS_LOG_DIR = "process_logs"  # Directory for individual process logs
 BASE_TIMEOUT_PER_SAMPLE = 30  # seconds per sample for small N
 TIMEOUT_SCALE_FACTOR = (N * steps) / 1000000  # Scale based on computational complexity
 PROCESS_TIMEOUT = max(3600, int(BASE_TIMEOUT_PER_SAMPLE * samples * TIMEOUT_SCALE_FACTOR))  # Minimum 1 hour
-print(f"[TIMEOUT] Process timeout set to {PROCESS_TIMEOUT} seconds ({PROCESS_TIMEOUT/3600:.1f} hours)")
+
+# Mean probability timeout is typically longer since it processes all steps at once
+MEAN_PROB_TIMEOUT_MULTIPLIER = 2.0  # Mean prob takes longer than sample computation
+MEAN_PROB_TIMEOUT = max(7200, int(PROCESS_TIMEOUT * MEAN_PROB_TIMEOUT_MULTIPLIER))  # Minimum 2 hours
+
+print(f"[TIMEOUT] Sample process timeout: {PROCESS_TIMEOUT} seconds ({PROCESS_TIMEOUT/3600:.1f} hours)")
+print(f"[TIMEOUT] Mean prob process timeout: {MEAN_PROB_TIMEOUT} seconds ({MEAN_PROB_TIMEOUT/3600:.1f} hours)")
 print(f"[TIMEOUT] Based on N={N}, steps={steps}, samples={samples}")
 
 # Mean probability multiprocessing configuration
 USE_MULTIPROCESS_MEAN_PROB = True  # Set to True to use multiprocessing for mean probability calculation
 MAX_MEAN_PROB_PROCESSES = min(5, MAX_PROCESSES)  # Don't exceed main process limit
+
+# ============================================================================
+# SYSTEM MONITORING AND LOGGING UTILITIES
+# ============================================================================
+
+def log_system_resources(logger=None, prefix="[SYSTEM]"):
+    """Log current system resource usage"""
+    try:
+        import psutil
+        memory = psutil.virtual_memory()
+        cpu_percent = psutil.cpu_percent(interval=1)
+        
+        msg = f"{prefix} Memory: {memory.percent:.1f}% used ({memory.available / (1024**3):.1f}GB free), CPU: {cpu_percent:.1f}%"
+        if logger:
+            logger.info(msg)
+        print(msg)
+        
+        # Check for concerning resource usage
+        if memory.percent > 90:
+            warning_msg = f"{prefix} WARNING: High memory usage ({memory.percent:.1f}%)"
+            if logger:
+                logger.warning(warning_msg)
+            print(warning_msg)
+        
+        if cpu_percent > 95:
+            warning_msg = f"{prefix} WARNING: High CPU usage ({cpu_percent:.1f}%)"
+            if logger:
+                logger.warning(warning_msg)
+            print(warning_msg)
+            
+    except ImportError:
+        msg = f"{prefix} psutil not available - cannot monitor resources"
+        if logger:
+            logger.info(msg)
+        print(msg)
+    except Exception as e:
+        msg = f"{prefix} Error monitoring resources: {e}"
+        if logger:
+            logger.error(msg)
+        print(msg)
+
+def log_progress_update(phase, completed, total, start_time, logger=None):
+    """Log detailed progress update with ETA"""
+    elapsed = time.time() - start_time
+    if completed > 0:
+        eta = (elapsed / completed) * (total - completed)
+        eta_str = f"{eta/60:.1f}m" if eta < 3600 else f"{eta/3600:.1f}h"
+        progress_pct = (completed / total) * 100
+        
+        msg = f"[{phase}] Progress: {completed}/{total} ({progress_pct:.1f}%) - Elapsed: {elapsed/60:.1f}m - ETA: {eta_str}"
+    else:
+        msg = f"[{phase}] Progress: {completed}/{total} (0.0%) - Elapsed: {elapsed/60:.1f}m - ETA: unknown"
+    
+    if logger:
+        logger.info(msg)
+    print(msg)
 
 # ============================================================================
 # MULTIPROCESSING LOGGING SETUP
@@ -369,7 +461,11 @@ def compute_mean_probability_for_dev(dev_args):
         logger.info(f"Source: {source_exp_dir}")
         logger.info(f"Target: {target_exp_dir}")
         
+        # Log initial system resources
+        log_system_resources(logger, "[WORKER]")
+        
         processed_steps = 0
+        last_log_time = time.time()
         
         for step_idx in range(steps):
             # Check if mean probability file already exists
@@ -381,6 +477,14 @@ def compute_mean_probability_for_dev(dev_args):
                 if step_idx % 100 == 0:
                     logger.info(f"    Step {step_idx+1}/{steps} already exists, skipping")
                 continue
+            
+            # Log progress more frequently and monitor resources
+            current_time = time.time()
+            if step_idx % 100 == 0 or current_time - last_log_time >= 60:  # Every 100 steps or 1 minute
+                logger.info(f"    Step {step_idx+1}/{steps} processing... (processed: {processed_steps})")
+                if current_time - last_log_time >= 300:  # Every 5 minutes
+                    log_system_resources(logger, "[WORKER]")
+                    last_log_time = current_time
             
             step_dir = os.path.join(source_exp_dir, f"step_{step_idx}")
             
@@ -1121,39 +1225,61 @@ def create_mean_probability_distributions_multiprocess(
                     dev_str = f"{dev:.4f}"
                 log_and_print(f"[MEAN_PROB] Process launched for dev={dev_str}")
             
-            # Collect results as they complete
+            # Collect results as they complete with timeout
             completed = 0
-            for future in as_completed(future_to_dev):
-                dev = future_to_dev[future]
-                completed += 1
-                try:
-                    result = future.result()
-                    process_results.append(result)
-                    process_info[dev]["end_time"] = time.time()
-                    process_info[dev]["status"] = "completed" if result["success"] else "failed"
+            timeout_start = time.time()
+            last_progress_time = timeout_start
+            log_and_print(f"[MEAN_PROB] Waiting for {len(future_to_dev)} processes with {MEAN_PROB_TIMEOUT/3600:.1f}h timeout...")
+            log_system_resources(logger, "[MEAN_PROB]")
+            
+            try:
+                for future in as_completed(future_to_dev, timeout=MEAN_PROB_TIMEOUT):
+                    # Check for shutdown signal
+                    if SHUTDOWN_REQUESTED:
+                        log_and_print(f"[MEAN_PROB] [SHUTDOWN] Graceful shutdown requested, cancelling remaining processes...", "warning")
+                        for remaining_future in future_to_dev:
+                            if not remaining_future.done():
+                                remaining_future.cancel()
+                        break
                     
-                    # Format dev for display
-                    if isinstance(dev, tuple):
-                        dev_str = f"max{dev[0]:.3f}_min{dev[0]*dev[1]:.3f}"
-                    else:
-                        dev_str = f"{dev:.4f}"
+                    dev = future_to_dev[future]
+                    completed += 1
+                    elapsed = time.time() - timeout_start
                     
-                    if result["success"]:
-                        log_and_print(f"[MEAN_PROB] [{completed}/{len(devs)}] [OK] dev={dev_str}: {result['processed_steps']}/{result['total_steps']} steps in {result['total_time']:.1f}s")
-                    else:
-                        log_and_print(f"[MEAN_PROB] [{completed}/{len(devs)}] [FAILED] dev={dev_str}: FAILED - {result['error']}", "error")
+                    # Log progress every 5 minutes or on completion
+                    if elapsed - (last_progress_time - timeout_start) >= 300 or completed == len(future_to_dev):
+                        log_progress_update("MEAN_PROB", completed, len(future_to_dev), timeout_start, logger)
+                        log_system_resources(logger, "[MEAN_PROB]")
+                        last_progress_time = time.time()
+                    
+                    try:
+                        result = future.result()
+                        process_results.append(result)
+                        process_info[dev]["end_time"] = time.time()
+                        process_info[dev]["status"] = "completed" if result["success"] else "failed"
                         
-                except Exception as e:
-                    process_info[dev]["end_time"] = time.time()
-                    process_info[dev]["status"] = "failed"
-                    
-                    if isinstance(dev, tuple):
-                        dev_str = f"max{dev[0]:.3f}_min{dev[0]*dev[1]:.3f}"
-                    else:
-                        dev_str = f"{dev:.4f}"
+                        # Format dev for display
+                        if isinstance(dev, tuple):
+                            dev_str = f"max{dev[0]:.3f}_min{dev[0]*dev[1]:.3f}"
+                        else:
+                            dev_str = f"{dev:.4f}"
+                        
+                        if result["success"]:
+                            log_and_print(f"[MEAN_PROB] [{completed}/{len(devs)}] [OK] dev={dev_str}: {result['processed_steps']}/{result['total_steps']} steps in {result['total_time']:.1f}s (elapsed: {elapsed/60:.1f}m)")
+                        else:
+                            log_and_print(f"[MEAN_PROB] [{completed}/{len(devs)}] [FAILED] dev={dev_str}: FAILED - {result['error']}", "error")
+                        
+                    except Exception as e:
+                        process_info[dev]["end_time"] = time.time()
+                        process_info[dev]["status"] = "failed"
+                        
+                        if isinstance(dev, tuple):
+                            dev_str = f"max{dev[0]:.3f}_min{dev[0]*dev[1]:.3f}"
+                        else:
+                            dev_str = f"{dev:.4f}"
                     
                     error_msg = f"Exception in mean probability process for dev {dev_str}: {str(e)}"
-                    log_and_print(f"[MEAN_PROB] [{completed}/{len(devs)}] [EXCEPTION] {error_msg}", "error")
+                    log_and_print(f"[MEAN_PROB] [{completed}/{len(devs)}] [EXCEPTION] {error_msg} (elapsed: {elapsed/60:.1f}m)", "error")
                     
                     result = {
                         "dev": dev,
@@ -1166,6 +1292,39 @@ def create_mean_probability_distributions_multiprocess(
                         "error": error_msg
                     }
                     process_results.append(result)
+            
+            except TimeoutError:
+                # Handle timeout - try to get partial results
+                log_and_print(f"[MEAN_PROB] [TIMEOUT] Mean probability computation timed out after {MEAN_PROB_TIMEOUT/3600:.1f} hours", "error")
+                log_and_print(f"[MEAN_PROB] [TIMEOUT] Completed {completed}/{len(future_to_dev)} processes before timeout", "error")
+                
+                # Cancel remaining futures and collect partial results
+                for future in future_to_dev:
+                    if not future.done():
+                        future.cancel()
+                        dev = future_to_dev[future]
+                        process_info[dev]["end_time"] = time.time()
+                        process_info[dev]["status"] = "timeout"
+                        
+                        if isinstance(dev, tuple):
+                            dev_str = f"max{dev[0]:.3f}_min{dev[0]*dev[1]:.3f}"
+                        else:
+                            dev_str = f"{dev:.4f}"
+                        
+                        result = {
+                            "dev": dev,
+                            "process_id": process_info[dev]["process_id"],
+                            "processed_steps": 0,
+                            "total_steps": steps,
+                            "total_time": 0,
+                            "log_file": process_info[dev]["log_file"],
+                            "success": False,
+                            "error": f"Process timed out after {MEAN_PROB_TIMEOUT/3600:.1f} hours"
+                        }
+                        process_results.append(result)
+                
+                # Don't raise exception - let partial results be processed
+                log_and_print(f"[MEAN_PROB] [RECOVERY] Continuing with {completed} completed processes", "warning")
     
     except Exception as e:
         log_and_print(f"[ERROR] Critical error in mean probability multiprocessing: {str(e)}", "error")
@@ -1567,6 +1726,14 @@ def run_static_experiment():
                     
                     # Collect results as they complete
                     for future in as_completed(future_to_dev, timeout=PROCESS_TIMEOUT):  # Dynamic timeout based on problem size
+                        # Check for shutdown signal
+                        if SHUTDOWN_REQUESTED:
+                            master_logger.warning("[SAMPLES] [SHUTDOWN] Graceful shutdown requested, cancelling remaining processes...")
+                            for remaining_future in future_to_dev:
+                                if not remaining_future.done():
+                                    remaining_future.cancel()
+                            break
+                        
                         dev = future_to_dev[future]
                         try:
                             result = future.result()
