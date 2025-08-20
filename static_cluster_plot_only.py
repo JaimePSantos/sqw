@@ -294,20 +294,30 @@ def load_std_data_directly(devs, N, tesselation_func, std_base_dir, noise_type, 
             tesselation_func, True, N, [dev], noise_type, std_base_dir, theta
         )
         
-        std_file = os.path.join(exp_dir, "std_data.pkl")
+        # Try multiple possible filenames for std data
+        std_files = [
+            os.path.join(exp_dir, "std_data.pkl"),
+            os.path.join(exp_dir, "std_vs_time.pkl")
+        ]
         
         # Try to load existing std data
-        try:
-            if os.path.exists(std_file):
-                with open(std_file, 'rb') as f:
-                    std_values = pickle.load(f)
-                print(f"  [OK] Loaded {len(std_values)} std values from file")
-                stds.append(std_values)
-            else:
-                print(f"  [MISSING] Standard deviation file not found: {std_file}")
-                stds.append([])
-        except Exception as e:
-            print(f"  [WARNING] Could not load std data: {e}")
+        loaded = False
+        for std_file in std_files:
+            try:
+                if os.path.exists(std_file):
+                    with open(std_file, 'rb') as f:
+                        std_values = pickle.load(f)
+                    print(f"  [OK] Loaded {len(std_values)} std values from {os.path.basename(std_file)}")
+                    stds.append(std_values)
+                    loaded = True
+                    break
+            except Exception as e:
+                print(f"  [WARNING] Could not load std data from {std_file}: {e}")
+                continue
+        
+        if not loaded:
+            print(f"  [MISSING] Standard deviation file not found in: {exp_dir}")
+            print(f"  [MISSING] Tried filenames: {[os.path.basename(f) for f in std_files]}")
             stds.append([])
     
     print(f"[OK] Standard deviation data loading completed!")
