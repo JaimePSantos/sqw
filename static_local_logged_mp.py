@@ -415,6 +415,7 @@ def compute_mean_probability_for_dev(dev_args):
         
         # Import required modules
         import pickle
+        import gc
         from sqw.states import amp2prob
         from smart_loading_static import find_experiment_dir_flexible, get_experiment_dir
         
@@ -482,36 +483,40 @@ def compute_mean_probability_for_dev(dev_args):
             
             step_dir = os.path.join(source_exp_dir, f"step_{step_idx}")
             
-            # Load all samples for this step
-            sample_states = []
+            # Optimized streaming processing - load and process samples one at a time
+            mean_prob_dist = None
             valid_samples = 0
+            
             for sample_idx in range(samples):
                 filename = f"final_step_{step_idx}_sample{sample_idx}.pkl"
                 filepath = os.path.join(step_dir, filename)
                 
                 if os.path.exists(filepath):
+                    # Load sample
                     with open(filepath, "rb") as f:
                         state = pickle.load(f)
-                    sample_states.append(state)
-                    valid_samples += 1
-                else:
-                    logger.warning(f"Sample file not found: {filepath}")
-            
-            if sample_states and valid_samples > 0:
-                # Convert quantum states to probability distributions
-                prob_distributions = []
-                for i, state in enumerate(sample_states):
+                    
+                    # Convert to probability distribution
                     prob_dist = amp2prob(state)  # |amplitude|^2
-                    prob_distributions.append(prob_dist)
-                    # Clear state from memory
-                    sample_states[i] = None
+                    
+                    # Update running mean
+                    if mean_prob_dist is None:
+                        # Initialize with first sample
+                        mean_prob_dist = prob_dist.copy()
+                    else:
+                        # Incremental mean: new_mean = old_mean + (new_value - old_mean) / count
+                        mean_prob_dist += (prob_dist - mean_prob_dist) / (valid_samples + 1)
+                    
+                    valid_samples += 1
+                    
+                    # Free memory immediately
+                    del state, prob_dist
+                else:
+                    if sample_idx < 10:  # Only log first 10 missing files to avoid spam
+                        logger.warning(f"Sample file not found: {filepath}")
                 
-                # Calculate mean probability distribution
-                mean_prob_dist = np.mean(prob_distributions, axis=0)
-                
-                # Clear prob_distributions to save memory
-                del prob_distributions
-                
+            
+            if valid_samples > 0:
                 # Save mean probability distribution
                 with open(mean_filepath, "wb") as f:
                     pickle.dump(mean_prob_dist, f, protocol=pickle.HIGHEST_PROTOCOL)
@@ -525,6 +530,10 @@ def compute_mean_probability_for_dev(dev_args):
                 # Only log missing samples every 100 steps to avoid spam
                 if step_idx % 100 == 0:
                     logger.warning(f"No valid samples found for step {step_idx+1}")
+            
+            # Force garbage collection periodically to keep memory usage low
+            if step_idx % 50 == 0:
+                gc.collect()
         
         dev_time = time.time() - dev_start_time
         logger.info(f"Deviation {dev_str} completed: {processed_steps}/{steps} steps in {dev_time:.1f}s")
