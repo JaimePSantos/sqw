@@ -314,6 +314,23 @@ def log_resource_usage(logger, prefix=""):
     except Exception as e:
         logger.warning(f"Could not monitor resources: {e}")
 
+def force_memory_cleanup(logger=None, description=""):
+    """Force aggressive memory cleanup and garbage collection"""
+    import gc
+    
+    # Multiple rounds of garbage collection
+    for i in range(3):
+        gc.collect()
+    
+    # Log memory status if logger provided
+    if logger:
+        try:
+            resources = monitor_system_resources()
+            logger.info(f"Memory cleanup {description}: {resources['memory_percent']:.1f}% used, "
+                       f"{resources['memory_available_gb']:.1f}GB available")
+        except Exception as e:
+            logger.warning(f"Could not log memory status after cleanup: {e}")
+
 # ============================================================================
 # MULTIPROCESSING WORKER FUNCTIONS
 # ============================================================================
@@ -405,28 +422,47 @@ def compute_mean_probability_for_dev(dev_args):
                 for i, state in enumerate(sample_states):
                     prob_dist = amp2prob(state)  # |amplitude|^2
                     prob_distributions.append(prob_dist)
-                    # Clear state from memory
+                    # Clear state from memory immediately
                     sample_states[i] = None
+                    del state
+                
+                # Clear sample_states list completely
+                del sample_states
+                import gc
+                gc.collect()
                 
                 # Calculate mean probability distribution
                 mean_prob_dist = np.mean(prob_distributions, axis=0)
                 
-                # Clear prob_distributions to save memory
+                # Clear prob_distributions to save memory immediately
                 del prob_distributions
+                gc.collect()
                 
                 # Save mean probability distribution
                 with open(mean_filepath, "wb") as f:
                     pickle.dump(mean_prob_dist, f, protocol=pickle.HIGHEST_PROTOCOL)
                 
+                # Clear mean_prob_dist to save memory
+                del mean_prob_dist
+                gc.collect()
+                
                 processed_steps += 1
                 
                 if step_idx % 100 == 0 or step_idx == steps - 1:
                     logger.info(f"    Step {step_idx+1}/{steps} processed (valid samples: {valid_samples})")
+                    log_resource_usage(logger, f"    Step {step_idx+1} memory: ")
             else:
                 logger.warning(f"No valid samples found for step {step_idx}")
+            
+            # Force memory cleanup every 100 steps
+            if step_idx % 100 == 0:
+                gc.collect()
         
         dev_time = time.time() - dev_start_time
         logger.info(f"Deviation {dev_str} completed: {processed_steps}/{steps} steps in {dev_time:.1f}s")
+        
+        # Final memory cleanup for this process
+        force_memory_cleanup(logger, f"after completing dev {dev_str}")
         
         return {
             "dev": dev,
@@ -715,14 +751,33 @@ def create_or_load_std_data(mean_results, devs, N, steps, tesselation_func, std_
                 
                 # Calculate standard deviations
                 if dev_mean_prob_dists and len(dev_mean_prob_dists) > 0 and all(state is not None for state in dev_mean_prob_dists):
+                    # Log memory before computation
+                    import gc
+                    gc.collect()
+                    resources = monitor_system_resources()
+                    print(f"    Memory before std computation: {resources['memory_percent']:.1f}%")
+                    
                     std_values = prob_distributions2std(dev_mean_prob_dists, domain)
                     
-                    # Save std data
+                    # Save std data immediately
                     with open(std_filepath, 'wb') as f:
                         pickle.dump(std_values, f)
                     
                     stds.append(std_values)
                     print(f"  [OK] Computed and saved std data for dev {dev_str} (final std = {std_values[-1]:.3f})")
+                    
+                    # Clear the mean probability distributions for this deviation to free memory
+                    if i < len(mean_results):
+                        mean_results[i] = None
+                    
+                    # Force garbage collection to free memory immediately
+                    del dev_mean_prob_dists
+                    gc.collect()
+                    
+                    # Log memory after cleanup
+                    resources = monitor_system_resources()
+                    print(f"    Memory after std computation and cleanup: {resources['memory_percent']:.1f}%")
+                    
                 else:
                     print(f"  [ERROR] No valid probability distributions found for dev {dev_str}")
                     stds.append([])
@@ -733,6 +788,22 @@ def create_or_load_std_data(mean_results, devs, N, steps, tesselation_func, std_
         except Exception as e:
             print(f"  [ERROR] Error computing std data for dev {dev_str}: {e}")
             stds.append([])
+            import traceback
+            print(f"  [DEBUG] Traceback: {traceback.format_exc()}")
+            
+        # Force garbage collection after each deviation
+        import gc
+        gc.collect()
+        
+        # Log final memory status for this deviation
+        resources = monitor_system_resources()
+        print(f"    Final memory for dev {dev_str}: {resources['memory_percent']:.1f}%")
+    
+    # Final cleanup after all deviations processed
+    print("\n[MEMORY] Final cleanup after all standard deviations calculated...")
+    force_memory_cleanup(description="after all std calculations")
+    resources = monitor_system_resources() 
+    print(f"[MEMORY] Final memory after std cleanup: {resources['memory_percent']:.1f}%")
     
     print(f"[OK] Standard deviation data management completed!")
     return stds
@@ -1821,13 +1892,28 @@ def run_static_experiment():
         
         if check_mean_probability_distributions_exist(dummy_tesselation_func, N, steps, devs, 
                                                     "experiments_data_samples_probDist", "static_noise", theta):
-            print("[OK] Found existing mean probability distributions - loading directly!")
-            master_logger.info("Loading existing mean probability distributions")
+            print("[OK] Found existing mean probability distributions - loading with memory management!")
+            master_logger.info("Loading existing mean probability distributions with memory management")
+            
+            # Log memory before loading
+            import gc
+            gc.collect()
+            resources = monitor_system_resources()
+            print(f"[MEMORY] Before loading mean prob distributions: {resources['memory_percent']:.1f}%")
+            master_logger.info(f"Memory before loading: {resources['memory_percent']:.1f}%")
+            
             mean_results = load_mean_probability_distributions(
                 dummy_tesselation_func, N, steps, devs, 
                 "experiments_data_samples_probDist", "static_noise", theta
             )
-            print("[OK] Mean probability distributions loaded successfully")
+            
+            # Log memory after loading
+            gc.collect()
+            resources = monitor_system_resources()
+            print(f"[MEMORY] After loading mean prob distributions: {resources['memory_percent']:.1f}%")
+            master_logger.info(f"Memory after loading: {resources['memory_percent']:.1f}%")
+            
+            print("[OK] Mean probability distributions loaded successfully with memory monitoring")
             master_logger.info("Mean probability distributions loaded successfully")
         else:
             # Need to create mean probability distributions
@@ -1880,13 +1966,28 @@ def run_static_experiment():
                     "static_noise", theta
                 )
             
-            # Load the created distributions
-            print("[DATA] Loading newly created mean probability distributions...")
+            # Load the created distributions with memory management
+            print("[DATA] Loading newly created mean probability distributions with memory management...")
+            
+            # Log memory before loading
+            import gc
+            gc.collect()
+            resources = monitor_system_resources()
+            print(f"[MEMORY] Before loading newly created distributions: {resources['memory_percent']:.1f}%")
+            master_logger.info(f"Memory before loading newly created distributions: {resources['memory_percent']:.1f}%")
+            
             mean_results = load_mean_probability_distributions(
                 dummy_tesselation_func, N, steps, devs, 
                 "experiments_data_samples_probDist", "static_noise", theta
             )
-            print("[OK] Mean probability distributions created and loaded successfully")
+            
+            # Log memory after loading
+            gc.collect()
+            resources = monitor_system_resources()
+            print(f"[MEMORY] After loading newly created distributions: {resources['memory_percent']:.1f}%")
+            master_logger.info(f"Memory after loading newly created distributions: {resources['memory_percent']:.1f}%")
+            
+            print("[OK] Mean probability distributions created and loaded successfully with memory monitoring")
             master_logger.info("Mean probability distributions created and loaded successfully")
         
     except Exception as e:
@@ -1896,12 +1997,42 @@ def run_static_experiment():
         master_logger.error(traceback.format_exc())
         mean_results = None
 
-    # Create or load standard deviation data
+    # Create or load standard deviation data with memory management
     try:
+        print("\n[MEMORY] Starting standard deviation data creation/loading...")
+        
+        # Log memory before std calculation
+        import gc
+        gc.collect()
+        resources = monitor_system_resources()
+        print(f"[MEMORY] Before std calculation: {resources['memory_percent']:.1f}%")
+        master_logger.info(f"Memory before std calculation: {resources['memory_percent']:.1f}%")
+        
         stds = create_or_load_std_data(
             mean_results, devs, N, steps, dummy_tesselation_func,
             "experiments_data_samples_std", "static_noise", theta=theta
         )
+        
+        # Log memory after std calculation and cleanup
+        gc.collect()
+        resources = monitor_system_resources()
+        print(f"[MEMORY] After std calculation: {resources['memory_percent']:.1f}%")
+        master_logger.info(f"Memory after std calculation: {resources['memory_percent']:.1f}%")
+        
+        # Clear mean_results to free memory since we're done with it
+        print("[MEMORY] Clearing mean probability distributions from memory...")
+        if mean_results:
+            for i in range(len(mean_results)):
+                if mean_results[i]:
+                    mean_results[i] = None
+            del mean_results
+            mean_results = None
+        
+        # Force garbage collection
+        gc.collect()
+        resources = monitor_system_resources()
+        print(f"[MEMORY] After clearing mean prob distributions: {resources['memory_percent']:.1f}%")
+        master_logger.info(f"Memory after clearing mean prob distributions: {resources['memory_percent']:.1f}%")
         
         # Print final std values for verification
         for i, (dev, std_values) in enumerate(zip(devs, stds)):
