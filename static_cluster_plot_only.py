@@ -82,9 +82,9 @@ PROBDIST_PLOT_CONFIG = {
     'fontsize_legend': 10,
     'linewidth': 2,
     'alpha': 0.8,
-    'xlim': (-40, 40),               # X-axis limits
+    'xlim': (-80, 80),               # X-axis limits
     'ylim_min': 1e-5,                  # Y-axis minimum (None for auto)
-    'ylim_max': 1e1,                  # Y-axis maximum (None for auto)
+    'ylim_max': 1e0,                  # Y-axis maximum (None for auto)
     'grid_alpha': 0.3,
     'dpi': 300,                        # DPI for saved figures
     'bbox_inches': 'tight'             # Bbox setting for saved figures
