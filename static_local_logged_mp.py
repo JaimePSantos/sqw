@@ -183,6 +183,14 @@ else:
 
 PROCESS_LOG_DIR = "process_logs"  # Directory for individual process logs
 
+# Timeout configuration - Scale with problem size
+# Base timeout for each process, scaled by N and steps
+BASE_TIMEOUT_PER_SAMPLE = 30  # seconds per sample for small N
+TIMEOUT_SCALE_FACTOR = (N * steps) / 1000000  # Scale based on computational complexity
+PROCESS_TIMEOUT = max(3600, int(BASE_TIMEOUT_PER_SAMPLE * samples * TIMEOUT_SCALE_FACTOR))  # Minimum 1 hour
+print(f"[TIMEOUT] Process timeout set to {PROCESS_TIMEOUT} seconds ({PROCESS_TIMEOUT/3600:.1f} hours)")
+print(f"[TIMEOUT] Based on N={N}, steps={steps}, samples={samples}")
+
 # Mean probability multiprocessing configuration
 USE_MULTIPROCESS_MEAN_PROB = True  # Set to True to use multiprocessing for mean probability calculation
 MAX_MEAN_PROB_PROCESSES = min(5, MAX_PROCESSES)  # Don't exceed main process limit
@@ -1533,6 +1541,9 @@ def run_static_experiment():
         # Execute processes concurrently with robust error handling
         max_retries = 3
         retry_delay = 30  # seconds
+        completed_samples = 0
+        total_samples = len(devs) * samples
+        process_timeout_but_likely_completed = False  # Flag for timeout recovery
         
         for attempt in range(max_retries):
             try:
@@ -1555,7 +1566,7 @@ def run_static_experiment():
                         master_logger.info(f"Process launched for dev={dev_str} (PID will be assigned)")
                     
                     # Collect results as they complete
-                    for future in as_completed(future_to_dev, timeout=7200):  # 2 hour timeout
+                    for future in as_completed(future_to_dev, timeout=PROCESS_TIMEOUT):  # Dynamic timeout based on problem size
                         dev = future_to_dev[future]
                         try:
                             result = future.result()
@@ -1612,6 +1623,60 @@ def run_static_experiment():
                 master_logger.info(f"Process pool attempt {attempt + 1} completed")
                 break
                 
+            except TimeoutError as te:
+                # Check if some processes might have completed but not returned
+                unfinished_count = sum(1 for dev in devs if process_info[dev]["status"] == "pending")
+                master_logger.error(f"Process pool attempt {attempt + 1} failed: {unfinished_count} (of {len(devs)}) futures unfinished")
+                master_logger.error(f"Timeout of {PROCESS_TIMEOUT} seconds ({PROCESS_TIMEOUT/3600:.1f} hours) exceeded")
+                
+                # Check process logs to see if processes actually completed
+                completed_in_logs = 0
+                for dev in devs:
+                    dev_str = f"{dev}" if isinstance(dev, (int, float)) else f"{dev[0]}_{dev[1]}" if isinstance(dev, (tuple, list)) else str(dev)
+                    log_file = os.path.join(PROCESS_LOG_DIR, f"process_dev_{dev_str}_pid_*.log")
+                    import glob
+                    matching_logs = glob.glob(log_file)
+                    if matching_logs:
+                        try:
+                            with open(matching_logs[0], 'r') as f:
+                                content = f.read()
+                                if "completed:" in content:
+                                    completed_in_logs += 1
+                                    master_logger.info(f"  Process for dev={dev_str} appears to have completed in log file")
+                        except:
+                            pass
+                
+                if completed_in_logs > 0:
+                    master_logger.error(f"IMPORTANT: {completed_in_logs} processes may have completed but timed out in coordination")
+                    master_logger.error("  Check individual process logs and output directories for completed data")
+                    master_logger.error("  Consider running with SKIP_SAMPLE_COMPUTATION=True to analyze existing data")
+                    
+                    # If most/all processes completed in logs, we might be able to continue
+                    if completed_in_logs >= len(devs) * 0.8:  # 80% or more completed
+                        master_logger.info(f"RECOVERY: {completed_in_logs}/{len(devs)} processes appear completed in logs")
+                        master_logger.info("RECOVERY: Will attempt to continue with analysis phase")
+                        # Set a flag to continue despite timeout
+                        process_timeout_but_likely_completed = True
+                        break  # Exit retry loop and continue
+                
+                if attempt < max_retries - 1:
+                    master_logger.info(f"Retrying in {retry_delay} seconds...")
+                    time.sleep(retry_delay)
+                    # Reset process info for retry
+                    for dev in process_info:
+                        process_info[dev]["status"] = "pending"
+                        process_info[dev]["start_time"] = None
+                        process_info[dev]["end_time"] = None
+                    process_results.clear()
+                    completed_samples = 0
+                else:
+                    if process_timeout_but_likely_completed:
+                        master_logger.warning("Timeout occurred but processes likely completed - continuing with analysis")
+                        break  # Exit retry loop and continue with analysis
+                    else:
+                        master_logger.error("All retry attempts failed")
+                        raise
+                
             except Exception as e:
                 import traceback
                 master_logger.error(f"Process pool attempt {attempt + 1} failed: {str(e)}")
@@ -1628,8 +1693,12 @@ def run_static_experiment():
                     process_results.clear()
                     completed_samples = 0
                 else:
-                    master_logger.error("All retry attempts failed")
-                    raise
+                    if process_timeout_but_likely_completed:
+                        master_logger.warning("Timeout occurred but processes likely completed - continuing with analysis")
+                        break  # Exit retry loop and continue with analysis
+                    else:
+                        master_logger.error("All retry attempts failed") 
+                        raise
 
         experiment_time = time.time() - start_time
         
