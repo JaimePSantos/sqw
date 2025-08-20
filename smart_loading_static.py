@@ -846,10 +846,19 @@ def load_mean_probability_distributions(
             mean_filepath = os.path.join(exp_dir, mean_filename)
             
             if os.path.exists(mean_filepath):
-                # Use optimized pickle loading
-                with open(mean_filepath, "rb") as f:
-                    mean_state = pickle.load(f)
-                dev_results.append(mean_state)
+                # Use optimized pickle loading with error handling for corrupted files
+                try:
+                    with open(mean_filepath, "rb") as f:
+                        mean_state = pickle.load(f)
+                    dev_results.append(mean_state)
+                except (EOFError, pickle.UnpicklingError, pickle.PickleError) as e:
+                    print(f"    WARNING: Corrupted pickle file detected: {mean_filepath}")
+                    print(f"    Error: {e}")
+                    print(f"    Skipping this step - you may need to regenerate the data")
+                    dev_results.append(None)
+                except Exception as e:
+                    print(f"    ERROR: Unexpected error loading {mean_filepath}: {e}")
+                    dev_results.append(None)
             else:
                 print(f"Warning: Mean probability distribution file not found: {mean_filepath}")
                 dev_results.append(None)

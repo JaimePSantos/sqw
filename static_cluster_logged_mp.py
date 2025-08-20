@@ -1995,6 +1995,26 @@ def run_static_experiment():
                 dummy_tesselation_func, N, steps, devs, 
                 "experiments_data_samples_probDist", "static_noise", theta
             )
+            
+            # Validate loaded data
+            if mean_results is None:
+                raise ValueError("Failed to load mean probability distributions - all data appears to be corrupted")
+            
+            # Check for corrupted data and warn user
+            corrupted_count = 0
+            total_count = 0
+            for dev_idx, dev_data in enumerate(mean_results):
+                if dev_data is not None:
+                    none_count = sum(1 for step_data in dev_data if step_data is None)
+                    corrupted_count += none_count
+                    total_count += len(dev_data)
+                    if none_count > 0:
+                        print(f"    WARNING: Dev {dev_idx+1}/{len(devs)} has {none_count}/{len(dev_data)} corrupted time steps")
+            
+            if corrupted_count > 0:
+                print(f"    TOTAL: {corrupted_count}/{total_count} time steps have corrupted data")
+                print(f"    Consider regenerating the corrupted data for better results")
+            
             print("[OK] Mean probability distributions loaded successfully")
             master_logger.info("Mean probability distributions loaded successfully")
         else:
@@ -2061,6 +2081,7 @@ def run_static_experiment():
         error_msg = f"Warning: Could not smart load/create mean probability distributions: {e}"
         print(f"[WARNING] {error_msg}")
         master_logger.error(error_msg)
+        import traceback
         master_logger.error(traceback.format_exc())
         mean_results = None
 
@@ -2411,6 +2432,7 @@ if __name__ == "__main__":
             master_logger = logging.getLogger("master")
             if master_logger.handlers:
                 master_logger.error(error_msg)
+                import traceback
                 master_logger.error(traceback.format_exc())
         except:
             pass
