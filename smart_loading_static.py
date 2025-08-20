@@ -40,7 +40,8 @@ def find_experiment_dir_flexible(
     noise_params=None,
     noise_type="static_noise",
     base_dir="experiments_data",
-    theta=None
+    theta=None,
+    samples=None
 ):
     """
     Find experiment directory supporting both old and new formats.
@@ -51,7 +52,7 @@ def find_experiment_dir_flexible(
     """
     if noise_type != "static_noise" or not noise_params:
         # Use standard directory for non-static noise cases
-        return get_experiment_dir(tesselation_func, has_noise, N, noise_params, noise_type, base_dir, theta), 'unified'
+        return get_experiment_dir(tesselation_func, has_noise, N, noise_params, noise_type, base_dir, theta, samples), 'unified'
     
     # For static noise with deviation parameters
     deviation_range = noise_params[0] if noise_params else 0
@@ -157,11 +158,13 @@ def get_experiment_dir(
     noise_params=None,
     noise_type="angle",  # "angle" or "tesselation_order" or "static_noise"
     base_dir="experiments_data",
-    theta=None  # Theta parameter for static noise experiments
+    theta=None,  # Theta parameter for static noise experiments
+    samples=None  # Number of samples - used for probability distribution folders
 ):
     """
     Returns the directory path for the experiment based on tesselation, noise, and graph size.
     Updated to use unified folder structure where noise value is always included in path.
+    For probability distribution directories, includes samples subfolder.
     """
     tesselation_name = tesselation_func.__name__
     if noise_type == "angle":
@@ -176,7 +179,13 @@ def get_experiment_dir(
             dev_value = 0
         
         dev_folder = f"dev_{format_deviation_for_filename(dev_value)}"
-        return os.path.join(base, dev_folder, f"N_{N}")
+        n_folder = f"N_{N}"
+        
+        # Add samples folder for probability distribution and standard deviation directories
+        if samples is not None and ("probDist" in base_dir or "std" in base_dir):
+            return os.path.join(base, dev_folder, n_folder, f"samples_{samples}")
+        else:
+            return os.path.join(base, dev_folder, n_folder)
         
     elif noise_type == "tesselation_order":
         # Unified folder structure - no separation between noise/no-noise
@@ -190,7 +199,13 @@ def get_experiment_dir(
             noise_suffix = "0.000"
         
         shift_folder = f"shift_prob_{noise_suffix}"
-        return os.path.join(base, shift_folder, f"N_{N}")
+        n_folder = f"N_{N}"
+        
+        # Add samples folder for probability distribution and standard deviation directories
+        if samples is not None and ("probDist" in base_dir or "std" in base_dir):
+            return os.path.join(base, shift_folder, n_folder, f"samples_{samples}")
+        else:
+            return os.path.join(base, shift_folder, n_folder)
         
     elif noise_type == "static_noise":
         # Unified folder structure - no separation between noise/no-noise
@@ -217,7 +232,13 @@ def get_experiment_dir(
             dev_suffix = "0.000"
         
         dev_folder = f"dev_{dev_suffix}"
-        return os.path.join(base, dev_folder, f"N_{N}")
+        n_folder = f"N_{N}"
+        
+        # Add samples folder for probability distribution and standard deviation directories
+        if samples is not None and ("probDist" in base_dir or "std" in base_dir):
+            return os.path.join(base, dev_folder, n_folder, f"samples_{samples}")
+        else:
+            return os.path.join(base, dev_folder, n_folder)
     else:
         raise ValueError(f"Unknown noise_type: {noise_type}")
 
@@ -671,16 +692,6 @@ def create_mean_probability_distributions(
     """
     import os
     
-    # Check for forced sample count override
-    if os.environ.get('FORCE_SAMPLES_COUNT'):
-        try:
-            forced_samples = int(os.environ.get('FORCE_SAMPLES_COUNT'))
-            if samples != forced_samples:
-                print(f"🔒 FORCED: Using only {forced_samples} samples instead of {samples}")
-                samples = forced_samples
-        except ValueError:
-            pass
-    
     print(f"Creating mean probability distributions for {len(devs)} devs, {steps} steps, {samples} samples each...")
     total_start_time = time.time()
     
@@ -718,11 +729,12 @@ def create_mean_probability_distributions(
         # Use flexible directory finding for static noise to handle backward compatibility
         if noise_type == "static_noise":
             source_exp_dir, found_format = find_experiment_dir_flexible(tesselation_func, has_noise, N, noise_params=noise_params, noise_type=noise_type, base_dir=source_base_dir, theta=theta)
-            target_exp_dir, _ = find_experiment_dir_flexible(tesselation_func, has_noise, N, noise_params=noise_params, noise_type=noise_type, base_dir=target_base_dir, theta=theta)
+            # For target directory (probDist), always use new structure with samples
+            target_exp_dir = get_experiment_dir(tesselation_func, has_noise, N, noise_params=noise_params, noise_type=noise_type, base_dir=target_base_dir, theta=theta, samples=samples)
         else:
             # For other noise types, use the unified structure
             source_exp_dir = get_experiment_dir(tesselation_func, has_noise, N, noise_params=noise_params, noise_type=noise_type, base_dir=source_base_dir, theta=theta)
-            target_exp_dir = get_experiment_dir(tesselation_func, has_noise, N, noise_params=noise_params, noise_type=noise_type, base_dir=target_base_dir, theta=theta)
+            target_exp_dir = get_experiment_dir(tesselation_func, has_noise, N, noise_params=noise_params, noise_type=noise_type, base_dir=target_base_dir, theta=theta, samples=samples)
         
         os.makedirs(target_exp_dir, exist_ok=True)
         print(f"  Dev {dev_idx+1}/{len(devs)} ({param_name}={dev_str}): Processing {steps} steps...")
@@ -785,6 +797,7 @@ def load_mean_probability_distributions(
     N,
     steps,
     devs,
+    samples,
     base_dir="experiments_data_samples_probDist",
     noise_type="angle",
     theta=None  # Theta parameter for static noise experiments
@@ -830,10 +843,11 @@ def load_mean_probability_distributions(
             
         # Use flexible directory finding for static noise to handle backward compatibility
         if noise_type == "static_noise":
-            exp_dir, found_format = find_experiment_dir_flexible(tesselation_func, has_noise, N, noise_params=noise_params, noise_type=noise_type, base_dir=base_dir, theta=theta)
+            # For probDist directories, always use new structure with samples
+            exp_dir = get_experiment_dir(tesselation_func, has_noise, N, noise_params=noise_params, noise_type=noise_type, base_dir=base_dir, theta=theta, samples=samples)
         else:
             # For other noise types, use the unified structure
-            exp_dir = get_experiment_dir(tesselation_func, has_noise, N, noise_params=noise_params, noise_type=noise_type, base_dir=base_dir, theta=theta)
+            exp_dir = get_experiment_dir(tesselation_func, has_noise, N, noise_params=noise_params, noise_type=noise_type, base_dir=base_dir, theta=theta, samples=samples)
         
         print(f"  Dev {dev_idx+1}/{len(devs)} ({param_name}={dev_str}): Loading from {exp_dir}")
         
@@ -876,6 +890,7 @@ def check_mean_probability_distributions_exist(
     N,
     steps,
     devs,
+    samples,
     base_dir="experiments_data_samples_probDist",
     noise_type="angle",
     theta=None  # Theta parameter for static noise experiments
@@ -917,11 +932,12 @@ def check_mean_probability_distributions_exist(
             
         # Use flexible directory finding for static noise to handle backward compatibility
         if noise_type == "static_noise":
-            exp_dir, found_format = find_experiment_dir_flexible(tesselation_func, has_noise, N, noise_params=noise_params, noise_type=noise_type, base_dir=base_dir, theta=theta)
-            print(f"  Checking dev {dev_idx+1}/{len(devs)} ({param_name}={dev_str}): {exp_dir} ({found_format} format)")
+            # For probDist directories, always use new structure with samples
+            exp_dir = get_experiment_dir(tesselation_func, has_noise, N, noise_params=noise_params, noise_type=noise_type, base_dir=base_dir, theta=theta, samples=samples)
+            print(f"  Checking dev {dev_idx+1}/{len(devs)} ({param_name}={dev_str}): {exp_dir}")
         else:
             # For other noise types, use the unified structure
-            exp_dir = get_experiment_dir(tesselation_func, has_noise, N, noise_params=noise_params, noise_type=noise_type, base_dir=base_dir, theta=theta)
+            exp_dir = get_experiment_dir(tesselation_func, has_noise, N, noise_params=noise_params, noise_type=noise_type, base_dir=base_dir, theta=theta, samples=samples)
             print(f"  Checking dev {dev_idx+1}/{len(devs)} ({param_name}={dev_str}): {exp_dir}")
         
         missing_files = []
@@ -967,24 +983,14 @@ def smart_load_or_create_experiment(
     """
     import os
     
-    # Check for forced sample count override
-    if os.environ.get('FORCE_SAMPLES_COUNT'):
-        try:
-            forced_samples = int(os.environ.get('FORCE_SAMPLES_COUNT'))
-            if samples != forced_samples:
-                print(f"🔒 FORCED: Overriding samples from {samples} to {forced_samples}")
-                samples = forced_samples
-        except ValueError:
-            pass
-    
     print(f"Smart loading for {len(parameter_list)} {parameter_name} values with {samples} samples...")
     start_time = time.time()
     
     # Step 1: Try to load mean probability distributions
     print("Step 1: Checking for existing mean probability distributions...")
-    if check_mean_probability_distributions_exist(tesselation_func, N, steps, parameter_list, probdist_base_dir, noise_type, theta):
+    if check_mean_probability_distributions_exist(tesselation_func, N, steps, parameter_list, samples, probdist_base_dir, noise_type, theta):
         print("[OK] Found existing mean probability distributions - loading directly!")
-        result = load_mean_probability_distributions(tesselation_func, N, steps, parameter_list, probdist_base_dir, noise_type, theta)
+        result = load_mean_probability_distributions(tesselation_func, N, steps, parameter_list, samples, probdist_base_dir, noise_type, theta)
         elapsed = time.time() - start_time
         print(f"Smart loading completed in {elapsed:.1f}s (probability distributions path)")
         return result
@@ -1041,7 +1047,7 @@ def smart_load_or_create_experiment(
         if sample_files_exist:
             print("[OK] Found existing sample data - creating probability distributions...")
             create_mean_probability_distributions(tesselation_func, N, steps, parameter_list, samples, samples_base_dir, probdist_base_dir, noise_type, theta)
-            result = load_mean_probability_distributions(tesselation_func, N, steps, parameter_list, probdist_base_dir, noise_type, theta)
+            result = load_mean_probability_distributions(tesselation_func, N, steps, parameter_list, samples, probdist_base_dir, noise_type, theta)
             elapsed = time.time() - start_time
             print(f"Smart loading completed in {elapsed:.1f}s (samples -> probabilities path)")
             return result
@@ -1153,7 +1159,7 @@ def smart_load_or_create_experiment(
         for param_idx, param in enumerate(parameter_list):
             has_noise = param > 0 if noise_type == "angle" else param > 0
             noise_params = noise_params_list[param_idx]
-            target_exp_dir = get_experiment_dir(tesselation_func, has_noise, N, noise_params=noise_params, noise_type=noise_type, base_dir=probdist_base_dir, theta=theta)
+            target_exp_dir = get_experiment_dir(tesselation_func, has_noise, N, noise_params=noise_params, noise_type=noise_type, base_dir=probdist_base_dir, theta=theta, samples=1)  # Single walk is like 1 sample
             os.makedirs(target_exp_dir, exist_ok=True)
             
             walk_states = results[param_idx]

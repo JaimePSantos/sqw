@@ -95,7 +95,7 @@ EXCLUDE_SAMPLES_FROM_ARCHIVE = True  # Set to True to exclude raw sample files f
 
 # Computation control switches
 CALCULATE_SAMPLES_ONLY = False  # Set to True to only compute and save samples (skip analysis)
-SKIP_SAMPLE_COMPUTATION = False  # Set to True to skip sample computation (analysis only)
+SKIP_SAMPLE_COMPUTATION = True  # Set to True to skip sample computation (analysis only)
 
 # Check for environment variable overrides (from safe_background_launcher.py)
 if os.environ.get('ENABLE_PLOTTING'):
@@ -133,9 +133,9 @@ BACKGROUND_LOG_FILE = "static_experiment_multiprocessing.log"  # Log file for ba
 BACKGROUND_PID_FILE = "static_experiment_mp.pid"  # PID file to track background process
 
 # Experiment parameters
-N = 20000  # System size
-steps = N//4  # Time steps - now we can handle the full computation with streaming
-samples = 20  # Samples per deviation - changed from 1 to 5
+N = 20000  # System size 
+steps = N//4  # Time steps
+samples = 20  # Samples per deviation
 
 # Resource monitoring and management
 print(f"[COMPUTATION SCALE] N={N}, steps={steps}, samples={samples}")
@@ -164,14 +164,7 @@ try:
 except ImportError:
     print("[SYSTEM] psutil not available - install for resource monitoring")
 
-# Check for forced parameter overrides from launcher
-if os.environ.get('FORCE_SAMPLES_COUNT'):
-    try:
-        forced_samples = int(os.environ.get('FORCE_SAMPLES_COUNT'))
-        print(f"[FORCED] Using samples = {forced_samples} (launcher override)")
-        samples = forced_samples
-    except ValueError:
-        pass
+# Environment variable overrides removed - samples value is set at top of file
 
 if os.environ.get('FORCE_N_VALUE'):
     try:
@@ -445,10 +438,11 @@ def compute_mean_probability_for_dev(dev_args):
         # Get source and target directories
         if noise_type == "static_noise":
             source_exp_dir, found_format = find_experiment_dir_flexible(tesselation_func, has_noise, N, noise_params=noise_params, noise_type=noise_type, base_dir=source_base_dir, theta=theta)
-            target_exp_dir, _ = find_experiment_dir_flexible(tesselation_func, has_noise, N, noise_params=noise_params, noise_type=noise_type, base_dir=target_base_dir, theta=theta)
+            # For target directory (probDist), always use new structure with samples
+            target_exp_dir = get_experiment_dir(tesselation_func, has_noise, N, noise_params=noise_params, noise_type=noise_type, base_dir=target_base_dir, theta=theta, samples=samples)
         else:
             source_exp_dir = get_experiment_dir(tesselation_func, has_noise, N, noise_params=noise_params, noise_type=noise_type, base_dir=source_base_dir, theta=theta)
-            target_exp_dir = get_experiment_dir(tesselation_func, has_noise, N, noise_params=noise_params, noise_type=noise_type, base_dir=target_base_dir, theta=theta)
+            target_exp_dir = get_experiment_dir(tesselation_func, has_noise, N, noise_params=noise_params, noise_type=noise_type, base_dir=target_base_dir, theta=theta, samples=samples)
         
         os.makedirs(target_exp_dir, exist_ok=True)
         logger.info(f"Processing {steps} steps for {param_name}={dev_str}")
@@ -739,7 +733,7 @@ def compute_dev_samples(dev_args):
 # STANDARD DEVIATION DATA MANAGEMENT
 # ============================================================================
 
-def create_or_load_std_data(mean_results, devs, N, steps, tesselation_func, std_base_dir, noise_type, theta=None):
+def create_or_load_std_data(mean_results, devs, N, steps, samples, tesselation_func, std_base_dir, noise_type, theta=None):
     """
     Create or load standard deviation data from mean probability distributions.
     
@@ -797,7 +791,7 @@ def create_or_load_std_data(mean_results, devs, N, steps, tesselation_func, std_
         noise_params = [dev]  # Static noise uses single parameter
         std_dir = get_experiment_dir(tesselation_func, has_noise, N, 
                                    noise_params=noise_params, noise_type=noise_type, 
-                                   base_dir=std_base_dir, theta=theta)
+                                   base_dir=std_base_dir, theta=theta, samples=samples)
         os.makedirs(std_dir, exist_ok=True)
         
         std_filepath = os.path.join(std_dir, "std_vs_time.pkl")
@@ -1987,12 +1981,12 @@ def run_static_experiment():
             load_mean_probability_distributions
         )
         
-        if check_mean_probability_distributions_exist(dummy_tesselation_func, N, steps, devs, 
+        if check_mean_probability_distributions_exist(dummy_tesselation_func, N, steps, devs, samples,
                                                     "experiments_data_samples_probDist", "static_noise", theta):
             print("[OK] Found existing mean probability distributions - loading directly!")
             master_logger.info("Loading existing mean probability distributions")
             mean_results = load_mean_probability_distributions(
-                dummy_tesselation_func, N, steps, devs, 
+                dummy_tesselation_func, N, steps, devs, samples,
                 "experiments_data_samples_probDist", "static_noise", theta
             )
             
@@ -2071,7 +2065,7 @@ def run_static_experiment():
             # Load the created distributions
             print("[DATA] Loading newly created mean probability distributions...")
             mean_results = load_mean_probability_distributions(
-                dummy_tesselation_func, N, steps, devs, 
+                dummy_tesselation_func, N, steps, devs, samples,
                 "experiments_data_samples_probDist", "static_noise", theta
             )
             print("[OK] Mean probability distributions created and loaded successfully")
@@ -2088,7 +2082,7 @@ def run_static_experiment():
     # Create or load standard deviation data
     try:
         stds = create_or_load_std_data(
-            mean_results, devs, N, steps, dummy_tesselation_func,
+            mean_results, devs, N, steps, samples, dummy_tesselation_func,
             "experiments_data_samples_std", "static_noise", theta=theta
         )
         
@@ -2364,7 +2358,7 @@ def run_static_experiment():
     print(f"- Save figures to files: {SAVE_FIGURES}")
     if ENABLE_PLOTTING:
         plot_type = "Log-log scale" if USE_LOGLOG_PLOT else "Linear scale"
-        plot_filename = "static_noise_std_vs_time_loglog.png" if USE_LOGLOG_PLOT else "static_noise_std_vs_time.png"
+        plot_filename = "static_noise_std_vs_time_loglog_N{N}_samples{samples}.png" if USE_LOGLOG_PLOT else "static_noise_std_vs_time.png"
         print(f"- Standard deviation plot type: {plot_type}")
         if SAVE_FIGURES:
             print(f"- Standard deviation plot saved as: {plot_filename}")
