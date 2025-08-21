@@ -88,14 +88,14 @@ PLOT_FINAL_PROBDIST = True  # Set to True to plot probability distributions at f
 SAVE_FIGURES = True  # Set to False to disable saving figures to files
 
 # Archive switch
-CREATE_TAR_ARCHIVE = True  # Set to True to create tar archive of experiments_data_samples folder
+CREATE_TAR_ARCHIVE = False  # Set to True to create tar archive of experiments_data_samples folder
 USE_MULTIPROCESS_ARCHIVING = True  # Set to True to use multiprocess archiving for faster compression
 MAX_ARCHIVE_PROCESSES = None  # Max processes for archiving (None = auto-detect)
 EXCLUDE_SAMPLES_FROM_ARCHIVE = True  # Set to True to exclude raw sample files from archive (keeps only probDist and std)
 
 # Computation control switches
 CALCULATE_SAMPLES_ONLY = False  # Set to True to only compute and save samples (skip analysis)
-SKIP_SAMPLE_COMPUTATION = False  # Set to True to skip sample computation (analysis only)
+SKIP_SAMPLE_COMPUTATION = True  # Set to True to skip sample computation (analysis only)
 
 # Check for environment variable overrides (from safe_background_launcher.py)
 if os.environ.get('ENABLE_PLOTTING'):
@@ -133,9 +133,9 @@ BACKGROUND_LOG_FILE = "static_experiment_multiprocessing.log"  # Log file for ba
 BACKGROUND_PID_FILE = "static_experiment_mp.pid"  # PID file to track background process
 
 # Experiment parameters
-N = 200  # System size 
-steps = N//6  # Time steps
-samples = 50  # Samples per deviation
+N = 20000  # System size 
+steps = N//4  # Time steps
+samples = 5  # Samples per deviation
 
 # Resource monitoring and management
 print(f"[COMPUTATION SCALE] N={N}, steps={steps}, samples={samples}")

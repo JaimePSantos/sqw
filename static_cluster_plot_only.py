@@ -104,7 +104,7 @@ LABEL_CONFIG = {
 # Experiment parameters (must match the original experiment)
 N = 20000  # System size
 steps = N//4  # Time steps
-samples = 10  # Samples per deviation
+samples = 20  # Samples per deviation
 
 # Quantum walk parameters
 theta = math.pi/3  # Base theta parameter for static noise
@@ -247,7 +247,7 @@ def load_final_step_probability_distributions(tesselation_func, N, steps, parame
             tesselation_func, True, N, [params], noise_type, probdist_base_dir, theta
         )
         
-        # Files are directly in the experiment directory (not in a probDist subfolder)
+        # Check if the experiment directory exists
         if not os.path.exists(exp_dir):
             print(f"  [MISSING] Experiment directory not found: {exp_dir}")
             results.append(None)
@@ -256,19 +256,36 @@ def load_final_step_probability_distributions(tesselation_func, N, steps, parame
         print(f"  [LOADING] Dev {i+1}/{len(parameter_list)}: {params} from {exp_dir}")
         
         try:
-            # Load only the final step
+            # First, check if files are directly in the experiment directory
             prob_file_new = os.path.join(exp_dir, f"mean_step_{final_step}.pkl")
             prob_file_old = os.path.join(exp_dir, f"probDist_step_{final_step}.pkl")
             
-            prob_file = prob_file_new if os.path.exists(prob_file_new) else prob_file_old
+            prob_file = None
+            if os.path.exists(prob_file_new):
+                prob_file = prob_file_new
+            elif os.path.exists(prob_file_old):
+                prob_file = prob_file_old
+            else:
+                # If not found directly, check inside samples subfolder
+                samples_folder = f"samples_{samples}"
+                samples_dir = os.path.join(exp_dir, samples_folder)
+                
+                if os.path.exists(samples_dir):
+                    prob_file_new_samples = os.path.join(samples_dir, f"mean_step_{final_step}.pkl")
+                    prob_file_old_samples = os.path.join(samples_dir, f"probDist_step_{final_step}.pkl")
+                    
+                    if os.path.exists(prob_file_new_samples):
+                        prob_file = prob_file_new_samples
+                    elif os.path.exists(prob_file_old_samples):
+                        prob_file = prob_file_old_samples
             
-            if os.path.exists(prob_file):
+            if prob_file and os.path.exists(prob_file):
                 with open(prob_file, 'rb') as f:
                     prob_dist = pickle.load(f)
                     results.append(prob_dist)
-                    print(f"  [OK] Loaded final step probability distribution")
+                    print(f"  [OK] Loaded final step probability distribution from {os.path.relpath(prob_file, exp_dir)}")
             else:
-                print(f"  [MISSING] Final step file not found: {prob_file}")
+                print(f"  [MISSING] Final step file not found in {exp_dir} or {exp_dir}/samples_{samples}")
                 results.append(None)
             
         except Exception as e:
@@ -294,7 +311,7 @@ def load_std_data_directly(devs, N, tesselation_func, std_base_dir, noise_type, 
             tesselation_func, True, N, [dev], noise_type, std_base_dir, theta
         )
         
-        # Try multiple possible filenames for std data
+        # First, try to find std files directly in experiment directory
         std_files = [
             os.path.join(exp_dir, "std_data.pkl"),
             os.path.join(exp_dir, "std_vs_time.pkl")
@@ -307,7 +324,7 @@ def load_std_data_directly(devs, N, tesselation_func, std_base_dir, noise_type, 
                 if os.path.exists(std_file):
                     with open(std_file, 'rb') as f:
                         std_values = pickle.load(f)
-                    print(f"  [OK] Loaded {len(std_values)} std values from {os.path.basename(std_file)}")
+                    print(f"  [OK] Loaded {len(std_values)} std values from {os.path.relpath(std_file, exp_dir)}")
                     stds.append(std_values)
                     loaded = True
                     break
@@ -315,9 +332,33 @@ def load_std_data_directly(devs, N, tesselation_func, std_base_dir, noise_type, 
                 print(f"  [WARNING] Could not load std data from {std_file}: {e}")
                 continue
         
+        # If not found directly, check inside samples subfolder
+        if not loaded:
+            samples_folder = f"samples_{samples}"
+            samples_dir = os.path.join(exp_dir, samples_folder)
+            
+            if os.path.exists(samples_dir):
+                std_files_samples = [
+                    os.path.join(samples_dir, "std_data.pkl"),
+                    os.path.join(samples_dir, "std_vs_time.pkl")
+                ]
+                
+                for std_file in std_files_samples:
+                    try:
+                        if os.path.exists(std_file):
+                            with open(std_file, 'rb') as f:
+                                std_values = pickle.load(f)
+                            print(f"  [OK] Loaded {len(std_values)} std values from {os.path.relpath(std_file, exp_dir)}")
+                            stds.append(std_values)
+                            loaded = True
+                            break
+                    except Exception as e:
+                        print(f"  [WARNING] Could not load std data from {std_file}: {e}")
+                        continue
+        
         if not loaded:
             print(f"  [MISSING] Standard deviation file not found in: {exp_dir}")
-            print(f"  [MISSING] Tried filenames: {[os.path.basename(f) for f in std_files]}")
+            print(f"  [MISSING] Also checked samples subfolder: {os.path.join(exp_dir, f'samples_{samples}')}")
             stds.append([])
     
     print(f"[OK] Standard deviation data loading completed!")
