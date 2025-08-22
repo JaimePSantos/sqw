@@ -82,10 +82,10 @@ if hasattr(signal, 'SIGHUP'):
 # ============================================================================
 
 # Plotting switch
-ENABLE_PLOTTING = True  # Set to False to disable plotting
-USE_LOGLOG_PLOT = True  # Set to True to use log-log scale for plotting
-PLOT_FINAL_PROBDIST = True  # Set to True to plot probability distributions at final time step
-SAVE_FIGURES = True  # Set to False to disable saving figures to files
+ENABLE_PLOTTING = False  # Set to False to disable plotting
+USE_LOGLOG_PLOT = False  # Set to True to use log-log scale for plotting
+PLOT_FINAL_PROBDIST = False  # Set to True to plot probability distributions at final time step
+SAVE_FIGURES = False  # Set to False to disable saving figures to files
 
 # Archive switch
 CREATE_TAR_ARCHIVE = False  # Set to True to create tar archive of experiments_data_samples folder
@@ -135,7 +135,7 @@ BACKGROUND_PID_FILE = "static_experiment_mp.pid"  # PID file to track background
 # Experiment parameters
 N = 20000  # System size 
 steps = N//4  # Time steps
-samples = 5  # Samples per deviation
+samples = 20  # Samples per deviation
 
 # Resource monitoring and management
 print(f"[COMPUTATION SCALE] N={N}, steps={steps}, samples={samples}")

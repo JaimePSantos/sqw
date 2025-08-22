@@ -15,13 +15,14 @@ python main_static_experiment.py
 ### Core Modules
 
 1. **`main_static_experiment.py`** - Main entry point with simple interface
-2. **`experiment_config.py`** - Configuration management and parameter validation
-3. **`experiment_orchestrator.py`** - Main experiment logic and phase coordination
-4. **`worker_functions.py`** - Multiprocessing worker functions for computation
-5. **`data_manager.py`** - Data processing, archiving, and file management
-6. **`experiment_logging.py`** - Centralized logging for master and worker processes
-7. **`system_monitor.py`** - System resource monitoring and signal handling
-8. **`background_executor.py`** - Background process execution utilities
+2. **`static_experiment_modules/`** - Package containing all experiment modules:
+   - **`experiment_config.py`** - Configuration management and parameter validation
+   - **`experiment_orchestrator.py`** - Main experiment logic and phase coordination
+   - **`worker_functions.py`** - Multiprocessing worker functions for computation
+   - **`data_manager.py`** - Data processing, archiving, and file management
+   - **`experiment_logging.py`** - Centralized logging for master and worker processes
+   - **`system_monitor.py`** - System resource monitoring and signal handling
+   - **`background_executor.py`** - Background process execution utilities
 
 ### Module Responsibilities
 
@@ -70,8 +71,7 @@ python main_static_experiment.py
 
 ### 1. Full Pipeline (Default)
 ```python
-from experiment_config import ExperimentConfig
-from experiment_orchestrator import run_static_experiment
+from static_experiment_modules import ExperimentConfig, run_static_experiment
 
 config = ExperimentConfig(
     N=20000,
@@ -173,6 +173,16 @@ python main_static_experiment.py
 ## Output Structure
 
 ```
+static_experiment_modules/         # Module package
+  ├── __init__.py                 # Package initialization
+  ├── experiment_config.py        # Configuration management
+  ├── experiment_orchestrator.py  # Main experiment logic
+  ├── worker_functions.py         # Multiprocessing workers
+  ├── data_manager.py            # Data processing utilities
+  ├── experiment_logging.py      # Logging utilities
+  ├── system_monitor.py          # System monitoring
+  └── background_executor.py     # Background execution
+main_static_experiment.py         # Main entry point
 experiments_data_samples/          # Raw sample data
 experiments_data_samples_probDist/ # Mean probability distributions  
 experiments_data_samples_std/      # Standard deviation data
@@ -195,15 +205,15 @@ experiments_data_N*_samples*.tar.gz # Optional archives
 
 ## Migration from Original Code
 
-The original `static_local_logged_mp.py` functionality is preserved but split across modules:
+The original `static_local_logged_mp.py` functionality is preserved but split across modules in the `static_experiment_modules/` package:
 
-- Configuration → `experiment_config.py`
-- Signal handling → `system_monitor.py`  
-- Logging → `experiment_logging.py`
-- Workers → `worker_functions.py`
-- Data management → `data_manager.py`
-- Background execution → `background_executor.py`
-- Main logic → `experiment_orchestrator.py`
+- Configuration → `static_experiment_modules/experiment_config.py`
+- Signal handling → `static_experiment_modules/system_monitor.py`  
+- Logging → `static_experiment_modules/experiment_logging.py`
+- Workers → `static_experiment_modules/worker_functions.py`
+- Data management → `static_experiment_modules/data_manager.py`
+- Background execution → `static_experiment_modules/background_executor.py`
+- Main logic → `static_experiment_modules/experiment_orchestrator.py`
 - User interface → `main_static_experiment.py`
 
 All original features are maintained including multiprocessing, timeout handling, resource monitoring, graceful shutdown, and background execution.

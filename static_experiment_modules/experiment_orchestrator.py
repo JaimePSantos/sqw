@@ -12,16 +12,16 @@ import multiprocessing as mp
 from concurrent.futures import ProcessPoolExecutor, as_completed, TimeoutError
 from typing import Dict, Any, List
 
-from experiment_config import ExperimentConfig
-from experiment_logging import (setup_master_logging, log_experiment_start, 
-                               log_experiment_completion, log_phase_start, log_process_summary)
-from system_monitor import (setup_signal_handlers, print_resource_estimates, 
-                           print_system_info, SHUTDOWN_REQUESTED)
-from background_executor import (start_background_process, is_background_process, 
-                               setup_background_cleanup_handlers, cleanup_background_process)
-from worker_functions import compute_dev_samples, dummy_tesselation_func
-from data_manager import (create_mean_probability_distributions_multiprocess, 
-                         create_or_load_std_data, create_experiment_archive)
+from .experiment_config import ExperimentConfig
+from .experiment_logging import (setup_master_logging, log_experiment_start, 
+                                log_experiment_completion, log_phase_start, log_process_summary)
+from .system_monitor import (setup_signal_handlers, print_resource_estimates, 
+                            print_system_info, SHUTDOWN_REQUESTED)
+from .background_executor import (start_background_process, is_background_process, 
+                                 setup_background_cleanup_handlers, cleanup_background_process)
+from .worker_functions import compute_dev_samples, dummy_tesselation_func
+from .data_manager import (create_mean_probability_distributions_multiprocess, 
+                          create_or_load_std_data, create_experiment_archive)
 
 
 def run_sample_computation_phase(config: ExperimentConfig, master_logger) -> tuple:

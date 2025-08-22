@@ -135,7 +135,7 @@ BACKGROUND_PID_FILE = "static_experiment_mp.pid"  # PID file to track background
 # Experiment parameters
 N = 20000  # System size 
 steps = N//4  # Time steps
-samples = 5  # Samples per deviation
+samples = 40  # Samples per deviation
 
 # Resource monitoring and management
 print(f"[COMPUTATION SCALE] N={N}, steps={steps}, samples={samples}")

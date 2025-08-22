@@ -14,8 +14,8 @@ import pickle
 import numpy as np
 from typing import Dict, Any, Tuple
 
-from experiment_logging import setup_process_logging
-from system_monitor import log_system_resources, log_resource_usage
+from .experiment_logging import setup_process_logging
+from .system_monitor import log_system_resources, log_resource_usage
 
 
 def dummy_tesselation_func(N):

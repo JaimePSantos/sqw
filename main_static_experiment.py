@@ -12,8 +12,8 @@ Customize the experiment by modifying the parameters in the main() function.
 """
 
 import multiprocessing as mp
-from experiment_config import ExperimentConfig
-from experiment_orchestrator import run_static_experiment
+from static_experiment_modules import ExperimentConfig, run_static_experiment
+import math
 
 
 def main():
@@ -27,8 +27,8 @@ def main():
     config = ExperimentConfig(
         # Core experiment parameters
         N=20000,                    # System size
-        samples=20,                 # Samples per deviation
-        theta=3.14159/3,           # Base theta parameter (pi/3)
+        samples=5,                 # Samples per deviation
+        theta=math.pi/3,           # Base theta parameter (pi/3)
         
         # Deviation values for static noise experiments
         # Format: List of tuples (min_dev, max_dev) or single values

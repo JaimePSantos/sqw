@@ -15,8 +15,8 @@ from datetime import datetime
 from concurrent.futures import ProcessPoolExecutor, as_completed, TimeoutError
 from typing import List, Optional, Dict, Any, Tuple
 
-from experiment_logging import setup_process_logging
-from worker_functions import compute_mean_probability_for_dev, dummy_tesselation_func
+from .experiment_logging import setup_process_logging
+from .worker_functions import compute_mean_probability_for_dev, dummy_tesselation_func
 
 
 def create_or_load_std_data(mean_results: List, devs: List, N: int, steps: int, samples: int, 
