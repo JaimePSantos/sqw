@@ -33,6 +33,22 @@ import numpy as np
 from sqw.states import amp2prob
 from sqw.experiments_expanded_static import running
 
+def format_theta_for_directory(theta):
+    """
+    Format theta value consistently for directory naming to avoid precision issues.
+    
+    Args:
+        theta: theta value in radians
+    
+    Returns:
+        String representation for directory naming (always 6 decimal places)
+    """
+    if theta is None:
+        return None
+    
+    # Always use 6 decimal places for consistent directory naming
+    return f"theta_{theta:.6f}"
+
 def find_experiment_dir_flexible(
     tesselation_func,
     has_noise,
@@ -64,7 +80,7 @@ def find_experiment_dir_flexible(
     unified_base = os.path.join(base_dir, unified_folder)
     
     if theta is not None:
-        theta_folder = f"theta_{theta:.6f}"
+        theta_folder = format_theta_for_directory(theta)
         unified_base = os.path.join(unified_base, theta_folder)
     
     # For unified structure, always include dev value
@@ -88,7 +104,7 @@ def find_experiment_dir_flexible(
         old_base = os.path.join(base_dir, old_folder)
         
         if theta is not None:
-            theta_folder = f"theta_{theta:.6f}"
+            theta_folder = format_theta_for_directory(theta)
             old_base = os.path.join(old_base, theta_folder)
         
         old_path = os.path.join(old_base, f"N_{N}")
@@ -101,7 +117,7 @@ def find_experiment_dir_flexible(
         old_base = os.path.join(base_dir, old_folder)
         
         if theta is not None:
-            theta_folder = f"theta_{theta:.6f}"
+            theta_folder = format_theta_for_directory(theta)
             old_base = os.path.join(old_base, theta_folder)
         
         # Try legacy format first (dev_1.000)
@@ -214,7 +230,7 @@ def get_experiment_dir(
         
         # Add theta parameter folder if provided
         if theta is not None:
-            theta_folder = f"theta_{theta:.6f}"
+            theta_folder = format_theta_for_directory(theta)
             base = os.path.join(base, theta_folder)
         
         # Always include deviation value in path, use 0 for no noise

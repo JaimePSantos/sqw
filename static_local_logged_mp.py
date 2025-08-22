@@ -82,10 +82,10 @@ if hasattr(signal, 'SIGHUP'):
 # ============================================================================
 
 # Plotting switch
-ENABLE_PLOTTING = False  # Set to False to disable plotting
+ENABLE_PLOTTING = True  # Set to False to disable plotting
 USE_LOGLOG_PLOT = False  # Set to True to use log-log scale for plotting
-PLOT_FINAL_PROBDIST = False  # Set to True to plot probability distributions at final time step
-SAVE_FIGURES = False  # Set to False to disable saving figures to files
+PLOT_FINAL_PROBDIST = True  # Set to True to plot probability distributions at final time step
+SAVE_FIGURES = True  # Set to False to disable saving figures to files
 
 # Archive switch
 CREATE_TAR_ARCHIVE = False  # Set to True to create tar archive of experiments_data_samples folder
@@ -95,7 +95,7 @@ EXCLUDE_SAMPLES_FROM_ARCHIVE = True  # Set to True to exclude raw sample files f
 
 # Computation control switches
 CALCULATE_SAMPLES_ONLY = False  # Set to True to only compute and save samples (skip analysis)
-SKIP_SAMPLE_COMPUTATION = True  # Set to True to skip sample computation (analysis only)
+SKIP_SAMPLE_COMPUTATION = False  # Set to True to skip sample computation (analysis only)
 
 # Check for environment variable overrides (from safe_background_launcher.py)
 if os.environ.get('ENABLE_PLOTTING'):
@@ -133,9 +133,9 @@ BACKGROUND_LOG_FILE = "static_experiment_multiprocessing.log"  # Log file for ba
 BACKGROUND_PID_FILE = "static_experiment_mp.pid"  # PID file to track background process
 
 # Experiment parameters
-N = 20000  # System size 
-steps = N//4  # Time steps
-samples = 20  # Samples per deviation
+N = 300  # System size 
+steps = N//3  # Time steps
+samples = 10  # Samples per deviation
 
 # Resource monitoring and management
 print(f"[COMPUTATION SCALE] N={N}, steps={steps}, samples={samples}")
@@ -176,7 +176,12 @@ if os.environ.get('FORCE_N_VALUE'):
         pass
 
 # Quantum walk parameters (for static noise, we only need theta)
-theta = math.pi/3  # Base theta parameter for static noise
+theta = math.pi/2  # Base theta parameter for static noise
+
+print(f"[THETA] Using theta = {theta:.6f} ({theta/math.pi:.3f}*pi)")
+print(f"[THETA WARNING] Different theta values create separate experiment directories!")
+print(f"[THETA WARNING] Directory structure includes theta_{theta:.6f}/ subfolder")
+
 initial_state_kwargs = {"nodes": [N//2]}
 
 # Deviation values for static noise experiments
@@ -190,7 +195,7 @@ devs = [
     (0, 0.2),           # Small noise range
     (0, 0.6),           # Medium noise range  
     (0, 0.8),           # Medium noise range  
-    (0, 1),           # Medium noise range  
+    (0, 0.1),           # Medium noise range  
 ]   
 
 # Multiprocessing configuration - Conservative for cluster stability
@@ -582,12 +587,24 @@ def compute_dev_samples(dev_args):
         logger.info(f"Starting computation for deviation {dev}")
         logger.info(f"Parameters: N={N}, steps={steps}, samples={samples}, theta={theta:.4f}")
         
+        # VALIDATION AND DEBUGGING FOR DEV=0 CASE
+        if isinstance(dev, (tuple, list)) and len(dev) == 2:
+            dev_min, dev_max = dev
+            if dev_min == 0 and dev_max == 0:
+                logger.info(f"[DEV=0 CASE] Perfect deterministic evolution - no noise")
+                logger.info(f"[DEV=0 CASE] theta = {theta:.10f} radians = {theta/math.pi:.6f}*pi")
+                logger.info(f"[DEV=0 CASE] This should produce identical results for same theta regardless of other parameters")
+        elif dev == 0:
+            logger.info(f"[DEV=0 CASE] Legacy format: Perfect deterministic evolution - no noise")
+            logger.info(f"[DEV=0 CASE] theta = {theta:.10f} radians = {theta/math.pi:.6f}*pi")
+        
         # Import required modules (each process needs its own imports)
         # Import the memory-efficient sparse implementation
         from sqw.experiments_sparse import running_streaming_sparse
         from smart_loading_static import get_experiment_dir
         import pickle
         import gc  # For garbage collection
+        import math  # For validation
         
         # Setup experiment directory - handle new deviation format
         if isinstance(dev, (tuple, list)) and len(dev) == 2:
@@ -606,6 +623,15 @@ def compute_dev_samples(dev_args):
         os.makedirs(exp_dir, exist_ok=True)
         
         logger.info(f"Experiment directory: {exp_dir}")
+        
+        # VALIDATION: Check that directory path includes theta correctly
+        from smart_loading_static import format_theta_for_directory
+        expected_theta_folder = format_theta_for_directory(theta)
+        if expected_theta_folder and expected_theta_folder not in exp_dir:
+            logger.warning(f"[DIRECTORY WARNING] Expected theta folder '{expected_theta_folder}' not found in path!")
+            logger.warning(f"[DIRECTORY WARNING] This might cause data mixing between different theta values!")
+        else:
+            logger.info(f"[DIRECTORY OK] Theta folder '{expected_theta_folder}' correctly included in path")
         
         dev_start_time = time.time()
         dev_computed_samples = 0
@@ -664,6 +690,19 @@ def compute_dev_samples(dev_args):
                 
                 # Run the quantum walk experiment using sparse streaming approach
                 logger.info(f"  Running sparse streaming quantum walk: N={N}, steps={steps}, dev={dev}")
+                
+                # VALIDATION: Log deviation range details
+                if isinstance(dev, (tuple, list)) and len(dev) == 2:
+                    dev_min, dev_max = dev
+                    logger.info(f"  [DEV VALIDATION] Deviation range: min={dev_min:.6f}, max={dev_max:.6f}")
+                    if dev_min == 0 and dev_max == 0:
+                        logger.info(f"  [DEV VALIDATION] ZERO NOISE CASE - should produce identical results for same theta")
+                        logger.info(f"  [DEV VALIDATION] All red edges will get theta + 0 = {theta:.10f}")
+                        logger.info(f"  [DEV VALIDATION] All blue edges will get theta - 0 = {theta:.10f}")
+                else:
+                    logger.info(f"  [DEV VALIDATION] Legacy deviation value: {dev:.6f}")
+                    if dev == 0:
+                        logger.info(f"  [DEV VALIDATION] ZERO NOISE CASE - should produce identical results for same theta")
                 
                 final_state = running_streaming_sparse(
                     N, theta, steps,
@@ -2196,11 +2235,11 @@ def run_static_experiment():
                 if USE_LOGLOG_PLOT:
                     plt.title('Standard Deviation vs Time (Log-Log Scale) for Different Static Noise Deviations', fontsize=14)
                     plt.grid(True, alpha=0.3, which="both", ls="-")  # Grid for both major and minor ticks
-                    plot_filename = "static_noise_std_vs_time_loglog.png"
+                    plot_filename = f"static_noise_std_vs_time_loglog_N{N}_theta{theta:.4f}_steps{steps}_samples{samples}.png"
                 else:
                     plt.title('Standard Deviation vs Time for Different Static Noise Deviations', fontsize=14)
                     plt.grid(True, alpha=0.3)
-                    plot_filename = "static_noise_std_vs_time.png"
+                    plot_filename = f"static_noise_std_vs_time_N{N}_theta{theta:.4f}_steps{steps}_samples{samples}.png"
                 
                 plt.legend(fontsize=10)
                 plt.tight_layout()
@@ -2271,7 +2310,7 @@ def run_static_experiment():
                 plt.tight_layout()
                 
                 # Save the plot (if enabled)
-                probdist_filename = "static_noise_final_probdist_log.png"
+                probdist_filename = f"static_noise_final_probdist_log_N{N}_theta{theta:.4f}_steps{steps}_samples{samples}.png"
                 if SAVE_FIGURES:
                     plt.savefig(probdist_filename, dpi=300, bbox_inches='tight')
                     print(f"[OK] Probability distribution plot saved as '{probdist_filename}'")
@@ -2355,19 +2394,35 @@ def run_static_experiment():
     
     print("\n=== Static Noise Details ===")
     print("Static noise model:")
-    print(f"- dev=0: Perfect static evolution with theta={theta:.3f} (no noise)")
+    print(f"- dev=0: Perfect static evolution with theta={theta:.6f} ({theta/math.pi:.4f}*pi) radians (no noise)")
     print("- dev>0: Random deviation applied to Hamiltonian edges with range 'dev'")
     print("- Each sample generates different random noise for edge parameters")
     print("- Mean probability distributions average over all samples")
     print("- Tessellations are built-in (alpha and beta patterns)")
     print("- MULTIPROCESSING: Each deviation value runs in separate process")
+    print(f"- IMPORTANT: Different theta values create separate experiment directories!")
+    try:
+        from smart_loading_static import format_theta_for_directory
+        theta_dir = format_theta_for_directory(theta)
+        print(f"- Current theta directory suffix: {theta_dir}")
+    except ImportError:
+        print(f"- Current theta directory suffix: theta_{theta:.6f}")
+    print("- If you change theta, results will be stored in different directories")
+    
+    print("\n=== Theta Configuration ===")
+    print("To use different theta values, edit the theta variable in the script:")
+    print("  theta = math.pi/3    # 60 degrees")
+    print("  theta = math.pi/4    # 45 degrees")
+    print("  theta = math.pi/6    # 30 degrees")
+    print("  theta = math.pi/2    # 90 degrees (current default)")
+    print(f"  Currently using: theta = {theta:.10f} radians = {theta/math.pi:.6f}*pi")
     
     print("\n=== Plotting Features ===")
     print(f"- Plotting enabled: {ENABLE_PLOTTING}")
     print(f"- Save figures to files: {SAVE_FIGURES}")
     if ENABLE_PLOTTING:
         plot_type = "Log-log scale" if USE_LOGLOG_PLOT else "Linear scale"
-        plot_filename = "static_noise_std_vs_time_loglog_N{N}_samples{samples}.png" if USE_LOGLOG_PLOT else "static_noise_std_vs_time.png"
+        plot_filename = f"static_noise_std_vs_time_loglog_N{N}_theta{theta:.4f}_steps{steps}_samples{samples}.png" if USE_LOGLOG_PLOT else f"static_noise_std_vs_time_N{N}_theta{theta:.4f}_steps{steps}_samples{samples}.png"
         print(f"- Standard deviation plot type: {plot_type}")
         if SAVE_FIGURES:
             print(f"- Standard deviation plot saved as: {plot_filename}")
@@ -2377,7 +2432,7 @@ def run_static_experiment():
         print(f"- Final probability distribution plot enabled: {PLOT_FINAL_PROBDIST}")
         if PLOT_FINAL_PROBDIST:
             if SAVE_FIGURES:
-                print("- Final probability distribution plot saved as: static_noise_final_probdist_log.png")
+                print(f"- Final probability distribution plot saved as: static_noise_final_probdist_log_N{N}_theta{theta:.4f}_steps{steps}_samples{samples}.png")
             print("- Shows probability distributions at the final time step for all deviations")
             print("- Uses log scale for y-axis and focuses on position range -150 to +150")
     
