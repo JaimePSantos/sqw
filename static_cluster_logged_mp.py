@@ -579,6 +579,11 @@ def compute_dev_samples(dev_args):
     """Worker function to compute samples for a single deviation value in a separate process"""
     dev, process_id, N, steps, samples, theta, initial_state_kwargs = dev_args
     
+    # Import required modules first (each process needs its own imports)
+    import math
+    import pickle
+    import gc  # For garbage collection
+    
     # Setup logging for this process - need to format dev for logging
     dev_str = f"{dev}" if isinstance(dev, (int, float)) else f"{dev[0]}_{dev[1]}" if isinstance(dev, (tuple, list)) else str(dev)
     logger, log_file = setup_process_logging(dev_str, process_id)
@@ -598,13 +603,9 @@ def compute_dev_samples(dev_args):
             logger.info(f"[DEV=0 CASE] Legacy format: Perfect deterministic evolution - no noise")
             logger.info(f"[DEV=0 CASE] theta = {theta:.10f} radians = {theta/math.pi:.6f}*pi")
         
-        # Import required modules (each process needs its own imports)
         # Import the memory-efficient sparse implementation
         from sqw.experiments_sparse import running_streaming_sparse
         from smart_loading_static import get_experiment_dir
-        import pickle
-        import gc  # For garbage collection
-        import math  # For validation
         
         # Setup experiment directory - handle new deviation format
         if isinstance(dev, (tuple, list)) and len(dev) == 2:
@@ -940,6 +941,10 @@ def create_experiment_archive(N, samples, use_multiprocess=True, max_archive_pro
             elif level == "error":
                 logger.error(message.replace("[ERROR] ", "").replace("[ARCHIVE] ", ""))
     
+    # Log the archiving stage for crash-safe logging
+    if logger:
+        logger.info("=== PROCESS DEV ARCHIVING STAGE - Creating experiment data archive ===")
+    
     try:
         log_and_print("\n[ARCHIVE] Creating tar archive of experiment data...")
         
@@ -1136,14 +1141,21 @@ def create_experiment_archive(N, samples, use_multiprocess=True, max_archive_pro
             log_and_print(f"[OK] Included: samples, probability distributions, and standard deviation data")
             log_and_print(f"[OK] Archive location: {os.path.abspath(final_archive_name)}")
             
+            # Log successful completion of archiving stage
+            if logger:
+                logger.info(f"=== PROCESS DEV ARCHIVING STAGE COMPLETED - Archive: {final_archive_name} ({size_mb:.1f} MB) ===")
+            
             return final_archive_name
         else:
             log_and_print("[ERROR] Final archive was not created", "error")
+            if logger:
+                logger.error("=== PROCESS DEV ARCHIVING STAGE FAILED - Final archive was not created ===")
             return None
         
     except Exception as e:
         log_and_print(f"[ERROR] Failed to create archive: {e}", "error")
         if logger:
+            logger.error(f"=== PROCESS DEV ARCHIVING STAGE FAILED - Exception: {e} ===")
             logger.error(traceback.format_exc())
         else:
             traceback.print_exc()
@@ -1400,7 +1412,7 @@ def create_mean_probability_distributions_multiprocess(
     
     return process_results
 
-# @crash_safe_log(log_file_prefix="static_noise_experiment", heartbeat_interval=30.0)
+@crash_safe_log(log_file_prefix="static_noise_experiment", heartbeat_interval=30.0)
 def run_static_experiment():
     """Run the static noise quantum walk experiment with configurable execution modes."""
     
