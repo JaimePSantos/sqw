@@ -195,7 +195,7 @@ devs = [
     (0, 0.2),           # Small noise range
     (0, 0.6),           # Medium noise range  
     (0, 0.8),           # Medium noise range  
-    (0, 0.1),           # Medium noise range  
+    (0, 1),           # Medium noise range  
 ]   
 
 # Multiprocessing configuration - Conservative for cluster stability
