@@ -287,6 +287,9 @@ def setup_process_logging(dev_value, process_id):
     """Setup logging for individual processes"""
     os.makedirs(PROCESS_LOG_DIR, exist_ok=True)
     
+    # Clear any existing loggers to prevent conflicts
+    logging.getLogger().handlers.clear()
+    
     # Format dev_value for filename (handle both old and new formats)
     if isinstance(dev_value, str):
         dev_str = dev_value  # Already formatted as string
@@ -298,10 +301,13 @@ def setup_process_logging(dev_value, process_id):
         # Single value format
         dev_str = f"{float(dev_value):.3f}"
     
-    log_filename = os.path.join(PROCESS_LOG_DIR, f"process_dev_{dev_str}_pid_{process_id}.log")
+    # Create timestamped filename
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    log_filename = os.path.join(PROCESS_LOG_DIR, f"process_dev_{dev_str}_pid_{process_id}_{timestamp}.log")
     
     # Create logger for this process
-    logger = logging.getLogger(f"dev_{dev_str}")
+    timestamp_suffix = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]  # Include milliseconds
+    logger = logging.getLogger(f"dev_{dev_str}_{timestamp_suffix}")
     logger.setLevel(logging.INFO)
     
     # Remove any existing handlers
@@ -329,10 +335,16 @@ def setup_process_logging(dev_value, process_id):
 
 def setup_master_logging():
     """Setup logging for the master process"""
-    master_log_filename = "static_experiment_multiprocess.log"
+    # Clear any existing loggers to prevent conflicts
+    logging.getLogger().handlers.clear()
+    
+    # Create timestamped filename
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    master_log_filename = f"static_experiment_multiprocess_{timestamp}.log"
     
     # Create master logger
-    master_logger = logging.getLogger("master")
+    timestamp_suffix = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]  # Include milliseconds  
+    master_logger = logging.getLogger(f"master_{timestamp_suffix}")
     master_logger.setLevel(logging.INFO)
     
     # Remove any existing handlers
@@ -1251,7 +1263,9 @@ def create_mean_probability_distributions_multiprocess(
         else:
             dev_str = f"{float(dev):.3f}"
         
-        log_file = os.path.join(PROCESS_LOG_DIR, f"process_dev_meanprob_{dev_str}_pid_{process_id}.log")
+        # Create timestamped filename
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        log_file = os.path.join(PROCESS_LOG_DIR, f"process_dev_meanprob_{dev_str}_pid_{process_id}_{timestamp}.log")
         process_info[dev] = {
             "process_id": process_id,
             "log_file": log_file,
