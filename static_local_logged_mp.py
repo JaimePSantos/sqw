@@ -82,13 +82,13 @@ if hasattr(signal, 'SIGHUP'):
 # ============================================================================
 
 # Plotting switch
-ENABLE_PLOTTING = True  # Set to False to disable plotting
+ENABLE_PLOTTING = False  # Set to False to disable plotting
 USE_LOGLOG_PLOT = False  # Set to True to use log-log scale for plotting
-PLOT_FINAL_PROBDIST = True  # Set to True to plot probability distributions at final time step
-SAVE_FIGURES = True  # Set to False to disable saving figures to files
+PLOT_FINAL_PROBDIST = False  # Set to True to plot probability distributions at final time step
+SAVE_FIGURES = False  # Set to False to disable saving figures to files
 
 # Archive switch
-CREATE_TAR_ARCHIVE = False  # Set to True to create tar archive of experiments_data_samples folder
+CREATE_TAR_ARCHIVE = True  # Set to True to create tar archive of experiments_data_samples folder
 USE_MULTIPROCESS_ARCHIVING = True  # Set to True to use multiprocess archiving for faster compression
 MAX_ARCHIVE_PROCESSES = None  # Max processes for archiving (None = auto-detect)
 EXCLUDE_SAMPLES_FROM_ARCHIVE = True  # Set to True to exclude raw sample files from archive (keeps only probDist and std)
@@ -133,9 +133,9 @@ BACKGROUND_LOG_FILE = "static_experiment_multiprocessing.log"  # Log file for ba
 BACKGROUND_PID_FILE = "static_experiment_mp.pid"  # PID file to track background process
 
 # Experiment parameters
-N = 300  # System size 
-steps = N//3  # Time steps
-samples = 10  # Samples per deviation
+N = 20000  # System size 
+steps = N//4  # Time steps
+samples = 40  # Samples per deviation
 
 # Resource monitoring and management
 print(f"[COMPUTATION SCALE] N={N}, steps={steps}, samples={samples}")
@@ -176,7 +176,7 @@ if os.environ.get('FORCE_N_VALUE'):
         pass
 
 # Quantum walk parameters (for static noise, we only need theta)
-theta = math.pi/2  # Base theta parameter for static noise
+theta = math.pi/3  # Base theta parameter for static noise
 
 print(f"[THETA] Using theta = {theta:.6f} ({theta/math.pi:.3f}*pi)")
 print(f"[THETA WARNING] Different theta values create separate experiment directories!")
@@ -287,6 +287,9 @@ def setup_process_logging(dev_value, process_id):
     """Setup logging for individual processes"""
     os.makedirs(PROCESS_LOG_DIR, exist_ok=True)
     
+    # Clear any existing loggers to prevent conflicts
+    logging.getLogger().handlers.clear()
+    
     # Format dev_value for filename (handle both old and new formats)
     if isinstance(dev_value, str):
         dev_str = dev_value  # Already formatted as string
@@ -298,10 +301,11 @@ def setup_process_logging(dev_value, process_id):
         # Single value format
         dev_str = f"{float(dev_value):.3f}"
     
-    log_filename = os.path.join(PROCESS_LOG_DIR, f"process_dev_{dev_str}_pid_{process_id}.log")
+    # Create simple filename without timestamp
+    log_filename = os.path.join(PROCESS_LOG_DIR, f"process_dev_{dev_str}_samples.log")
     
     # Create logger for this process
-    logger = logging.getLogger(f"dev_{dev_str}")
+    logger = logging.getLogger(f"dev_{dev_str}_samples")
     logger.setLevel(logging.INFO)
     
     # Remove any existing handlers
@@ -316,10 +320,12 @@ def setup_process_logging(dev_value, process_id):
     console_handler = logging.StreamHandler()
     console_handler.setLevel(logging.INFO)
     
-    # Create formatter
-    formatter = logging.Formatter('[%(asctime)s] [PID:%(process)d] [DEV:%(name)s] %(levelname)s: %(message)s')
-    file_handler.setFormatter(formatter)
-    console_handler.setFormatter(formatter)
+    # Create formatters - detailed for file, clean for console  
+    file_formatter = logging.Formatter('[%(asctime)s] [PID:%(process)d] [DEV:%(name)s] %(levelname)s: %(message)s')
+    console_formatter = logging.Formatter('[DEV:%(name)s] %(message)s')  # Cleaner console output
+    
+    file_handler.setFormatter(file_formatter)
+    console_handler.setFormatter(console_formatter)
     
     # Add handlers to logger
     logger.addHandler(file_handler)
@@ -329,7 +335,11 @@ def setup_process_logging(dev_value, process_id):
 
 def setup_master_logging():
     """Setup logging for the master process"""
-    master_log_filename = "static_experiment_multiprocess.log"
+    # Clear any existing loggers to prevent conflicts
+    logging.getLogger().handlers.clear()
+    
+    # Create simple filename without timestamp  
+    master_log_filename = f"master_process.log"
     
     # Create master logger
     master_logger = logging.getLogger("master")
@@ -343,14 +353,16 @@ def setup_master_logging():
     file_handler = logging.FileHandler(master_log_filename, mode='w')
     file_handler.setLevel(logging.INFO)
     
-    # Create console handler
+    # Create console handler with higher verbosity for foreground-like output
     console_handler = logging.StreamHandler()
     console_handler.setLevel(logging.INFO)
     
-    # Create formatter
-    formatter = logging.Formatter('[%(asctime)s] [MASTER] %(levelname)s: %(message)s')
-    file_handler.setFormatter(formatter)
-    console_handler.setFormatter(formatter)
+    # Create formatters - detailed for file, clean for console
+    file_formatter = logging.Formatter('[%(asctime)s] [MASTER] %(levelname)s: %(message)s')
+    console_formatter = logging.Formatter('%(message)s')  # Clean console output like foreground
+    
+    file_handler.setFormatter(file_formatter)
+    console_handler.setFormatter(console_formatter)
     
     # Add handlers to logger
     master_logger.addHandler(file_handler)
@@ -412,7 +424,36 @@ def compute_mean_probability_for_dev(dev_args):
     
     # Setup logging for this process
     dev_str = f"{dev}" if isinstance(dev, (int, float)) else f"{dev[0]}_{dev[1]}" if isinstance(dev, (tuple, list)) else str(dev)
-    logger, log_file = setup_process_logging(f"meanprob_{dev_str}", process_id)
+    
+    # Create meanprob logger
+    os.makedirs(PROCESS_LOG_DIR, exist_ok=True)
+    log_file = os.path.join(PROCESS_LOG_DIR, f"process_dev_{dev_str}_meanprob.log")
+    
+    logger = logging.getLogger(f"dev_{dev_str}_meanprob")
+    logger.setLevel(logging.INFO)
+    
+    # Remove any existing handlers
+    for handler in logger.handlers[:]:
+        logger.removeHandler(handler)
+    
+    # Create file handler
+    file_handler = logging.FileHandler(log_file, mode='w')
+    file_handler.setLevel(logging.INFO)
+    
+    # Create console handler
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(logging.INFO)
+    
+    # Create formatters
+    file_formatter = logging.Formatter('[%(asctime)s] [PID:%(process)d] [DEV:%(name)s] %(levelname)s: %(message)s')
+    console_formatter = logging.Formatter('[DEV:%(name)s] %(message)s')
+    
+    file_handler.setFormatter(file_formatter)
+    console_handler.setFormatter(console_formatter)
+    
+    # Add handlers to logger
+    logger.addHandler(file_handler)
+    logger.addHandler(console_handler)
     
     try:
         logger.info(f"Starting mean probability computation for deviation {dev}")
@@ -579,6 +620,11 @@ def compute_dev_samples(dev_args):
     """Worker function to compute samples for a single deviation value in a separate process"""
     dev, process_id, N, steps, samples, theta, initial_state_kwargs = dev_args
     
+    # Import required modules first (each process needs its own imports)
+    import math
+    import pickle
+    import gc  # For garbage collection
+    
     # Setup logging for this process - need to format dev for logging
     dev_str = f"{dev}" if isinstance(dev, (int, float)) else f"{dev[0]}_{dev[1]}" if isinstance(dev, (tuple, list)) else str(dev)
     logger, log_file = setup_process_logging(dev_str, process_id)
@@ -598,13 +644,9 @@ def compute_dev_samples(dev_args):
             logger.info(f"[DEV=0 CASE] Legacy format: Perfect deterministic evolution - no noise")
             logger.info(f"[DEV=0 CASE] theta = {theta:.10f} radians = {theta/math.pi:.6f}*pi")
         
-        # Import required modules (each process needs its own imports)
         # Import the memory-efficient sparse implementation
         from sqw.experiments_sparse import running_streaming_sparse
         from smart_loading_static import get_experiment_dir
-        import pickle
-        import gc  # For garbage collection
-        import math  # For validation
         
         # Setup experiment directory - handle new deviation format
         if isinstance(dev, (tuple, list)) and len(dev) == 2:
@@ -931,14 +973,50 @@ def create_experiment_archive(N, samples, use_multiprocess=True, max_archive_pro
         logger: Optional logger for logging archive operations
     """
     def log_and_print(message, level="info"):
-        """Helper function to log messages (cluster-safe, no print)"""
+        """Helper function to log messages with clean console output"""
+        # Create archiving logger if it doesn't exist
+        archive_logger = logging.getLogger("archiving")
+        if not archive_logger.handlers:
+            archive_logger.setLevel(logging.INFO)
+            
+            # File handler for detailed logs
+            if not os.path.exists("process_logs"):
+                os.makedirs("process_logs")
+            file_handler = logging.FileHandler("process_logs/archiving_process.log", mode='w')
+            file_handler.setLevel(logging.INFO)
+            file_formatter = logging.Formatter('[%(asctime)s] [ARCHIVE] %(levelname)s: %(message)s')
+            file_handler.setFormatter(file_formatter)
+            archive_logger.addHandler(file_handler)
+            
+            # Console handler for clean output
+            console_handler = logging.StreamHandler()
+            console_handler.setLevel(logging.INFO)
+            console_formatter = logging.Formatter('%(message)s')
+            console_handler.setFormatter(console_formatter)
+            archive_logger.addHandler(console_handler)
+        
+        # Clean the message for display
+        clean_message = message.replace("[ARCHIVE] ", "").replace("[WARNING] ", "").replace("[OK] ", "").replace("[ERROR] ", "").replace("[DEBUG] ", "").replace("[INFO] ", "")
+        
+        if level == "info":
+            archive_logger.info(clean_message)
+        elif level == "warning":
+            archive_logger.warning(clean_message)
+        elif level == "error":
+            archive_logger.error(clean_message)
+        
+        # Also log to master logger if provided
         if logger:
             if level == "info":
-                logger.info(message.replace("[ARCHIVE] ", "").replace("[WARNING] ", "").replace("[OK] ", "").replace("[ERROR] ", "").replace("[DEBUG] ", "").replace("[INFO] ", ""))
+                logger.info(clean_message)
             elif level == "warning":
-                logger.warning(message.replace("[WARNING] ", "").replace("[ARCHIVE] ", ""))
+                logger.warning(clean_message)
             elif level == "error":
-                logger.error(message.replace("[ERROR] ", "").replace("[ARCHIVE] ", ""))
+                logger.error(clean_message)
+    
+    # Log the archiving stage for crash-safe logging
+    if logger:
+        logger.info("=== PROCESS DEV ARCHIVING STAGE - Creating experiment data archive ===")
     
     try:
         log_and_print("\n[ARCHIVE] Creating tar archive of experiment data...")
@@ -1136,14 +1214,21 @@ def create_experiment_archive(N, samples, use_multiprocess=True, max_archive_pro
             log_and_print(f"[OK] Included: samples, probability distributions, and standard deviation data")
             log_and_print(f"[OK] Archive location: {os.path.abspath(final_archive_name)}")
             
+            # Log successful completion of archiving stage
+            if logger:
+                logger.info(f"=== PROCESS DEV ARCHIVING STAGE COMPLETED - Archive: {final_archive_name} ({size_mb:.1f} MB) ===")
+            
             return final_archive_name
         else:
             log_and_print("[ERROR] Final archive was not created", "error")
+            if logger:
+                logger.error("=== PROCESS DEV ARCHIVING STAGE FAILED - Final archive was not created ===")
             return None
         
     except Exception as e:
         log_and_print(f"[ERROR] Failed to create archive: {e}", "error")
         if logger:
+            logger.error(f"=== PROCESS DEV ARCHIVING STAGE FAILED - Exception: {e} ===")
             logger.error(traceback.format_exc())
         else:
             traceback.print_exc()
@@ -1239,7 +1324,8 @@ def create_mean_probability_distributions_multiprocess(
         else:
             dev_str = f"{float(dev):.3f}"
         
-        log_file = os.path.join(PROCESS_LOG_DIR, f"process_dev_meanprob_{dev_str}_pid_{process_id}.log")
+        # Create simple filename without timestamp
+        log_file = os.path.join(PROCESS_LOG_DIR, f"process_dev_{dev_str}_meanprob.log")
         process_info[dev] = {
             "process_id": process_id,
             "log_file": log_file,
@@ -1400,7 +1486,7 @@ def create_mean_probability_distributions_multiprocess(
     
     return process_results
 
-# @crash_safe_log(log_file_prefix="static_noise_experiment", heartbeat_interval=30.0)
+@crash_safe_log(log_file_prefix="static_noise_experiment", heartbeat_interval=30.0)
 def run_static_experiment():
     """Run the static noise quantum walk experiment with configurable execution modes."""
     

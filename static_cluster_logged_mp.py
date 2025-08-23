@@ -95,7 +95,7 @@ EXCLUDE_SAMPLES_FROM_ARCHIVE = True  # Set to True to exclude raw sample files f
 
 # Computation control switches
 CALCULATE_SAMPLES_ONLY = False  # Set to True to only compute and save samples (skip analysis)
-SKIP_SAMPLE_COMPUTATION = False  # Set to True to skip sample computation (analysis only)
+SKIP_SAMPLE_COMPUTATION = True  # Set to True to skip sample computation (analysis only)
 
 # Check for environment variable overrides (from safe_background_launcher.py)
 if os.environ.get('ENABLE_PLOTTING'):
