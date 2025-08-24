@@ -1,0 +1,26 @@
+[2025-08-23 19:48:29,147] [MASTER] INFO: ============================================================
+[2025-08-23 19:48:29,148] [MASTER] INFO: MULTIPROCESS STATIC NOISE EXPERIMENT STARTED
+[2025-08-23 19:48:29,148] [MASTER] INFO: ============================================================
+[2025-08-23 19:48:29,148] [MASTER] INFO: Parameters: N=20000, steps=5000, samples=40
+[2025-08-23 19:48:29,148] [MASTER] INFO: Deviations: [(0, 0), (0, 0.2), (0, 0.6), (0, 0.8), (0, 1)]
+[2025-08-23 19:48:29,148] [MASTER] INFO: Max processes: 5
+[2025-08-23 19:48:29,148] [MASTER] INFO: Master log file: master_process.log
+[2025-08-23 19:48:29,148] [MASTER] INFO: SKIPPING SAMPLE COMPUTATION
+[2025-08-23 19:48:29,148] [MASTER] INFO: ========================================
+[2025-08-23 19:48:29,148] [MASTER] INFO: ANALYSIS PHASE - MEAN PROBABILITY DISTRIBUTIONS
+[2025-08-23 19:48:29,148] [MASTER] INFO: ========================================
+[2025-08-23 19:48:29,163] [MASTER] INFO: Creating mean probability distributions from samples
+[2025-08-23 19:48:29,163] [MASTER] INFO: Using multiprocess mean probability calculation with 5 processes
+[2025-08-23 19:48:29,163] [MASTER] INFO: 
+Creating mean probability distributions...
+[2025-08-23 19:48:29,163] [MASTER] INFO: Using multiprocess mode with 5 processes for 5 deviations
+[2025-08-23 19:48:29,205] [MASTER] INFO: Process launched for dev=max0.000_min0.000
+[2025-08-23 19:48:29,254] [MASTER] INFO: Process launched for dev=max0.000_min0.000
+[2025-08-23 19:48:29,292] [MASTER] INFO: Process launched for dev=max0.000_min0.000
+[2025-08-23 19:48:29,337] [MASTER] INFO: Process launched for dev=max0.000_min0.000
+[2025-08-23 19:48:29,409] [MASTER] INFO: Process launched for dev=max0.000_min0.000
+[2025-08-23 19:48:29,409] [MASTER] INFO: Waiting for 5 processes with 66.7h timeout...
+[2025-08-23 19:48:30,410] [MASTER] INFO: [MEAN_PROB] Memory: 2.7% used (60.8GB free), CPU: 41.7%
+[2025-08-23 22:40:54,811] [MASTER] INFO: [MEAN_PROB] Progress: 1/5 (20.0%) - Elapsed: 172.4m - ETA: 11.5h
+[2025-08-23 22:40:55,812] [MASTER] INFO: [MEAN_PROB] Memory: 3.0% used (60.6GB free), CPU: 0.2%
+[2025-08-23 22:40:55,812] [MASTER] ERROR: [1/5] [FAILED] dev=max0.000_min0.000: FAILED - Error in mean probability process for dev max0.000_min0.000: Ran out of input
