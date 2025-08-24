@@ -66,16 +66,56 @@ SHUTDOWN_REQUESTED = False
 def signal_handler(signum, frame):
     """Handle shutdown signals gracefully"""
     global SHUTDOWN_REQUESTED
+    
+    # SIGHUP should NOT terminate the process - ignore it for background execution
+    if signum == signal.SIGHUP:
+        print(f"\n[SIGNAL] Received SIGHUP (terminal disconnect) - continuing in background...")
+        return  # Don't shutdown on SIGHUP
+    
     SHUTDOWN_REQUESTED = True
     print(f"\n[SHUTDOWN] Received signal {signum}. Initiating graceful shutdown...")
     print("[SHUTDOWN] Waiting for current processes to complete...")
     print("[SHUTDOWN] This may take a few minutes. Do not force-kill unless necessary.")
 
+def ignore_sighup_handler(signum, frame):
+    """Ignore SIGHUP signals to prevent termination when terminal disconnects"""
+    print(f"\n[SIGNAL] Received SIGHUP (terminal disconnect) - continuing in background...")
+
+def setup_background_process():
+    """Setup process to run in background and survive terminal disconnection"""
+    import os
+    import sys
+    
+    # Redirect stdout and stderr to log files to prevent broken pipe errors
+    if not os.environ.get('KEEP_TERMINAL_OUTPUT'):
+        # Create background log file
+        bg_log = open('background_execution.log', 'a')
+        
+        # Redirect stdout and stderr
+        sys.stdout = bg_log
+        sys.stderr = bg_log
+        
+        print(f"[BACKGROUND] Process detached at {datetime.now()}")
+        print(f"[BACKGROUND] PID: {os.getpid()}")
+        print(f"[BACKGROUND] Logs redirected to background_execution.log")
+    
+    # Create a new session to detach from terminal
+    try:
+        os.setsid()
+        print(f"[BACKGROUND] New session created - process detached from terminal")
+    except:
+        # setsid may fail if already a session leader, that's okay
+        pass
+    
+    # Ignore SIGPIPE to prevent crashes when terminal disconnects
+    if hasattr(signal, 'SIGPIPE'):
+        signal.signal(signal.SIGPIPE, signal.SIG_IGN)
+
 # Register signal handlers
 signal.signal(signal.SIGINT, signal_handler)   # Ctrl+C
 signal.signal(signal.SIGTERM, signal_handler)  # Termination signal
 if hasattr(signal, 'SIGHUP'):
-    signal.signal(signal.SIGHUP, signal_handler)  # Hangup signal (Unix)
+    signal.signal(signal.SIGHUP, ignore_sighup_handler)  # Ignore hangup signal (Unix terminal disconnect)
 
 # ============================================================================
 # CONFIGURATION PARAMETERS
@@ -95,7 +135,7 @@ EXCLUDE_SAMPLES_FROM_ARCHIVE = True  # Set to True to exclude raw sample files f
 
 # Computation control switches
 CALCULATE_SAMPLES_ONLY = False  # Set to True to only compute and save samples (skip analysis)
-SKIP_SAMPLE_COMPUTATION = True  # Set to True to skip sample computation (analysis only)
+SKIP_SAMPLE_COMPUTATION = False  # Set to True to skip sample computation (analysis only)
 
 # Check for environment variable overrides (from safe_background_launcher.py)
 if os.environ.get('ENABLE_PLOTTING'):
@@ -135,7 +175,7 @@ BACKGROUND_PID_FILE = "static_experiment_mp.pid"  # PID file to track background
 # Experiment parameters
 N = 20000  # System size 
 steps = N//4  # Time steps
-samples = 40  # Samples per deviation
+samples = 20  # Samples per deviation
 
 # Resource monitoring and management
 print(f"[COMPUTATION SCALE] N={N}, steps={steps}, samples={samples}")
@@ -176,7 +216,7 @@ if os.environ.get('FORCE_N_VALUE'):
         pass
 
 # Quantum walk parameters (for static noise, we only need theta)
-theta = math.pi/3  # Base theta parameter for static noise
+theta = math.pi/2  # Base theta parameter for static noise
 
 print(f"[THETA] Using theta = {theta:.6f} ({theta/math.pi:.3f}*pi)")
 print(f"[THETA WARNING] Different theta values create separate experiment directories!")
@@ -2562,6 +2602,12 @@ def run_static_experiment():
     }
 
 if __name__ == "__main__":
+    # Check if running in background (via Ctrl+Z, bg sequence)
+    import os
+    if os.getppid() == 1 or os.environ.get('BACKGROUND_MODE'):
+        # Process was backgrounded or orphaned, set up background execution
+        setup_background_process()
+    
     # Multiprocessing protection for Windows
     mp.set_start_method('spawn', force=True)
     
