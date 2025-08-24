@@ -898,19 +898,12 @@ def create_or_load_std_data(mean_results, devs, N, steps, samples, tesselation_f
     domain = np.arange(N) - N//2  # Center domain around 0
     
     for i, dev in enumerate(devs):
-        # Handle new deviation format for has_noise check
+        # Handle deviation format for has_noise check
         if isinstance(dev, (tuple, list)) and len(dev) == 2:
-            # New format: (max_dev, min_factor) or legacy (min, max)
-            if dev[1] <= 1.0 and dev[1] >= 0.0:
-                # New format
-                max_dev, min_factor = dev
-                has_noise = max_dev > 0
-                dev_str = f"max{max_dev:.3f}_min{max_dev * min_factor:.3f}"
-            else:
-                # Legacy format
-                min_val, max_val = dev
-                has_noise = max_val > 0
-                dev_str = f"min{min_val:.3f}_max{max_val:.3f}"
+            # Tuple format: always interpret as (min_val, max_val)
+            min_val, max_val = dev
+            has_noise = max_val > 0
+            dev_str = f"min{min_val:.3f}_max{max_val:.3f}"
         else:
             # Single value format
             has_noise = dev > 0
@@ -1354,13 +1347,9 @@ def create_mean_probability_distributions_multiprocess(
     for i, (dev, process_id, *_) in enumerate(process_args):
         # Format dev for filename
         if isinstance(dev, (tuple, list)) and len(dev) == 2:
-            if dev[1] <= 1.0 and dev[1] >= 0.0:
-                max_dev, min_factor = dev
-                min_dev = max_dev * min_factor
-                dev_str = f"max{max_dev:.3f}_min{min_dev:.3f}"
-            else:
-                min_val, max_val = dev
-                dev_str = f"min{min_val:.3f}_max{max_val:.3f}"
+            # Tuple format: always interpret as (min_val, max_val)
+            min_val, max_val = dev
+            dev_str = f"min{min_val:.3f}_max{max_val:.3f}"
         else:
             dev_str = f"{float(dev):.3f}"
         
@@ -1845,14 +1834,9 @@ def run_static_experiment():
         for i, (dev, process_id, *_) in enumerate(process_args):
             # Format dev for filename (handle both old and new formats)
             if isinstance(dev, (tuple, list)) and len(dev) == 2:
-                # New format: (max_dev, min_factor) or legacy (min, max)
-                if dev[1] <= 1.0 and dev[1] >= 0.0:
-                    max_dev, min_factor = dev
-                    min_dev = max_dev * min_factor
-                    dev_str = f"max{max_dev:.3f}_min{min_dev:.3f}"
-                else:
-                    min_val, max_val = dev
-                    dev_str = f"min{min_val:.3f}_max{max_val:.3f}"
+                # Tuple format: always interpret as (min_val, max_val)
+                min_val, max_val = dev
+                dev_str = f"min{min_val:.3f}_max{max_val:.3f}"
             else:
                 # Single value format
                 dev_str = f"{float(dev):.3f}"
@@ -2265,14 +2249,9 @@ def run_static_experiment():
             if std_values and len(std_values) > 0:
                 # Format dev for display
                 if isinstance(dev, tuple) and len(dev) == 2:
-                    if dev[1] <= 1.0 and dev[1] >= 0.0:
-                        # New format: (max_dev, min_factor)
-                        max_dev, min_factor = dev
-                        dev_label = f"max{max_dev:.3f}_min{max_dev*min_factor:.3f}"
-                    else:
-                        # Legacy format: (min, max)
-                        min_val, max_val = dev
-                        dev_label = f"min{min_val:.3f}_max{max_val:.3f}"
+                    # Tuple format: always interpret as (min_val, max_val)
+                    min_val, max_val = dev
+                    dev_label = f"min{min_val:.3f}_max{max_val:.3f}"
                 else:
                     # Single value format
                     dev_label = f"{dev:.3f}"
@@ -2281,14 +2260,9 @@ def run_static_experiment():
             else:
                 # Format dev for display
                 if isinstance(dev, tuple) and len(dev) == 2:
-                    if dev[1] <= 1.0 and dev[1] >= 0.0:
-                        # New format: (max_dev, min_factor)
-                        max_dev, min_factor = dev
-                        dev_label = f"max{max_dev:.3f}_min{max_dev*min_factor:.3f}"
-                    else:
-                        # Legacy format: (min, max)
-                        min_val, max_val = dev
-                        dev_label = f"min{min_val:.3f}_max{max_val:.3f}"
+                    # Tuple format: always interpret as (min_val, max_val)
+                    min_val, max_val = dev
+                    dev_label = f"min{min_val:.3f}_max{max_val:.3f}"
                 else:
                     # Single value format
                     dev_label = f"{dev:.3f}"
@@ -2315,14 +2289,9 @@ def run_static_experiment():
                         
                         # Format dev for display
                         if isinstance(dev, tuple) and len(dev) == 2:
-                            if dev[1] <= 1.0 and dev[1] >= 0.0:
-                                # New format: (max_dev, min_factor)
-                                max_dev, min_factor = dev
-                                dev_label = f"max{max_dev:.3f}_min{max_dev*min_factor:.3f}"
-                            else:
-                                # Legacy format: (min, max)
-                                min_val, max_val = dev
-                                dev_label = f"min{min_val:.3f}_max{max_val:.3f}"
+                            # Tuple format: always interpret as (min_val, max_val)
+                            min_val, max_val = dev
+                            dev_label = f"min{min_val:.3f}_max{max_val:.3f}"
                         else:
                             # Single value format
                             dev_label = f"{dev:.3f}"
@@ -2409,14 +2378,9 @@ def run_static_experiment():
                         
                         # Format dev for display
                         if isinstance(dev, tuple) and len(dev) == 2:
-                            if dev[1] <= 1.0 and dev[1] >= 0.0:
-                                # New format: (max_dev, min_factor)
-                                max_dev, min_factor = dev
-                                dev_label = f"max{max_dev:.3f}_min{max_dev*min_factor:.3f}"
-                            else:
-                                # Legacy format: (min, max)
-                                min_val, max_val = dev
-                                dev_label = f"min{min_val:.3f}_max{max_val:.3f}"
+                            # Tuple format: always interpret as (min_val, max_val)
+                            min_val, max_val = dev
+                            dev_label = f"min{min_val:.3f}_max{max_val:.3f}"
                         else:
                             # Single value format
                             dev_label = f"{dev:.3f}"
@@ -2498,14 +2462,9 @@ def run_static_experiment():
             # Format dev properly for both single values and tuples
             dev = result['dev']
             if isinstance(dev, (tuple, list)) and len(dev) == 2:
-                # New format: (max_dev, min_factor) or legacy (min, max)
-                if dev[1] <= 1.0 and dev[1] >= 0.0:
-                    max_dev, min_factor = dev
-                    min_dev = max_dev * min_factor
-                    dev_str = f"max{max_dev:.4f}_min{min_dev:.4f}"
-                else:
-                    min_val, max_val = dev
-                    dev_str = f"min{min_val:.4f}_max{max_val:.4f}"
+                # Tuple format: always interpret as (min_val, max_val)
+                min_val, max_val = dev
+                dev_str = f"min{min_val:.4f}_max{max_val:.4f}"
             else:
                 # Single value format
                 dev_str = f"{float(dev):.4f}"

@@ -540,19 +540,12 @@ def run_and_save_experiment_samples(
     computed_samples = 0
     
     for dev_idx, dev in enumerate(devs):
-        # Handle new deviation format for has_noise check
+        # Handle deviation format for has_noise check
         if isinstance(dev, (tuple, list)) and len(dev) == 2:
-            # New format: (max_dev, min_factor) or legacy (min, max)
-            if dev[1] <= 1.0 and dev[1] >= 0.0:
-                # New format
-                max_dev, min_factor = dev
-                has_noise = max_dev > 0
-                dev_str = f"max{max_dev:.3f}_min{max_dev * min_factor:.3f}"
-            else:
-                # Legacy format
-                min_val, max_val = dev
-                has_noise = max_val > 0
-                dev_str = f"min{min_val:.3f}_max{max_val:.3f}"
+            # Tuple format: always interpret as (min_val, max_val)
+            min_val, max_val = dev
+            has_noise = max_val > 0
+            dev_str = f"min{min_val:.3f}_max{max_val:.3f}"
         else:
             # Single value format
             has_noise = dev > 0
@@ -714,19 +707,12 @@ def create_mean_probability_distributions(
     for dev_idx, dev in enumerate(devs):
         dev_start_time = time.time()
         
-        # Handle new deviation format for has_noise check
+        # Handle deviation format for has_noise check
         if isinstance(dev, (tuple, list)) and len(dev) == 2:
-            # New format: (max_dev, min_factor) or legacy (min, max)
-            if dev[1] <= 1.0 and dev[1] >= 0.0:
-                # New format
-                max_dev, min_factor = dev
-                has_noise = max_dev > 0
-                dev_str = f"max{max_dev:.3f}_min{max_dev * min_factor:.3f}"
-            else:
-                # Legacy format
-                min_val, max_val = dev
-                has_noise = max_val > 0
-                dev_str = f"min{min_val:.3f}_max{max_val:.3f}"
+            # Tuple format: always interpret as (min_val, max_val)
+            min_val, max_val = dev
+            has_noise = max_val > 0
+            dev_str = f"min{min_val:.3f}_max{max_val:.3f}"
         else:
             # Single value format
             has_noise = dev > 0
@@ -829,19 +815,12 @@ def load_mean_probability_distributions(
     for dev_idx, dev in enumerate(devs):
         dev_start_time = time.time()
         
-        # Handle new deviation format for has_noise check
+        # Handle deviation format for has_noise check
         if isinstance(dev, (tuple, list)) and len(dev) == 2:
-            # New format: (max_dev, min_factor) or legacy (min, max)
-            if dev[1] <= 1.0 and dev[1] >= 0.0:
-                # New format
-                max_dev, min_factor = dev
-                has_noise = max_dev > 0
-                dev_str = f"max{max_dev:.3f}_min{max_dev * min_factor:.3f}"
-            else:
-                # Legacy format
-                min_val, max_val = dev
-                has_noise = max_val > 0
-                dev_str = f"min{min_val:.3f}_max{max_val:.3f}"
+            # Tuple format: always interpret as (min_val, max_val)
+            min_val, max_val = dev
+            has_noise = max_val > 0
+            dev_str = f"min{min_val:.3f}_max{max_val:.3f}"
         else:
             # Single value format
             has_noise = dev > 0
@@ -918,19 +897,12 @@ def check_mean_probability_distributions_exist(
     print(f"Checking if mean probability distributions exist for {len(devs)} devs, {steps} steps each...")
     
     for dev_idx, dev in enumerate(devs):
-        # Handle new deviation format for has_noise check
+        # Handle deviation format for has_noise check
         if isinstance(dev, (tuple, list)) and len(dev) == 2:
-            # New format: (max_dev, min_factor) or legacy (min, max)
-            if dev[1] <= 1.0 and dev[1] >= 0.0:
-                # New format
-                max_dev, min_factor = dev
-                has_noise = max_dev > 0
-                dev_str = f"max{max_dev:.3f}_min{max_dev * min_factor:.3f}"
-            else:
-                # Legacy format
-                min_val, max_val = dev
-                has_noise = max_val > 0
-                dev_str = f"min{min_val:.3f}_max{max_val:.3f}"
+            # Tuple format: always interpret as (min_val, max_val)
+            min_val, max_val = dev
+            has_noise = max_val > 0
+            dev_str = f"min{min_val:.3f}_max{max_val:.3f}"
         else:
             # Single value format
             has_noise = dev > 0
@@ -1018,17 +990,11 @@ def smart_load_or_create_experiment(
         # Check if sample files exist
         sample_files_exist = True
         for param in parameter_list:
-            # Handle different parameter formats for has_noise check
+            # Handle parameter formats for has_noise check
             if isinstance(param, (tuple, list)) and len(param) == 2:
-                # Tuple format: (max_dev, min_factor) or legacy (min, max)
-                if param[1] <= 1.0 and param[1] >= 0.0:
-                    # New format
-                    max_dev, min_factor = param
-                    has_noise = max_dev > 0
-                else:
-                    # Legacy format
-                    min_val, max_val = param
-                    has_noise = max_val > 0
+                # Tuple format: always interpret as (min_val, max_val)
+                min_val, max_val = param
+                has_noise = max_val > 0
             else:
                 # Single value format
                 has_noise = param > 0
