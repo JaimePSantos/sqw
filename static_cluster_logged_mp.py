@@ -67,55 +67,65 @@ def signal_handler(signum, frame):
     """Handle shutdown signals gracefully"""
     global SHUTDOWN_REQUESTED
     
-    # SIGHUP should NOT terminate the process - ignore it for background execution
-    if signum == signal.SIGHUP:
-        print(f"\n[SIGNAL] Received SIGHUP (terminal disconnect) - continuing in background...")
-        return  # Don't shutdown on SIGHUP
-    
+    # On Windows, SIGHUP doesn't exist, so we don't need to check for it
     SHUTDOWN_REQUESTED = True
     print(f"\n[SHUTDOWN] Received signal {signum}. Initiating graceful shutdown...")
     print("[SHUTDOWN] Waiting for current processes to complete...")
     print("[SHUTDOWN] This may take a few minutes. Do not force-kill unless necessary.")
 
-def ignore_sighup_handler(signum, frame):
-    """Ignore SIGHUP signals to prevent termination when terminal disconnects"""
-    print(f"\n[SIGNAL] Received SIGHUP (terminal disconnect) - continuing in background...")
-
 def setup_background_process():
     """Setup process to run in background and survive terminal disconnection"""
-    import os
-    import sys
+    print(f"[BACKGROUND] Setting up background execution...")
+    print(f"[BACKGROUND] PID: {os.getpid()}")
     
-    # Redirect stdout and stderr to log files to prevent broken pipe errors
-    if not os.environ.get('KEEP_TERMINAL_OUTPUT'):
-        # Create background log file
-        bg_log = open('background_execution.log', 'a')
-        
-        # Redirect stdout and stderr
-        sys.stdout = bg_log
-        sys.stderr = bg_log
-        
-        print(f"[BACKGROUND] Process detached at {datetime.now()}")
-        print(f"[BACKGROUND] PID: {os.getpid()}")
-        print(f"[BACKGROUND] Logs redirected to background_execution.log")
+    # Create background log directory
+    bg_log_dir = "background_logs"
+    os.makedirs(bg_log_dir, exist_ok=True)
     
-    # Create a new session to detach from terminal
+    # Create timestamped background log file
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    bg_log_file = os.path.join(bg_log_dir, f"background_execution_{timestamp}.log")
+    
+    # Don't redirect stdout/stderr if we want to see output in terminal initially
+    # The process will continue running even after terminal disconnect
+    print(f"[BACKGROUND] Background log file: {bg_log_file}")
+    print(f"[BACKGROUND] Process will continue running after terminal disconnect")
+    print(f"[BACKGROUND] Monitor progress with: tail -f {bg_log_file}")
+    
+    # Create background log file and write initial info
+    with open(bg_log_file, 'w') as f:
+        f.write(f"[BACKGROUND] Background execution started at {datetime.now()}\n")
+        f.write(f"[BACKGROUND] PID: {os.getpid()}\n")
+        f.write(f"[BACKGROUND] Command: {' '.join(sys.argv)}\n")
+        f.write(f"[BACKGROUND] Working directory: {os.getcwd()}\n")
+        f.write("-" * 60 + "\n")
+    
+    # On Windows, we can't use setsid, but we can ignore SIGPIPE-like errors
     try:
-        os.setsid()
-        print(f"[BACKGROUND] New session created - process detached from terminal")
+        # Try to detach from controlling terminal (Unix-like systems)
+        if hasattr(os, 'setsid'):
+            os.setsid()
+            print(f"[BACKGROUND] Session detached from terminal")
     except:
-        # setsid may fail if already a session leader, that's okay
-        pass
+        # On Windows or if setsid fails, just continue
+        print(f"[BACKGROUND] Session detachment not available (Windows/limited environment)")
     
-    # Ignore SIGPIPE to prevent crashes when terminal disconnects
-    if hasattr(signal, 'SIGPIPE'):
-        signal.signal(signal.SIGPIPE, signal.SIG_IGN)
+    return bg_log_file
 
-# Register signal handlers
+# Register signal handlers (cross-platform)
 signal.signal(signal.SIGINT, signal_handler)   # Ctrl+C
 signal.signal(signal.SIGTERM, signal_handler)  # Termination signal
+
+# Only register SIGHUP on systems that have it (Unix-like, not Windows)
 if hasattr(signal, 'SIGHUP'):
-    signal.signal(signal.SIGHUP, ignore_sighup_handler)  # Ignore hangup signal (Unix terminal disconnect)
+    def ignore_sighup_handler(signum, frame):
+        """Ignore SIGHUP signals to prevent termination when terminal disconnects"""
+        print(f"\n[SIGNAL] Received SIGHUP (terminal disconnect) - continuing in background...")
+    signal.signal(signal.SIGHUP, ignore_sighup_handler)
+
+# Ignore SIGPIPE on systems that have it
+if hasattr(signal, 'SIGPIPE'):
+    signal.signal(signal.SIGPIPE, signal.SIG_IGN)
 
 # ============================================================================
 # CONFIGURATION PARAMETERS
@@ -163,12 +173,14 @@ if os.environ.get('CALCULATE_SAMPLES_ONLY'):
 if os.environ.get('SKIP_SAMPLE_COMPUTATION'):
     SKIP_SAMPLE_COMPUTATION = os.environ.get('SKIP_SAMPLE_COMPUTATION').lower() == 'true'
 
-# Background execution switch - SAFER IMPLEMENTATION
-RUN_IN_BACKGROUND = False  # Set to True to automatically run the process in background
+# Background execution switch - ENABLED BY DEFAULT FOR CLUSTER EXECUTION
+RUN_IN_BACKGROUND = True  # Set to True to automatically run the process in background
 
 # Check if background execution has been disabled externally
 if os.environ.get('RUN_IN_BACKGROUND') == 'False':
     RUN_IN_BACKGROUND = False
+elif os.environ.get('RUN_IN_BACKGROUND') == 'True':
+    RUN_IN_BACKGROUND = True
 BACKGROUND_LOG_FILE = "static_experiment_multiprocessing.log"  # Log file for background execution
 BACKGROUND_PID_FILE = "static_experiment_mp.pid"  # PID file to track background process
 
@@ -465,39 +477,71 @@ def compute_mean_probability_for_dev(dev_args):
     # Setup logging for this process
     dev_str = f"{dev}" if isinstance(dev, (int, float)) else f"{dev[0]}_{dev[1]}" if isinstance(dev, (tuple, list)) else str(dev)
     
-    # Create meanprob logger
-    os.makedirs(PROCESS_LOG_DIR, exist_ok=True)
-    log_file = os.path.join(PROCESS_LOG_DIR, f"process_dev_{dev_str}_meanprob.log")
+    # Create meanprob logger with proper error handling
+    try:
+        os.makedirs(PROCESS_LOG_DIR, exist_ok=True)
+        log_file = os.path.join(PROCESS_LOG_DIR, f"process_dev_{dev_str}_meanprob.log")
+        
+        # Create logger with unique name to avoid conflicts
+        logger_name = f"dev_{dev_str}_meanprob_{process_id}"
+        logger = logging.getLogger(logger_name)
+        logger.setLevel(logging.INFO)
+        
+        # Remove any existing handlers
+        for handler in logger.handlers[:]:
+            logger.removeHandler(handler)
+        
+        # Create file handler with immediate flush
+        file_handler = logging.FileHandler(log_file, mode='w')
+        file_handler.setLevel(logging.INFO)
+        
+        # Create console handler
+        console_handler = logging.StreamHandler()
+        console_handler.setLevel(logging.INFO)
+        
+        # Create formatters
+        file_formatter = logging.Formatter('[%(asctime)s] [PID:%(process)d] [DEV:%(name)s] %(levelname)s: %(message)s')
+        console_formatter = logging.Formatter('[DEV:%(name)s] %(message)s')
+        
+        file_handler.setFormatter(file_formatter)
+        console_handler.setFormatter(console_formatter)
+        
+        # Add handlers to logger
+        logger.addHandler(file_handler)
+        logger.addHandler(console_handler)
+        
+        # Force immediate write to confirm log file creation
+        logger.info(f"=== MEAN PROBABILITY COMPUTATION STARTED ===")
+        logger.info(f"Log file: {log_file}")
+        logger.info(f"PID: {os.getpid()}")
+        logger.info(f"Deviation: {dev}")
+        logger.info(f"Parameters: N={N}, steps={steps}, samples={samples}")
+        
+        # Force flush the log file
+        for handler in logger.handlers:
+            if hasattr(handler, 'flush'):
+                handler.flush()
     
-    logger = logging.getLogger(f"dev_{dev_str}_meanprob")
-    logger.setLevel(logging.INFO)
+    except Exception as logging_error:
+        # Fallback to print if logging setup fails
+        print(f"[ERROR] Failed to setup logging for dev {dev_str}: {logging_error}")
+        print(f"[INFO] Continuing without file logging for deviation {dev}")
+        logger = None
+        log_file = f"process_dev_{dev_str}_meanprob.log"  # Fallback filename for return
     
-    # Remove any existing handlers
-    for handler in logger.handlers[:]:
-        logger.removeHandler(handler)
-    
-    # Create file handler
-    file_handler = logging.FileHandler(log_file, mode='w')
-    file_handler.setLevel(logging.INFO)
-    
-    # Create console handler
-    console_handler = logging.StreamHandler()
-    console_handler.setLevel(logging.INFO)
-    
-    # Create formatters
-    file_formatter = logging.Formatter('[%(asctime)s] [PID:%(process)d] [DEV:%(name)s] %(levelname)s: %(message)s')
-    console_formatter = logging.Formatter('[DEV:%(name)s] %(message)s')
-    
-    file_handler.setFormatter(file_formatter)
-    console_handler.setFormatter(console_formatter)
-    
-    # Add handlers to logger
-    logger.addHandler(file_handler)
-    logger.addHandler(console_handler)
+    # Helper function to safely log messages
+    def safe_log(level, message):
+        if logger:
+            getattr(logger, level)(message)
+            # Force flush
+            for handler in logger.handlers:
+                if hasattr(handler, 'flush'):
+                    handler.flush()
+        else:
+            print(f"[{level.upper()}] {message}")
     
     try:
-        logger.info(f"Starting mean probability computation for deviation {dev}")
-        logger.info(f"Parameters: N={N}, steps={steps}, samples={samples}")
+        safe_log('info', f"Starting mean probability computation for deviation {dev}")
         
         # Import required modules
         import pickle
@@ -532,12 +576,15 @@ def compute_mean_probability_for_dev(dev_args):
             target_exp_dir = get_experiment_dir(tesselation_func, has_noise, N, noise_params=noise_params, noise_type=noise_type, base_dir=target_base_dir, theta=theta, samples=samples)
         
         os.makedirs(target_exp_dir, exist_ok=True)
-        logger.info(f"Processing {steps} steps for {param_name}={dev_str}")
-        logger.info(f"Source: {source_exp_dir}")
-        logger.info(f"Target: {target_exp_dir}")
+        safe_log('info', f"Processing {steps} steps for {param_name}={dev_str}")
+        safe_log('info', f"Source: {source_exp_dir}")
+        safe_log('info', f"Target: {target_exp_dir}")
         
         # Log initial system resources
-        log_system_resources(logger, "[WORKER]")
+        if logger:
+            log_system_resources(logger, "[WORKER]")
+        else:
+            print("[WORKER] Resource monitoring not available without logger")
         
         processed_steps = 0
         last_log_time = time.time()
@@ -550,7 +597,7 @@ def compute_mean_probability_for_dev(dev_args):
             if os.path.exists(mean_filepath):
                 processed_steps += 1
                 if step_idx % 100 == 0:
-                    logger.info(f"    Step {step_idx+1}/{steps} already exists, skipping")
+                    safe_log('info', f"    Step {step_idx+1}/{steps} already exists, skipping")
                 continue
             
             # Log progress more frequently and monitor resources
@@ -561,9 +608,9 @@ def compute_mean_probability_for_dev(dev_args):
             should_log_resources = (current_time - last_log_time >= 300)  # Every 5 minutes
             
             if should_log_progress:
-                logger.info(f"    Step {step_idx+1}/{steps} processing... (processed: {processed_steps})")
+                safe_log('info', f"    Step {step_idx+1}/{steps} processing... (processed: {processed_steps})")
             
-            if should_log_resources:
+            if should_log_resources and logger:
                 log_system_resources(logger, "[WORKER]")
                 last_log_time = current_time
             
@@ -599,7 +646,7 @@ def compute_mean_probability_for_dev(dev_args):
                     del state, prob_dist
                 else:
                     if sample_idx < 10:  # Only log first 10 missing files to avoid spam
-                        logger.warning(f"Sample file not found: {filepath}")
+                        safe_log('warning', f"Sample file not found: {filepath}")
                 
             
             if valid_samples > 0:
@@ -611,18 +658,18 @@ def compute_mean_probability_for_dev(dev_args):
                 
                 # Only log completion every 100 steps or on final step
                 if step_idx % 100 == 0 or step_idx == steps - 1:
-                    logger.info(f"    Step {step_idx+1}/{steps} processed (valid samples: {valid_samples})")
+                    safe_log('info', f"    Step {step_idx+1}/{steps} processed (valid samples: {valid_samples})")
             else:
                 # Only log missing samples every 100 steps to avoid spam
                 if step_idx % 100 == 0:
-                    logger.warning(f"No valid samples found for step {step_idx+1}")
+                    safe_log('warning', f"No valid samples found for step {step_idx+1}")
             
             # Force garbage collection periodically to keep memory usage low
             if step_idx % 50 == 0:
                 gc.collect()
         
         dev_time = time.time() - dev_start_time
-        logger.info(f"Deviation {dev_str} completed: {processed_steps}/{steps} steps in {dev_time:.1f}s")
+        safe_log('info', f"Deviation {dev_str} completed: {processed_steps}/{steps} steps in {dev_time:.1f}s")
         
         return {
             "dev": dev,
@@ -642,8 +689,8 @@ def compute_mean_probability_for_dev(dev_args):
         else:
             dev_str = f"{dev:.4f}"
         error_msg = f"Error in mean probability process for dev {dev_str}: {str(e)}"
-        logger.error(error_msg)
-        logger.error(traceback.format_exc())
+        safe_log('error', error_msg)
+        safe_log('error', traceback.format_exc())
         
         return {
             "dev": dev,
@@ -651,7 +698,7 @@ def compute_mean_probability_for_dev(dev_args):
             "processed_steps": 0,
             "total_steps": steps,
             "total_time": 0,
-            "log_file": log_file,
+            "log_file": log_file if 'log_file' in locals() else f"process_dev_{dev_str}_meanprob.log",
             "success": False,
             "error": error_msg
         }
@@ -2561,11 +2608,12 @@ def run_static_experiment():
     }
 
 if __name__ == "__main__":
-    # Check if running in background (via Ctrl+Z, bg sequence)
-    import os
-    if os.getppid() == 1 or os.environ.get('BACKGROUND_MODE'):
-        # Process was backgrounded or orphaned, set up background execution
-        setup_background_process()
+    # Setup background execution if enabled
+    background_log_file = None
+    if RUN_IN_BACKGROUND:
+        print("[BACKGROUND] Background execution enabled - setting up background mode...")
+        background_log_file = setup_background_process()
+        print(f"[BACKGROUND] Background setup complete - log file: {background_log_file}")
     
     # Multiprocessing protection for Windows
     mp.set_start_method('spawn', force=True)
@@ -2578,36 +2626,22 @@ if __name__ == "__main__":
         
         # Try to log to master logger if available
         try:
-            master_logger = logging.getLogger("master")
-            if master_logger.handlers:
-                master_logger.error(error_msg)
-                import traceback
-                master_logger.error(traceback.format_exc())
+            import logging
+            logger = logging.getLogger("master")
+            if logger.handlers:
+                logger.error(error_msg)
+                logger.error(traceback.format_exc())
         except:
             pass
         
-        # If we're in background mode, write the error to the log file
-        if os.environ.get('IS_BACKGROUND_PROCESS'):
+        # Also log to background file if available
+        if background_log_file:
             try:
-                with open(BACKGROUND_LOG_FILE, 'a') as f:
-                    f.write(f"\n{error_msg}\n")
-                    import traceback
+                with open(background_log_file, 'a') as f:
+                    f.write(f"\n[ERROR] {datetime.now()}: {error_msg}\n")
                     f.write(traceback.format_exc())
-                    f.write("\nScript exiting due to fatal error\n")
-            except:
-                pass
-            
-            # Clean up PID file if we're the background process
-            try:
-                if os.path.exists(BACKGROUND_PID_FILE):
-                    os.remove(BACKGROUND_PID_FILE)
-                    print("Cleaned up PID file due to error")
+                    f.write("\n")
             except:
                 pass
         
-        # Re-raise the exception if not in background mode
-        if not os.environ.get('IS_BACKGROUND_PROCESS'):
-            raise
-        else:
-            import sys
-            sys.exit(1)
+        raise
