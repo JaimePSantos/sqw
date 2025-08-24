@@ -216,7 +216,7 @@ if os.environ.get('FORCE_N_VALUE'):
         pass
 
 # Quantum walk parameters (for static noise, we only need theta)
-theta = math.pi/2  # Base theta parameter for static noise
+theta = math.pi/3  # Base theta parameter for static noise
 
 print(f"[THETA] Using theta = {theta:.6f} ({theta/math.pi:.3f}*pi)")
 print(f"[THETA WARNING] Different theta values create separate experiment directories!")
