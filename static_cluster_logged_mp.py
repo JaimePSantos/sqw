@@ -95,7 +95,7 @@ EXCLUDE_SAMPLES_FROM_ARCHIVE = True  # Set to True to exclude raw sample files f
 
 # Computation control switches
 CALCULATE_SAMPLES_ONLY = False  # Set to True to only compute and save samples (skip analysis)
-SKIP_SAMPLE_COMPUTATION = False  # Set to True to skip sample computation (analysis only)
+SKIP_SAMPLE_COMPUTATION = True  # Set to True to skip sample computation (analysis only)
 
 # Check for environment variable overrides (from safe_background_launcher.py)
 if os.environ.get('ENABLE_PLOTTING'):
@@ -192,10 +192,10 @@ initial_state_kwargs = {"nodes": [N//2]}
 # 3. Mixed: devs = [0, (0.0, 0.2), 0.5] - can mix formats
 devs = [
     (0,0),              # No noise
-    # (0, 0.2),           # Small noise range
-    # (0, 0.6),           # Medium noise range  
-    # (0, 0.8),           # Medium noise range  
-    # (0, 1),           # Medium noise range  
+    (0, 0.2),           # Small noise range
+    (0, 0.6),           # Medium noise range  
+    (0, 0.8),           # Medium noise range  
+    (0, 1),           # Medium noise range  
 ]   
 
 # Multiprocessing configuration - Conservative for cluster stability
