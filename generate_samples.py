@@ -300,10 +300,11 @@ def generate_samples_for_dev(dev_args):
             has_noise = dev > 0
         
         # With unified structure, we always include noise_params (including 0 for no noise)
+        # For sample generation, we don't include the samples subfolder - that's only for processed data
         noise_params = [dev]
         exp_dir = get_experiment_dir(dummy_tesselation_func, has_noise, N, 
                                    noise_params=noise_params, noise_type="static_noise", 
-                                   base_dir=SAMPLES_BASE_DIR, theta=theta_param, samples=samples_count)
+                                   base_dir=SAMPLES_BASE_DIR, theta=theta_param, samples=None)
         os.makedirs(exp_dir, exist_ok=True)
         
         logger.info(f"Experiment directory: {exp_dir}")
