@@ -33,11 +33,15 @@ import multiprocessing as mp
 from concurrent.futures import ProcessPoolExecutor, as_completed, TimeoutError
 from datetime import datetime
 import traceback
-import signal
-import math
-import numpy as np
+import tarfile
 
 # ============================================================================
+# ARCHIVING CONFIGURATION
+# ============================================================================
+
+CREATE_TAR = True  # If True, create per-dev and main tar archives
+ARCHIVE_DIR = "experiments_archive"
+
 # CONFIGURATION PARAMETERS
 # ============================================================================
 
@@ -433,57 +437,78 @@ def generate_std_for_dev(dev_args):
         os.makedirs(std_exp_dir, exist_ok=True)
         std_file = os.path.join(std_exp_dir, "std_vs_time.pkl")
         
+        skipped = False
         if validate_std_file(std_file):
             logger.info(f"Valid std file already exists: {std_file}")
-            return {
-                "dev": dev, "process_id": process_id, "success": True,
-                "error": None, "log_file": log_file, "total_time": 0,
-                "action": "skipped", "message": "Valid std file already exists"
-            }
+            skipped = True
         
-        # Load probability distributions
-        prob_distributions = load_probability_distributions_for_dev(probdist_exp_dir, N, steps, logger)
-        
-        if not prob_distributions or len(prob_distributions) == 0:
-            logger.error(f"No probability distributions loaded")
-            return {
-                "dev": dev, "process_id": process_id, "success": False,
-                "error": "No probability distributions loaded",
-                "log_file": log_file, "total_time": 0
-            }
-        
-        # Calculate standard deviations
-        logger.info(f"Calculating standard deviations for {len(prob_distributions)} time steps...")
-        domain = np.arange(N) - N//2  # Center domain around 0
-        
-        std_values = prob_distributions2std(prob_distributions, domain)
-        
-        valid_std_count = sum(1 for s in std_values if s is not None and s > 0)
-        logger.info(f"Calculated {valid_std_count}/{len(std_values)} valid standard deviations")
-        
-        if valid_std_count == 0:
-            logger.error(f"No valid standard deviations calculated")
-            return {
-                "dev": dev, "process_id": process_id, "success": False,
-                "error": "No valid standard deviations calculated",
-                "log_file": log_file, "total_time": 0
-            }
-        
-        # Save standard deviation data
-        with open(std_file, 'wb') as f:
-            pickle.dump(std_values, f)
-        
-        logger.info(f"Standard deviation data saved to: {std_file}")
-        if valid_std_count > 0:
-            final_std = [s for s in std_values if s is not None and s > 0][-1]
-            logger.info(f"Final std value: {final_std:.6f}")
-        
+        valid_std_count = 0
+        std_values = []
+        if not skipped:
+            # Load probability distributions
+            prob_distributions = load_probability_distributions_for_dev(probdist_exp_dir, N, steps, logger)
+            if not prob_distributions or len(prob_distributions) == 0:
+                logger.error(f"No probability distributions loaded")
+                return {
+                    "dev": dev, "process_id": process_id, "success": False,
+                    "error": "No probability distributions loaded",
+                    "log_file": log_file, "total_time": 0
+                }
+            # Calculate standard deviations
+            logger.info(f"Calculating standard deviations for {len(prob_distributions)} time steps...")
+            domain = np.arange(N) - N//2  # Center domain around 0
+            std_values = prob_distributions2std(prob_distributions, domain)
+            valid_std_count = sum(1 for s in std_values if s is not None and s > 0)
+            logger.info(f"Calculated {valid_std_count}/{len(std_values)} valid standard deviations")
+            if valid_std_count == 0:
+                logger.error(f"No valid standard deviations calculated")
+                return {
+                    "dev": dev, "process_id": process_id, "success": False,
+                    "error": "No valid standard deviations calculated",
+                    "log_file": log_file, "total_time": 0
+                }
+            # Save standard deviation data
+            with open(std_file, 'wb') as f:
+                pickle.dump(std_values, f)
+            logger.info(f"Standard deviation data saved to: {std_file}")
+            if valid_std_count > 0:
+                final_std = [s for s in std_values if s is not None and s > 0][-1]
+                logger.info(f"Final std value: {final_std:.6f}")
+        else:
+            # If skipped, load the std_values for reporting
+            try:
+                with open(std_file, 'rb') as f:
+                    std_values = pickle.load(f)
+                valid_std_count = sum(1 for s in std_values if s is not None and s > 0)
+            except Exception:
+                std_values = []
+                valid_std_count = 0
+
         dev_time = time.time() - dev_start_time
-        
         logger.info(f"=== STANDARD DEVIATION GENERATION COMPLETED ===")
         logger.info(f"Valid std values: {valid_std_count}/{len(std_values)}")
         logger.info(f"Total time: {dev_time:.1f}s")
-        
+
+        # Archive this dev's std directory if requested (always, even if skipped)
+        dev_tar_path = None
+        if CREATE_TAR:
+            os.makedirs(ARCHIVE_DIR, exist_ok=True)
+            # Format dev string for filename
+            if isinstance(dev, (tuple, list)) and len(dev) == 2:
+                min_val, max_val = dev
+                devstr = f"min{min_val:.3f}_max{max_val:.3f}"
+            else:
+                devstr = f"{float(dev):.3f}"
+            # Find the theta_ folder containing this std_exp_dir
+            theta_dir = os.path.dirname(os.path.dirname(std_exp_dir))
+            theta_folder_name = os.path.basename(theta_dir)
+            dev_folder_name = os.path.basename(os.path.dirname(std_exp_dir))
+            dev_dir = os.path.dirname(std_exp_dir)
+            dev_tar_path = os.path.join(ARCHIVE_DIR, f"std_{theta_folder_name}_{devstr}.tar")
+            with tarfile.open(dev_tar_path, "w") as tar:
+                tar.add(dev_dir, arcname=os.path.join(theta_folder_name, dev_folder_name))
+            logger.info(f"Created temporary archive: {dev_tar_path}")
+
         return {
             "dev": dev,
             "process_id": process_id,
@@ -493,8 +518,9 @@ def generate_std_for_dev(dev_args):
             "total_std_count": len(std_values),
             "log_file": log_file,
             "total_time": dev_time,
-            "action": "generated",
-            "message": f"Generated {valid_std_count} valid std values"
+            "action": "skipped" if skipped else "generated",
+            "message": "Valid std file already exists" if skipped else f"Generated {valid_std_count} valid std values",
+            "dev_tar_path": dev_tar_path
         }
         
     except Exception as e:
@@ -552,15 +578,12 @@ def main():
             for args in process_args:
                 future = executor.submit(generate_std_for_dev, args)
                 future_to_dev[future] = args[0]  # dev value
-            
             # Collect results with timeout handling
             for future in as_completed(future_to_dev, timeout=PROCESS_TIMEOUT * len(devs)):
                 dev = future_to_dev[future]
-                
                 try:
                     result = future.result(timeout=PROCESS_TIMEOUT)
                     process_results.append(result)
-                    
                     if result["success"]:
                         action = result.get("action", "processed")
                         message = result.get("message", "")
@@ -569,7 +592,6 @@ def main():
                                          f"time: {result['total_time']:.1f}s")
                     else:
                         master_logger.error(f"Process for dev {dev} failed: {result['error']}")
-                        
                 except TimeoutError:
                     master_logger.error(f"Process for dev {dev} timed out after {PROCESS_TIMEOUT}s")
                     process_results.append({
@@ -582,13 +604,33 @@ def main():
                         "dev": dev, "success": False, "error": str(e),
                         "total_time": 0
                     })
-    
     except KeyboardInterrupt:
         master_logger.warning("Interrupted by user")
         print("\n[INTERRUPT] Gracefully shutting down processes...")
     except Exception as e:
         master_logger.error(f"Critical error in multiprocessing: {str(e)}")
         raise
+
+    # === MAIN ARCHIVE CREATION ===
+    if CREATE_TAR:
+        os.makedirs(ARCHIVE_DIR, exist_ok=True)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        main_tar_name = f"experiments_std_N{N}_samples{samples}_{timestamp}.tar"
+        main_tar_path = os.path.join(ARCHIVE_DIR, main_tar_name)
+        dev_tar_paths = [r.get("dev_tar_path") for r in process_results if r.get("dev_tar_path")]
+        if dev_tar_paths:
+            with tarfile.open(main_tar_path, "w") as tar:
+                for dev_tar in dev_tar_paths:
+                    tar.add(dev_tar, arcname=os.path.basename(dev_tar))
+            print(f"Created main archive: {main_tar_path}")
+            master_logger.info(f"Created main archive: {main_tar_path}")
+            # Delete temporary dev tar files
+            for dev_tar in dev_tar_paths:
+                try:
+                    os.remove(dev_tar)
+                    master_logger.info(f"Deleted temporary archive: {dev_tar}")
+                except Exception as e:
+                    master_logger.warning(f"Could not delete {dev_tar}: {e}")
     
     total_time = time.time() - start_time
     

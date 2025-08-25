@@ -34,11 +34,18 @@ import multiprocessing as mp
 from concurrent.futures import ProcessPoolExecutor, as_completed, TimeoutError
 from datetime import datetime
 import traceback
+import tarfile
 import signal
 import math
 import numpy as np
 
 # ============================================================================
+# ARCHIVING CONFIGURATION
+# ============================================================================
+
+CREATE_TAR = True  # If True, create per-dev and main tar archives
+ARCHIVE_DIR = "experiments_archive"
+
 # CONFIGURATION PARAMETERS
 # ============================================================================
 
@@ -514,54 +521,76 @@ def generate_survival_for_dev(dev_args):
         os.makedirs(survival_exp_dir, exist_ok=True)
         survival_file = os.path.join(survival_exp_dir, "survival_vs_time.pkl")
         
+        skipped = False
         if validate_survival_file(survival_file):
             logger.info(f"Valid survival file already exists: {survival_file}")
-            return {
-                "dev": dev, "process_id": process_id, "success": True,
-                "error": None, "log_file": log_file, "total_time": 0,
-                "action": "skipped", "message": "Valid survival file already exists"
-            }
+            skipped = True
         
-        # Load probability distributions
-        prob_distributions = load_probability_distributions_for_dev(probdist_exp_dir, N, steps, logger)
-        
-        if not prob_distributions or len(prob_distributions) == 0:
-            logger.error(f"No probability distributions loaded")
-            return {
-                "dev": dev, "process_id": process_id, "success": False,
-                "error": "No probability distributions loaded",
-                "log_file": log_file, "total_time": 0
-            }
-        
-        # Generate survival probability data
-        logger.info(f"Generating survival probability data for {len(prob_distributions)} time steps...")
-        survival_data = generate_survival_probability_data(prob_distributions, N, logger)
-        
-        # Validate results
         total_ranges = len(SURVIVAL_RANGES)
-        valid_ranges = sum(1 for range_name, range_data in survival_data.items() 
-                          if any(p is not None for p in range_data))
-        
-        if valid_ranges == 0:
-            logger.error(f"No valid survival probabilities calculated")
-            return {
-                "dev": dev, "process_id": process_id, "success": False,
-                "error": "No valid survival probabilities calculated",
-                "log_file": log_file, "total_time": 0
-            }
-        
-        # Save survival probability data
-        with open(survival_file, 'wb') as f:
-            pickle.dump(survival_data, f)
-        
-        logger.info(f"Survival probability data saved to: {survival_file}")
-        
+        valid_ranges = 0
+        survival_data = {}
+        if not skipped:
+            # Load probability distributions
+            prob_distributions = load_probability_distributions_for_dev(probdist_exp_dir, N, steps, logger)
+            if not prob_distributions or len(prob_distributions) == 0:
+                logger.error(f"No probability distributions loaded")
+                return {
+                    "dev": dev, "process_id": process_id, "success": False,
+                    "error": "No probability distributions loaded",
+                    "log_file": log_file, "total_time": 0
+                }
+            # Generate survival probability data
+            logger.info(f"Generating survival probability data for {len(prob_distributions)} time steps...")
+            survival_data = generate_survival_probability_data(prob_distributions, N, logger)
+            valid_ranges = sum(1 for range_name, range_data in survival_data.items() 
+                              if any(p is not None for p in range_data))
+            if valid_ranges == 0:
+                logger.error(f"No valid survival probabilities calculated")
+                return {
+                    "dev": dev, "process_id": process_id, "success": False,
+                    "error": "No valid survival probabilities calculated",
+                    "log_file": log_file, "total_time": 0
+                }
+            # Save survival probability data
+            with open(survival_file, 'wb') as f:
+                pickle.dump(survival_data, f)
+            logger.info(f"Survival probability data saved to: {survival_file}")
+        else:
+            # If skipped, load the survival_data for reporting
+            try:
+                with open(survival_file, 'rb') as f:
+                    survival_data = pickle.load(f)
+                valid_ranges = sum(1 for range_name, range_data in survival_data.items() 
+                                  if any(p is not None for p in range_data))
+            except Exception:
+                survival_data = {}
+                valid_ranges = 0
+
         dev_time = time.time() - dev_start_time
-        
         logger.info(f"=== SURVIVAL PROBABILITY GENERATION COMPLETED ===")
         logger.info(f"Valid ranges: {valid_ranges}/{total_ranges}")
         logger.info(f"Total time: {dev_time:.1f}s")
-        
+
+        # Archive this dev's survival directory if requested (always, even if skipped)
+        dev_tar_path = None
+        if CREATE_TAR:
+            os.makedirs(ARCHIVE_DIR, exist_ok=True)
+            # Format dev string for filename
+            if isinstance(dev, (tuple, list)) and len(dev) == 2:
+                min_val, max_val = dev
+                devstr = f"min{min_val:.3f}_max{max_val:.3f}"
+            else:
+                devstr = f"{float(dev):.3f}"
+            # Find the theta_ folder containing this survival_exp_dir
+            theta_dir = os.path.dirname(os.path.dirname(survival_exp_dir))
+            theta_folder_name = os.path.basename(theta_dir)
+            dev_folder_name = os.path.basename(os.path.dirname(survival_exp_dir))
+            dev_dir = os.path.dirname(survival_exp_dir)
+            dev_tar_path = os.path.join(ARCHIVE_DIR, f"survival_{theta_folder_name}_{devstr}.tar")
+            with tarfile.open(dev_tar_path, "w") as tar:
+                tar.add(dev_dir, arcname=os.path.join(theta_folder_name, dev_folder_name))
+            logger.info(f"Created temporary archive: {dev_tar_path}")
+
         return {
             "dev": dev,
             "process_id": process_id,
@@ -571,8 +600,9 @@ def generate_survival_for_dev(dev_args):
             "total_ranges": total_ranges,
             "log_file": log_file,
             "total_time": dev_time,
-            "action": "generated",
-            "message": f"Generated survival data for {valid_ranges} ranges"
+            "action": "skipped" if skipped else "generated",
+            "message": "Valid survival file already exists" if skipped else f"Generated survival data for {valid_ranges} ranges",
+            "dev_tar_path": dev_tar_path
         }
         
     except Exception as e:
@@ -632,15 +662,12 @@ def main():
             for args in process_args:
                 future = executor.submit(generate_survival_for_dev, args)
                 future_to_dev[future] = args[0]  # dev value
-            
             # Collect results with timeout handling
             for future in as_completed(future_to_dev, timeout=PROCESS_TIMEOUT * len(devs)):
                 dev = future_to_dev[future]
-                
                 try:
                     result = future.result(timeout=PROCESS_TIMEOUT)
                     process_results.append(result)
-                    
                     if result["success"]:
                         action = result.get("action", "processed")
                         message = result.get("message", "")
@@ -649,7 +676,6 @@ def main():
                                          f"time: {result['total_time']:.1f}s")
                     else:
                         master_logger.error(f"Process for dev {dev} failed: {result['error']}")
-                        
                 except TimeoutError:
                     master_logger.error(f"Process for dev {dev} timed out after {PROCESS_TIMEOUT}s")
                     process_results.append({
@@ -662,13 +688,33 @@ def main():
                         "dev": dev, "success": False, "error": str(e),
                         "total_time": 0
                     })
-    
     except KeyboardInterrupt:
         master_logger.warning("Interrupted by user")
         print("\n[INTERRUPT] Gracefully shutting down processes...")
     except Exception as e:
         master_logger.error(f"Critical error in multiprocessing: {str(e)}")
         raise
+
+    # === MAIN ARCHIVE CREATION ===
+    if CREATE_TAR:
+        os.makedirs(ARCHIVE_DIR, exist_ok=True)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        main_tar_name = f"experiments_survival_N{N}_samples{samples}_{timestamp}.tar"
+        main_tar_path = os.path.join(ARCHIVE_DIR, main_tar_name)
+        dev_tar_paths = [r.get("dev_tar_path") for r in process_results if r.get("dev_tar_path")]
+        if dev_tar_paths:
+            with tarfile.open(main_tar_path, "w") as tar:
+                for dev_tar in dev_tar_paths:
+                    tar.add(dev_tar, arcname=os.path.basename(dev_tar))
+            print(f"Created main archive: {main_tar_path}")
+            master_logger.info(f"Created main archive: {main_tar_path}")
+            # Delete temporary dev tar files
+            for dev_tar in dev_tar_paths:
+                try:
+                    os.remove(dev_tar)
+                    master_logger.info(f"Deleted temporary archive: {dev_tar}")
+                except Exception as e:
+                    master_logger.warning(f"Could not delete {dev_tar}: {e}")
     
     total_time = time.time() - start_time
     
