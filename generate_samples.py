@@ -27,6 +27,7 @@ import math
 import signal
 import pickle
 import logging
+import gc
 import multiprocessing as mp
 from concurrent.futures import ProcessPoolExecutor, as_completed, TimeoutError
 from datetime import datetime
@@ -185,70 +186,6 @@ def setup_master_logging():
     return master_logger
 
 # ============================================================================
-# DIRECTORY MANAGEMENT
-# ============================================================================
-
-def get_experiment_dir(tesselation_func, has_noise, N, noise_params=None, noise_type="static_noise", base_dir="experiments_data_samples", theta=None, samples=None):
-    """
-    Get experiment directory path with proper structure.
-    
-    Structure: base_dir/tesselation_func_noise_type/theta_value/dev_range/N_value/samples_count
-    Example: experiments_data_samples/dummy_tesselation_func_static_noise/theta_1.047198/dev_min0.000_max0.000/N_300/samples_5
-    """
-    # Handle deviation format
-    if noise_params and len(noise_params) > 0:
-        dev = noise_params[0]
-        if isinstance(dev, (tuple, list)) and len(dev) == 2:
-            min_val, max_val = dev
-            dev_str = f"dev_min{min_val:.3f}_max{max_val:.3f}"
-        else:
-            dev_str = f"dev_{float(dev):.3f}"
-    else:
-        dev_str = "dev_min0.000_max0.000"
-    
-    # Format theta for directory
-    if theta is not None:
-        theta_str = f"theta_{theta:.6f}"
-    else:
-        theta_str = "theta_default"
-    
-    # Format tessellation function name for directory
-    if tesselation_func is None or hasattr(tesselation_func, '__name__') and tesselation_func.__name__ == 'dummy_tesselation_func':
-        tessellation_name = "dummy_tesselation_func"
-    else:
-        tessellation_name = getattr(tesselation_func, '__name__', 'unknown_tesselation_func')
-    
-    # Build directory path with correct structure
-    exp_dir = os.path.join(
-        base_dir,
-        f"{tessellation_name}_{noise_type}",
-        theta_str,
-        dev_str,
-        f"N_{N}"
-    )
-    
-    if samples is not None:
-        exp_dir = os.path.join(exp_dir, f"samples_{samples}")
-    
-    return exp_dir
-
-def check_sample_exists(exp_dir, sample_id):
-    """Check if a specific sample already exists for all steps"""
-    for step_idx in range(steps):
-        step_dir = os.path.join(exp_dir, f"step_{step_idx}")
-        sample_file = os.path.join(step_dir, f"sample_{sample_id}.pkl")
-        if not os.path.exists(sample_file):
-            return False
-        # Also ensure the pickle file can be loaded (not corrupted)
-        try:
-            with open(sample_file, 'rb') as f:
-                _ = pickle.load(f)
-        except Exception:
-            # Corrupt or unreadable file => treat as missing
-            return False
-    return True
-
-# ============================================================================
 # SAMPLE GENERATION FUNCTIONS
 # ============================================================================
 
@@ -289,6 +226,7 @@ def generate_samples_for_dev(dev_args):
         
         # Import the memory-efficient sparse implementation
         from sqw.experiments_sparse import running_streaming_sparse
+        from smart_loading_static import get_experiment_dir
         
         # Setup experiment directory - handle new deviation format
         if isinstance(dev, (tuple, list)) and len(dev) == 2:
@@ -300,18 +238,18 @@ def generate_samples_for_dev(dev_args):
             has_noise = dev > 0
         
         # With unified structure, we always include noise_params (including 0 for no noise)
-        # For sample generation, we don't include the samples subfolder - that's only for processed data
         noise_params = [dev]
         exp_dir = get_experiment_dir(dummy_tesselation_func, has_noise, N, 
                                    noise_params=noise_params, noise_type="static_noise", 
-                                   base_dir=SAMPLES_BASE_DIR, theta=theta_param, samples=None)
+                                   base_dir=SAMPLES_BASE_DIR, theta=theta_param)
         os.makedirs(exp_dir, exist_ok=True)
         
         logger.info(f"Experiment directory: {exp_dir}")
         
         # VALIDATION: Check that directory path includes theta correctly
-        expected_theta_folder = f"theta_{theta_param:.6f}"
-        if expected_theta_folder not in exp_dir:
+        from smart_loading_static import format_theta_for_directory
+        expected_theta_folder = format_theta_for_directory(theta_param)
+        if expected_theta_folder and expected_theta_folder not in exp_dir:
             logger.warning(f"[DIRECTORY WARNING] Expected theta folder '{expected_theta_folder}' not found in path!")
             logger.warning(f"[DIRECTORY WARNING] This might cause data mixing between different theta values!")
         else:
@@ -324,8 +262,17 @@ def generate_samples_for_dev(dev_args):
         for sample_idx in range(samples_count):
             sample_start_time = time.time()
             
-            # Check if this sample already exists (all step files)
-            if check_sample_exists(exp_dir, sample_idx):
+            # Check if this sample already exists (all step files) - use same logic as static cluster
+            sample_exists = True
+            for step_idx in range(steps):
+                step_dir = os.path.join(exp_dir, f"step_{step_idx}")
+                filename = f"final_step_{step_idx}_sample{sample_idx}.pkl"
+                filepath = os.path.join(step_dir, filename)
+                if not os.path.exists(filepath):
+                    sample_exists = False
+                    break
+            
+            if sample_exists:
                 logger.info(f"Sample {sample_idx+1}/{samples_count} already exists, skipping...")
                 dev_skipped_samples += 1
                 continue
@@ -337,17 +284,23 @@ def generate_samples_for_dev(dev_args):
             
             # Create step callback function for streaming saves
             def save_step_callback(step_idx, state):
-                """Callback to save each step state"""
+                """Callback function to save each step as it's computed"""
                 step_dir = os.path.join(exp_dir, f"step_{step_idx}")
                 os.makedirs(step_dir, exist_ok=True)
-                sample_file = os.path.join(step_dir, f"sample_{sample_idx}.pkl")
-                # If the sample file already exists, skip writing to avoid overwriting
-                if os.path.exists(sample_file):
-                    logger.debug(f"Step file already exists, skipping write: {sample_file}")
-                    return
-
-                with open(sample_file, 'wb') as f:
+                
+                filename = f"final_step_{step_idx}_sample{sample_idx}.pkl"
+                filepath = os.path.join(step_dir, filename)
+                
+                with open(filepath, 'wb') as f:
                     pickle.dump(state, f)
+                
+                # Explicitly delete state reference to help memory management
+                del state
+                gc.collect()
+                
+                # Progress logging for large computations
+                if step_idx % 100 == 0 or step_idx == steps:
+                    logger.info(f"    Saved step {step_idx}/{steps}")
             
             # Memory-efficient streaming approach
             try:
