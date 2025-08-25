@@ -44,8 +44,10 @@ import gc
 # Experiment parameters - EDIT THESE TO MATCH YOUR SETUP
 N = 20000                # System size (small for testing)
 steps = N//4           # Time steps (25 for N=100)
-samples = 5          # Samples per deviation (small for testing)
-theta = math.pi      # Theta parameter for static noise
+samples = 40         # Samples per deviation (small for testing)
+theta = math.pi/3      # Theta parameter for static noise
+# samples = 5          # Samples per deviation (small for testing)
+# theta = math.pi      # Theta parameter for static noise
 
 # Deviation values - TEST SET (matching generate_samples.py)
 # devs = [
@@ -107,7 +109,7 @@ def dummy_tesselation_func(N):
 # LOGGING SETUP
 # ============================================================================
 
-def setup_process_logging(dev_value, process_id):
+def setup_process_logging(dev_value, process_id, theta=None):
     """Setup logging for individual processes"""
     os.makedirs(PROCESS_LOG_DIR, exist_ok=True)
     
@@ -118,7 +120,13 @@ def setup_process_logging(dev_value, process_id):
     else:
         dev_str = f"{float(dev_value):.3f}"
     
-    log_filename = os.path.join(PROCESS_LOG_DIR, f"process_dev_{dev_str}_samples.log")
+    # Format theta for filename
+    if theta is not None:
+        theta_str = f"_theta{theta:.6f}"
+    else:
+        theta_str = ""
+    
+    log_filename = os.path.join(PROCESS_LOG_DIR, f"process_dev_{dev_str}{theta_str}_samples.log")
     
     # Create logger for this process
     logger = logging.getLogger(f"dev_{dev_str}_samples")
@@ -206,7 +214,7 @@ def generate_samples_for_dev(dev_args):
     
     # Setup logging for this process
     dev_str = f"{dev}" if isinstance(dev, (int, float)) else f"{dev[0]}_{dev[1]}" if isinstance(dev, (tuple, list)) else str(dev)
-    logger, log_file = setup_process_logging(dev_str, process_id)
+    logger, log_file = setup_process_logging(dev_str, process_id, theta_param)
     
     try:
         logger.info(f"=== SAMPLE GENERATION STARTED ===")

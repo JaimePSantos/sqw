@@ -171,7 +171,7 @@ def log_progress_update(phase, completed, total, start_time, logger=None):
 # LOGGING SETUP
 # ============================================================================
 
-def setup_process_logging(dev_value, process_id):
+def setup_process_logging(dev_value, process_id, theta=None):
     """Setup logging for individual processes"""
     os.makedirs(PROCESS_LOG_DIR, exist_ok=True)
     
@@ -182,7 +182,13 @@ def setup_process_logging(dev_value, process_id):
     else:
         dev_str = f"{float(dev_value):.3f}"
     
-    log_filename = os.path.join(PROCESS_LOG_DIR, f"process_dev_{dev_str}_std.log")
+    # Format theta for filename
+    if theta is not None:
+        theta_str = f"_theta{theta:.6f}"
+    else:
+        theta_str = ""
+    
+    log_filename = os.path.join(PROCESS_LOG_DIR, f"process_dev_{dev_str}{theta_str}_std.log")
     
     # Create logger for this process
     logger = logging.getLogger(f"dev_{dev_str}_std")
@@ -464,7 +470,7 @@ def generate_std_for_dev(dev_args):
     
     # Setup logging for this process
     dev_str = f"{dev}" if isinstance(dev, (int, float)) else f"{dev[0]}_{dev[1]}" if isinstance(dev, (tuple, list)) else str(dev)
-    logger, log_file = setup_process_logging(dev_str, process_id)
+    logger, log_file = setup_process_logging(dev_str, process_id, theta_param)
     
     try:
         logger.info(f"=== STANDARD DEVIATION GENERATION STARTED ===")
