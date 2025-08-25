@@ -77,13 +77,84 @@ PROCESS_LOG_DIR = "generate_probdist"
 
 # Multiprocessing configuration
 MAX_PROCESSES = min(len(devs), mp.cpu_count())
-PROCESS_TIMEOUT = 7200  # 2 hour timeout per process
+
+# Timeout configuration - Scale with problem size (matches static_cluster_logged_mp.py)
+# Base timeout for each process, scaled by N and steps
+BASE_TIMEOUT_PER_SAMPLE = 30  # seconds per sample for small N
+TIMEOUT_SCALE_FACTOR = (N * steps) / 1000000  # Scale based on computational complexity
+PROCESS_TIMEOUT = max(3600, int(BASE_TIMEOUT_PER_SAMPLE * samples * TIMEOUT_SCALE_FACTOR))  # Minimum 1 hour
+
+print(f"[TIMEOUT] Process timeout: {PROCESS_TIMEOUT} seconds ({PROCESS_TIMEOUT/3600:.1f} hours)")
+print(f"[TIMEOUT] Based on N={N}, steps={steps}, samples={samples}")
+print(f"[RESOURCE] Using {MAX_PROCESSES} processes out of {mp.cpu_count()} CPUs")
 
 # Logging configuration
 MASTER_LOG_FILE = "generate_probdist/probdist_generation_master.log"
 
 # Global shutdown flag
 SHUTDOWN_REQUESTED = False
+
+# ============================================================================
+# SYSTEM MONITORING AND LOGGING UTILITIES
+# ============================================================================
+
+def log_system_resources(logger=None, prefix="[SYSTEM]"):
+    """Log current system resource usage (matches static_cluster_logged_mp.py)"""
+    try:
+        import psutil
+        memory = psutil.virtual_memory()
+        cpu_percent = psutil.cpu_percent(interval=1)
+        
+        msg = f"{prefix} Memory: {memory.percent:.1f}% used ({memory.available / (1024**3):.1f}GB free), CPU: {cpu_percent:.1f}%"
+        if logger:
+            logger.info(msg)
+        else:
+            print(msg)
+        
+        # Check for concerning resource usage
+        if memory.percent > 90:
+            warning_msg = f"{prefix} HIGH MEMORY USAGE: {memory.percent:.1f}%"
+            if logger:
+                logger.warning(warning_msg)
+            else:
+                print(f"[WARNING] {warning_msg}")
+        
+        if cpu_percent > 95:
+            warning_msg = f"{prefix} HIGH CPU USAGE: {cpu_percent:.1f}%"
+            if logger:
+                logger.warning(warning_msg)
+            else:
+                print(f"[WARNING] {warning_msg}")
+            
+    except ImportError:
+        msg = f"{prefix} psutil not available - cannot monitor resources"
+        if logger:
+            logger.warning(msg)
+        else:
+            print(f"[WARNING] {msg}")
+    except Exception as e:
+        msg = f"{prefix} Error monitoring resources: {e}"
+        if logger:
+            logger.warning(msg)
+        else:
+            print(f"[WARNING] {msg}")
+
+def log_progress_update(phase, completed, total, start_time, logger=None):
+    """Log detailed progress update with ETA (matches static_cluster_logged_mp.py)"""
+    elapsed = time.time() - start_time
+    if completed > 0:
+        eta = (elapsed / completed) * (total - completed)
+        eta_str = f"{eta/60:.1f}m" if eta < 3600 else f"{eta/3600:.1f}h"
+        progress_pct = (completed / total) * 100
+        
+        msg = f"[{phase}] Progress: {completed}/{total} ({progress_pct:.1f}%) - Elapsed: {elapsed/60:.1f}m - ETA: {eta_str}"
+    else:
+        msg = f"[{phase}] Progress: {completed}/{total} (0.0%) - Elapsed: {elapsed/60:.1f}m - ETA: unknown"
+    
+    if logger:
+        logger.info(msg)
+    else:
+        print(msg)
 
 # ============================================================================
 # SIGNAL HANDLING AND UTILITIES
@@ -319,6 +390,8 @@ def load_sample_file(file_path):
 def generate_step_probdist(samples_dir, target_dir, step_idx, N, samples_count, logger):
     """
     Generate probability distribution for a specific step from sample files.
+    Uses optimized streaming processing with incremental mean calculation to minimize memory usage.
+    This matches the implementation from static_cluster_logged_mp.py.
     
     Args:
         samples_dir: Directory containing sample files
@@ -340,38 +413,55 @@ def generate_step_probdist(samples_dir, target_dir, step_idx, N, samples_count, 
             logger.error(f"Step directory not found: {step_dir}")
             return False
         
-        # Collect all valid samples for this step
-        valid_prob_dists = []
-
+        # Optimized streaming processing - load and process samples one at a time
+        # This matches the memory-efficient approach from static_cluster_logged_mp.py
+        mean_prob_dist = None
+        valid_samples = 0
+        
         for sample_idx in range(samples_count):
-            sample_file = os.path.join(step_dir, f"sample_{sample_idx}.pkl")
-            sample_data = load_sample_file(sample_file)
-
-            if sample_data is not None:
-                # Convert amplitude to probability
-                prob_dist = amp2prob(sample_data)
-                valid_prob_dists.append(prob_dist)
+            # Use the same filename format as static_cluster_logged_mp.py
+            filename = f"final_step_{step_idx}_sample{sample_idx}.pkl"
+            filepath = os.path.join(step_dir, filename)
+            
+            if os.path.exists(filepath):
+                # Load sample
+                with open(filepath, "rb") as f:
+                    state = pickle.load(f)
+                
+                # Convert to probability distribution
+                prob_dist = amp2prob(state)  # |amplitude|^2
+                
+                # Update running mean using incremental formula
+                if mean_prob_dist is None:
+                    # Initialize with first sample
+                    mean_prob_dist = prob_dist.copy()
+                else:
+                    # Incremental mean: new_mean = old_mean + (new_value - old_mean) / count
+                    mean_prob_dist += (prob_dist - mean_prob_dist) / (valid_samples + 1)
+                
+                valid_samples += 1
+                
+                # Free memory immediately
+                del state, prob_dist
             else:
-                logger.error(f"Failed to load sample {sample_idx} for step {step_idx}: {sample_file}")
-                # If a sample is missing/invalid, fail this step so caller can handle shutdown
-                return False
+                if sample_idx < 10:  # Only log first 10 missing files to avoid spam
+                    logger.warning(f"Sample file not found: {filepath}")
         
-        if not valid_prob_dists:
-            logger.error(f"No valid samples found for step {step_idx}")
+        if valid_samples > 0:
+            # Save mean probability distribution
+            os.makedirs(target_dir, exist_ok=True)
+            mean_filepath = os.path.join(target_dir, f"mean_step_{step_idx}.pkl")
+            
+            with open(mean_filepath, "wb") as f:
+                pickle.dump(mean_prob_dist, f, protocol=pickle.HIGHEST_PROTOCOL)
+            
+            # Only log completion for debugging (matches static cluster behavior)
+            if step_idx % 100 == 0 or step_idx < 10:
+                logger.info(f"Generated probDist for step {step_idx} from {valid_samples} samples")
+            return True
+        else:
+            logger.warning(f"No valid samples found for step {step_idx}")
             return False
-        
-        # Calculate mean probability distribution
-        mean_prob_dist = np.mean(valid_prob_dists, axis=0)
-        
-        # Save mean probability distribution
-        os.makedirs(target_dir, exist_ok=True)
-        mean_filepath = os.path.join(target_dir, f"mean_step_{step_idx}.pkl")
-        
-        with open(mean_filepath, 'wb') as f:
-            pickle.dump(mean_prob_dist, f)
-        
-        logger.info(f"Generated probDist for step {step_idx} from {len(valid_prob_dists)} samples")
-        return True
         
     except Exception as e:
         logger.error(f"Error generating probDist for step {step_idx}: {str(e)}")
@@ -462,9 +552,9 @@ def validate_samples_presence(samples_exp_dir, steps, samples_count, logger):
 def generate_probdist_for_dev(dev_args):
     """
     Worker function to generate probability distributions for a single deviation value.
-    dev_args: (dev, process_id, N, steps, samples, theta, shutdown_flag)
+    dev_args: (dev, process_id, N, steps, samples, theta, shutdown_flag, source_base_dir, target_base_dir)
     """
-    dev, process_id, N, steps, samples_count, theta_param, shutdown_flag = dev_args
+    dev, process_id, N, steps, samples_count, theta_param, shutdown_flag, source_base_dir, target_base_dir = dev_args
     
     # Setup logging for this process
     dev_str = f"{dev}" if isinstance(dev, (int, float)) else f"{dev[0]}_{dev[1]}" if isinstance(dev, (tuple, list)) else str(dev)
@@ -485,21 +575,21 @@ def generate_probdist_for_dev(dev_args):
         else:
             has_noise = dev > 0
         
-    # Get source and target directories
+        # Get source and target directories using smart_loading_static
+        from smart_loading_static import find_experiment_dir_flexible, get_experiment_dir
+        
         noise_params = [dev]
         samples_exp_dir, found_format = find_experiment_dir_flexible(
             dummy_tesselation_func, has_noise, N, 
             noise_params=noise_params, noise_type="static_noise", 
-            base_dir=SAMPLES_BASE_DIR, theta=theta_param
+            base_dir=source_base_dir, theta=theta_param
         )
         
         probdist_exp_dir = get_experiment_dir(
             dummy_tesselation_func, has_noise, N, 
             noise_params=noise_params, noise_type="static_noise", 
-            base_dir=PROBDIST_BASE_DIR, theta=theta_param, samples=samples_count
-        )
-        
-        logger.info(f"Samples source: {samples_exp_dir}")
+            base_dir=target_base_dir, theta=theta_param, samples=samples_count
+        )        logger.info(f"Samples source: {samples_exp_dir}")
         logger.info(f"ProbDist target: {probdist_exp_dir}")
         logger.info(f"Source format: {found_format}")
         # If there are precomputed mean_step_*.pkl files in the samples tree,
@@ -555,10 +645,15 @@ def generate_probdist_for_dev(dev_args):
                 "log_file": log_file, "total_time": 0
             }
         
-        # Process each step
+        # Process each step with enhanced monitoring (matches static_cluster_logged_mp.py)
         processed_steps = 0
         skipped_steps = 0
         generated_steps = 0
+        last_log_time = time.time()
+        
+        # Log initial system resources
+        log_system_resources(logger, "[WORKER]")
+        logger.info(f"Processing {steps} steps for deviation {dev_str}")
         
         for step_idx in range(steps):
             global SHUTDOWN_REQUESTED
@@ -566,14 +661,32 @@ def generate_probdist_for_dev(dev_args):
                 logger.warning(f"Shutdown requested, stopping at step {step_idx}")
                 break
             
+            # Log progress more frequently and monitor resources
+            current_time = time.time()
+            # Log every 100 steps, but only log time-based updates if it's been more than 5 minutes
+            # AND we're not already logging for the 100-step interval
+            should_log_progress = (step_idx % 100 == 0)
+            should_log_resources = (current_time - last_log_time >= 300)  # Every 5 minutes
+            
+            if should_log_progress:
+                log_progress_update("PROBDIST", step_idx + 1, steps, dev_start_time, logger)
+            
+            if should_log_resources:
+                log_system_resources(logger, "[WORKER]")
+                last_log_time = current_time
+            
             # Check if probDist file exists and is valid
             probdist_file = os.path.join(probdist_exp_dir, f"mean_step_{step_idx}.pkl")
             
             if validate_probdist_file(probdist_file):
-                logger.debug(f"Valid probDist exists for step {step_idx}, skipping")
                 skipped_steps += 1
+                if step_idx % 100 == 0:
+                    logger.info(f"    Step {step_idx+1}/{steps} already exists, skipping")
             else:
-                logger.info(f"Generating probDist for step {step_idx}...")
+                # Only log generation for debugging (matches static cluster behavior)
+                if step_idx % 100 == 0:
+                    logger.info(f"    Step {step_idx+1}/{steps} processing... (processed: {processed_steps})")
+                    
                 if generate_step_probdist(samples_exp_dir, probdist_exp_dir, step_idx, N, samples_count, logger):
                     generated_steps += 1
                 else:
@@ -581,11 +694,10 @@ def generate_probdist_for_dev(dev_args):
             
             processed_steps += 1
             
-            # Log progress every 100 steps
-            if step_idx % 100 == 0 and step_idx > 0:
-                elapsed = time.time() - dev_start_time
-                eta = (elapsed / step_idx) * (steps - step_idx)
-                logger.info(f"Progress: {step_idx}/{steps} steps - Elapsed: {elapsed/60:.1f}m - ETA: {eta/60:.1f}m")
+            # Force garbage collection periodically to keep memory usage low
+            if step_idx % 50 == 0:
+                import gc
+                gc.collect()
         
         dev_time = time.time() - dev_start_time
         
@@ -654,6 +766,153 @@ def generate_probdist_for_dev(dev_args):
 # MAIN EXECUTION FUNCTION
 # ============================================================================
 
+# ============================================================================
+# MAIN EXECUTION FUNCTION
+# ============================================================================
+
+def create_probability_distributions_multiprocess(
+    tesselation_func,
+    N,
+    steps,
+    devs,
+    samples,
+    source_base_dir="experiments_data_samples",
+    target_base_dir="experiments_data_samples_probDist",
+    noise_type="static_noise",
+    theta=None,
+    use_multiprocess=True,
+    max_processes=None,
+    logger=None
+):
+    """
+    Create probability distributions using multiprocessing for parallel computation.
+    Each deviation is processed in a separate process for maximum efficiency.
+    This function matches the interface from static_cluster_logged_mp.py.
+    
+    Args:
+        tesselation_func: Function to create tesselation (dummy for static noise)
+        N: System size
+        steps: Number of time steps
+        devs: List of deviation values
+        samples: Number of samples per deviation
+        source_base_dir: Base directory containing sample data
+        target_base_dir: Base directory to save probability distributions
+        noise_type: Type of noise ("static_noise")
+        theta: Theta parameter for static noise
+        use_multiprocess: Whether to use multiprocessing
+        max_processes: Maximum number of processes (None = auto-detect)
+        logger: Optional logger for logging operations
+    
+    Returns:
+        List of results from each process
+    """
+    def log_and_print(message, level="info"):
+        """Helper function to log messages (cluster-safe, no print)"""
+        if logger:
+            if level == "info":
+                logger.info(message.replace("[PROBDIST] ", "").replace("[WARNING] ", "").replace("[OK] ", "").replace("[ERROR] ", ""))
+            elif level == "warning":
+                logger.warning(message.replace("[WARNING] ", "").replace("[PROBDIST] ", ""))
+            elif level == "error":
+                logger.error(message.replace("[ERROR] ", "").replace("[PROBDIST] ", ""))
+        else:
+            print(message)
+    
+    log_and_print(f"[PROBDIST] Creating probability distributions for {len(devs)} devs...")
+    start_time = time.time()
+    
+    # Check if multiprocessing should be used
+    if not use_multiprocess or len(devs) <= 1:
+        log_and_print(f"[PROBDIST] Using single-process mode for {len(devs)} deviations")
+        
+        # Fall back to sequential processing
+        for dev in devs:
+            # Process each deviation sequentially
+            result = generate_probdist_for_dev((dev, 0, N, steps, samples, theta, None))
+            if not result["success"]:
+                log_and_print(f"[ERROR] Failed to process deviation {dev}: {result['error']}", "error")
+        
+        total_time = time.time() - start_time
+        log_and_print(f"[OK] Probability distributions created in {total_time:.1f}s (sequential)")
+        return []
+    
+    # Multiprocessing approach
+    if max_processes is None:
+        max_processes = min(len(devs), mp.cpu_count())
+    
+    log_and_print(f"[PROBDIST] Using multiprocess mode with {max_processes} processes for {len(devs)} deviations")
+    
+    # Prepare arguments for each process
+    process_args = []
+    for process_id, dev in enumerate(devs):
+        # Create shared shutdown flag for this run
+        manager = mp.Manager()
+        shutdown_flag = manager.Value('b', False)
+        args = (dev, process_id, N, steps, samples, theta, shutdown_flag, source_base_dir, target_base_dir)
+        process_args.append(args)
+    
+    # Use the same multiprocessing logic as the main function
+    # (This code would be shared with the main() function)
+    
+    process_results = []
+    
+    # Track process information
+    process_info = {}
+    for i, (dev, process_id, *_) in enumerate(process_args):
+        if isinstance(dev, (tuple, list)) and len(dev) == 2:
+            min_val, max_val = dev
+            dev_str = f"min{min_val:.3f}_max{max_val:.3f}"
+        else:
+            dev_str = f"{float(dev):.3f}"
+        
+        process_info[dev] = {
+            "process_id": process_id,
+            "log_file": f"process_dev_{dev_str}_probdist.log",
+            "start_time": None,
+            "end_time": None,
+            "status": "pending"
+        }
+    
+    try:
+        with ProcessPoolExecutor(max_workers=max_processes) as executor:
+            # Submit all jobs
+            future_to_dev = {}
+            for args in process_args:
+                dev = args[0]
+                future = executor.submit(generate_probdist_for_dev, args)
+                future_to_dev[future] = dev
+                process_info[dev]["start_time"] = time.time()
+                process_info[dev]["status"] = "running"
+            
+            # Collect results
+            for future in as_completed(future_to_dev, timeout=max(3600, len(devs) * 1800)):
+                dev = future_to_dev[future]
+                try:
+                    result = future.result(timeout=10)
+                    process_results.append(result)
+                    process_info[dev]["status"] = "completed" if result["success"] else "failed"
+                except Exception as e:
+                    log_and_print(f"[ERROR] Process for dev {dev} failed: {str(e)}", "error")
+                    process_results.append({
+                        "dev": dev, "success": False, "error": str(e),
+                        "processed_steps": 0, "total_steps": steps,
+                        "total_time": 0
+                    })
+                    process_info[dev]["status"] = "crashed"
+                    
+    except Exception as e:
+        log_and_print(f"[ERROR] Critical error in multiprocessing: {str(e)}", "error")
+        raise
+    
+    total_time = time.time() - start_time
+    successful_processes = sum(1 for r in process_results if r["success"])
+    failed_processes = len(process_results) - successful_processes
+    
+    log_and_print(f"[OK] Probability distributions multiprocessing completed in {total_time:.1f}s")
+    log_and_print(f"[OK] Results: {successful_processes} successful, {failed_processes} failed processes")
+    
+    return process_results
+
 def main():
     """Main execution function for probability distribution generation."""
     
@@ -705,68 +964,151 @@ def main():
     manager = mp.Manager()
     shutdown_flag = manager.Value('b', False)
 
-    # Prepare arguments for each process (include shutdown_flag)
+    # Prepare arguments for each process (include shutdown_flag and base directories)
     process_args = []
     for process_id, dev in enumerate(devs):
-        args = (dev, process_id, N, steps, samples, theta, shutdown_flag)
+        args = (dev, process_id, N, steps, samples, theta, shutdown_flag, SAMPLES_BASE_DIR, PROBDIST_BASE_DIR)
         process_args.append(args)
     
     print(f"\nStarting {len(process_args)} processes for probDist generation...")
     
     process_results = []
     
+    # Track process information (matches static_cluster_logged_mp.py)
+    process_info = {}
+    for i, (dev, process_id, *_) in enumerate(process_args):
+        # Format dev for filename
+        if isinstance(dev, (tuple, list)) and len(dev) == 2:
+            min_val, max_val = dev
+            dev_str = f"min{min_val:.3f}_max{max_val:.3f}"
+        else:
+            dev_str = f"{float(dev):.3f}"
+        
+        log_file = os.path.join(PROCESS_LOG_DIR, f"process_dev_{dev_str}_probdist.log")
+        process_info[dev] = {
+            "process_id": process_id,
+            "log_file": log_file,
+            "start_time": None,
+            "end_time": None,
+            "status": "pending"
+        }
+    
     try:
         with ProcessPoolExecutor(max_workers=MAX_PROCESSES) as executor:
-            # Submit all processes
+            # Submit all jobs
             future_to_dev = {}
             for args in process_args:
+                dev = args[0]
                 future = executor.submit(generate_probdist_for_dev, args)
-                future_to_dev[future] = args[0]  # dev value
-            # Collect results with timeout handling
-            for future in as_completed(future_to_dev, timeout=PROCESS_TIMEOUT * len(devs)):
-                dev = future_to_dev[future]
-                try:
-                    result = future.result(timeout=PROCESS_TIMEOUT)
-                    process_results.append(result)
-                    if result["success"]:
-                        master_logger.info(f"Process for dev {dev} completed successfully: "
-                                         f"{result['generated_steps']} generated, "
-                                         f"{result['skipped_steps']} skipped, "
-                                         f"time: {result['total_time']:.1f}s")
-                    else:
-                        master_logger.error(f"Process for dev {dev} failed: {result['error']}")
-                except TimeoutError:
-                    master_logger.error(f"Process for dev {dev} timed out after {PROCESS_TIMEOUT}s")
-                    process_results.append({
-                        "dev": dev, "success": False, "error": "Timeout",
-                        "processed_steps": 0, "total_steps": steps,
-                        "skipped_steps": 0, "generated_steps": 0,
-                        "total_time": PROCESS_TIMEOUT
-                    })
-                except Exception as e:
-                    master_logger.error(f"Process for dev {dev} crashed: {str(e)}")
-                    process_results.append({
-                        "dev": dev, "success": False, "error": str(e),
-                        "processed_steps": 0, "total_steps": steps,
-                        "skipped_steps": 0, "generated_steps": 0,
-                        "total_time": 0
-                    })
-                # If any worker signalled shutdown via the shared flag, cancel remaining futures
-                try:
-                    if shutdown_flag.value:
-                        master_logger.warning("Shutdown flag detected; cancelling remaining tasks")
-                        # Cancel pending futures
-                        for f in future_to_dev:
-                            if not f.done():
-                                f.cancel()
+                future_to_dev[future] = dev
+                process_info[dev]["start_time"] = time.time()
+                process_info[dev]["status"] = "running"
+                
+                # Format dev for display
+                if isinstance(dev, (tuple, list)) and len(dev) == 2:
+                    dev_str = f"min{dev[0]:.3f}_max{dev[1]:.3f}"
+                else:
+                    dev_str = f"{float(dev):.3f}"
+                master_logger.info(f"Process launched for dev={dev_str}")
+            
+            # Collect results as they complete with timeout and resource monitoring
+            completed = 0
+            timeout_start = time.time()
+            last_progress_time = timeout_start
+            master_logger.info(f"Waiting for {len(future_to_dev)} processes with {PROCESS_TIMEOUT/3600:.1f}h timeout...")
+            log_system_resources(master_logger, "[MASTER]")
+            
+            try:
+                for future in as_completed(future_to_dev, timeout=PROCESS_TIMEOUT):
+                    # Check for shutdown signal
+                    if SHUTDOWN_REQUESTED:
+                        master_logger.warning("Graceful shutdown requested, cancelling remaining processes...")
+                        for remaining_future in future_to_dev:
+                            if not remaining_future.done():
+                                remaining_future.cancel()
                         break
-                except Exception:
-                    pass
+                    
+                    dev = future_to_dev[future]
+                    process_info[dev]["end_time"] = time.time()
+                    
+                    try:
+                        result = future.result(timeout=10)  # Short timeout since future is already done
+                        process_results.append(result)
+                        process_info[dev]["status"] = "completed" if result["success"] else "failed"
+                        
+                        # Format dev for display
+                        if isinstance(dev, (tuple, list)) and len(dev) == 2:
+                            dev_str = f"min{dev[0]:.3f}_max{dev[1]:.3f}"
+                        else:
+                            dev_str = f"{float(dev):.3f}"
+                        
+                        if result["success"]:
+                            master_logger.info(f"✓ Dev {dev_str}: {result['generated_steps']} generated, "
+                                             f"{result['skipped_steps']} skipped, {result['total_time']:.1f}s")
+                        else:
+                            master_logger.error(f"✗ Dev {dev_str}: {result['error']}")
+                            
+                    except TimeoutError:
+                        error_msg = f"Process result timeout after completion for dev {dev}"
+                        master_logger.error(error_msg)
+                        process_results.append({
+                            "dev": dev, "process_id": process_info[dev]["process_id"], "success": False,
+                            "error": error_msg, "processed_steps": 0, "total_steps": steps,
+                            "skipped_steps": 0, "generated_steps": 0,
+                            "log_file": process_info[dev]["log_file"], "total_time": 0
+                        })
+                        process_info[dev]["status"] = "timeout"
+                        
+                    except Exception as e:
+                        error_msg = f"Process exception for dev {dev}: {str(e)}"
+                        master_logger.error(error_msg)
+                        process_results.append({
+                            "dev": dev, "process_id": process_info[dev]["process_id"], "success": False,
+                            "error": error_msg, "processed_steps": 0, "total_steps": steps,
+                            "skipped_steps": 0, "generated_steps": 0,
+                            "log_file": process_info[dev]["log_file"], "total_time": 0
+                        })
+                        process_info[dev]["status"] = "crashed"
+                    
+                    completed += 1
+                    
+                    # Progress and resource monitoring
+                    current_time = time.time()
+                    if completed % max(1, len(devs) // 10) == 0 or current_time - last_progress_time >= 300:
+                        log_progress_update("PROCESSES", completed, len(devs), timeout_start, master_logger)
+                        log_system_resources(master_logger, "[MASTER]")
+                        last_progress_time = current_time
+                    
+                    # Check shared shutdown flag
+                    try:
+                        if shutdown_flag.value:
+                            master_logger.warning("Shutdown flag detected, cancelling remaining processes...")
+                            for remaining_future in future_to_dev:
+                                if not remaining_future.done():
+                                    remaining_future.cancel()
+                            break
+                    except Exception:
+                        pass
+                        
+            except TimeoutError:
+                master_logger.error(f"Overall timeout after {PROCESS_TIMEOUT}s - some processes may still be running")
+                # Handle timeout - mark remaining futures as timed out
+                for future, dev in future_to_dev.items():
+                    if not future.done():
+                        process_info[dev]["status"] = "timeout"
+                        process_results.append({
+                            "dev": dev, "process_id": process_info[dev]["process_id"], "success": False,
+                            "error": "Overall timeout", "processed_steps": 0, "total_steps": steps,
+                            "skipped_steps": 0, "generated_steps": 0,
+                            "log_file": process_info[dev]["log_file"], "total_time": PROCESS_TIMEOUT
+                        })
+                        
     except KeyboardInterrupt:
         master_logger.warning("Interrupted by user")
         print("\n[INTERRUPT] Gracefully shutting down processes...")
     except Exception as e:
         master_logger.error(f"Critical error in multiprocessing: {str(e)}")
+        master_logger.error(traceback.format_exc())
         raise
 
     # === MAIN ARCHIVE CREATION ===
