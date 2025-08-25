@@ -55,7 +55,7 @@ def find_experiment_dir_flexible(
     N,
     noise_params=None,
     noise_type="static_noise",
-    base_dir="experiments_data",
+    base_dir="experiments_data_samples",
     theta=None,
     samples=None
 ):
@@ -173,7 +173,7 @@ def get_experiment_dir(
     N,
     noise_params=None,
     noise_type="angle",  # "angle" or "tesselation_order" or "static_noise"
-    base_dir="experiments_data",
+    base_dir="experiments_data_samples",
     theta=None,  # Theta parameter for static noise experiments
     samples=None  # Number of samples - used for probability distribution folders
 ):
@@ -271,7 +271,7 @@ def run_and_save_experiment_generic(
     noise_params_list,  # List of noise parameters for each walk
     noise_type="angle",  # "angle" or "tesselation_order" or "static_noise"
     parameter_name="dev",  # Name of the parameter for logging
-    base_dir="experiments_data",
+    base_dir="experiments_data_samples",
     theta=None  # Theta parameter for static noise experiments
 ):
     """
@@ -344,7 +344,7 @@ def load_experiment_results_generic(
     parameter_list,
     noise_params_list,
     noise_type="angle",
-    base_dir="experiments_data",
+    base_dir="experiments_data_samples",
     theta=None  # Theta parameter for static noise experiments
 ):
     """

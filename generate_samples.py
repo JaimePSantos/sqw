@@ -188,7 +188,7 @@ def setup_master_logging():
 # DIRECTORY MANAGEMENT
 # ============================================================================
 
-def get_experiment_dir(tesselation_func, has_noise, N, noise_params=None, noise_type="static_noise", base_dir="experiments_data", theta=None, samples=None):
+def get_experiment_dir(tesselation_func, has_noise, N, noise_params=None, noise_type="static_noise", base_dir="experiments_data_samples", theta=None, samples=None):
     """
     Get experiment directory path with proper structure.
     

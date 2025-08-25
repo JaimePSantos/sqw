@@ -168,7 +168,7 @@ def format_deviation_label(dev):
     else:
         return f"{float(dev):.3f}"
 
-def get_experiment_dir(tesselation_func, has_noise, N, noise_params=None, noise_type="static_noise", base_dir="experiments_data", theta=None, samples=None):
+def get_experiment_dir(tesselation_func, has_noise, N, noise_params=None, noise_type="static_noise", base_dir="experiments_data_samples", theta=None, samples=None):
     """
     Get experiment directory path with proper structure.
     
@@ -212,7 +212,7 @@ def get_experiment_dir(tesselation_func, has_noise, N, noise_params=None, noise_
     
     return exp_dir
 
-def find_experiment_dir_flexible(tesselation_func, has_noise, N, noise_params=None, noise_type="static_noise", base_dir="experiments_data", theta=None):
+def find_experiment_dir_flexible(tesselation_func, has_noise, N, noise_params=None, noise_type="static_noise", base_dir="experiments_data_samples", theta=None):
     """
     Find experiment directory with flexible format matching.
     Tries different directory structures to find existing data.

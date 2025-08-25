@@ -211,7 +211,7 @@ def format_deviation_for_filename(deviation_value, use_legacy_format=None):
         # Single value format
         return f"{deviation_value:.6f}"
 
-def get_experiment_dir(tesselation_func, has_noise, N, noise_params=None, noise_type="static_noise", base_dir="experiments_data", theta=None):
+def get_experiment_dir(tesselation_func, has_noise, N, noise_params=None, noise_type="static_noise", base_dir="experiments_data_samples", theta=None):
     """
     Construct experiment directory path following the expected structure.
     """
@@ -246,7 +246,7 @@ def get_experiment_dir(tesselation_func, has_noise, N, noise_params=None, noise_
         else:
             return os.path.join(base, f"N_{N}")
 
-def find_experiment_dir_flexible(tesselation_func, has_noise, N, noise_params=None, noise_type="static_noise", base_dir="experiments_data", theta=None):
+def find_experiment_dir_flexible(tesselation_func, has_noise, N, noise_params=None, noise_type="static_noise", base_dir="experiments_data_samples", theta=None):
     """
     Find experiment directory supporting both old and new formats.
     Returns: Tuple (directory_path, found_format)

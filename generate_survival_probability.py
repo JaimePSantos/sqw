@@ -4,7 +4,13 @@
 Generate Survival Probability Data from Probability Distributions
 
 This script generates survival probability data from existing probability distribution files.
-It processes multiple deviation values in parallel, calculating survival probabilities for
+It processes multiple deviation values in parallel, calculating survdef get_experiment_dir(tesselation_func, has_noise, N, noise_params=None, noise_type="static_noise", base_dir="experiments_data_samples", theta=None, samples=None):
+    """
+    Get experiment directory path with proper structure.
+    
+    Structure: base_dir/tesselation_func_noise_type/theta_value/dev_range/N_value/samples_count
+    Example: experiments_data_samples/dummy_tesselation_func_static_noise/theta_1.047198/dev_min0.000_max0.000/N_300/samples_5
+    """obabilities for
 configurable node ranges and saving the results for later plotting.
 
 Key Features:
@@ -261,7 +267,7 @@ def setup_master_logging():
 # DIRECTORY AND FILE MANAGEMENT
 # ============================================================================
 
-def get_experiment_dir(tesselation_func, has_noise, N, noise_params=None, noise_type="static_noise", base_dir="experiments_data", theta=None, samples=None):
+def get_experiment_dir(tesselation_func, has_noise, N, noise_params=None, noise_type="static_noise", base_dir="experiments_data_samples", theta=None, samples=None):
     """
     Get experiment directory path with proper structure.
     
@@ -305,7 +311,7 @@ def get_experiment_dir(tesselation_func, has_noise, N, noise_params=None, noise_
     
     return exp_dir
 
-def find_experiment_dir_flexible(tesselation_func, has_noise, N, noise_params=None, noise_type="static_noise", base_dir="experiments_data", theta=None):
+def find_experiment_dir_flexible(tesselation_func, has_noise, N, noise_params=None, noise_type="static_noise", base_dir="experiments_data_samples", theta=None):
     """
     Find experiment directory with flexible format matching.
     Tries different directory structures to find existing data.
