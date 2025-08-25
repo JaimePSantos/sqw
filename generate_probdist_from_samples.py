@@ -49,9 +49,9 @@ ARCHIVE_DIR = "experiments_archive"
 # ============================================================================
 
 # Experiment parameters - EDIT THESE TO MATCH YOUR SETUP
-N = 300                # System size (small for testing)
+N = 20000                # System size (small for testing)
 steps = N//4           # Time steps (25 for N=100)
-samples = 5           # Samples per deviation (small for testing)
+samples = 40           # Samples per deviation (small for testing)
 theta = math.pi/3      # Theta parameter for static noise
 
 # Deviation values - TEST SET (matching generate_samples.py)
@@ -64,8 +64,10 @@ theta = math.pi/3      # Theta parameter for static noise
 
 devs = [
     (0,0),              # No noise
-    (0, 0.1),           # Small noise range
-    (0, 0.9),           # Medium noise range  
+    (0, 0.2),           # Small noise range
+    (0, 0.6),           # Medium noise range  
+    (0, 0.8),           # Medium noise range  
+    (0, 1),           # Medium noise range  
 ]
 
 # Directory configuration
