@@ -155,9 +155,9 @@ LABEL_CONFIG = {
 }
 
 # Experiment parameters (must match the original experiment)
-N = 20000  # System size
+N = 300  # System size
 steps = N//4  # Time steps
-samples = 40  # Samples per deviation
+samples = 5  # Samples per deviation
 
 # Quantum walk parameters
 theta = math.pi/3  # Base theta parameter for static noise
@@ -165,12 +165,18 @@ initial_state_kwargs = {"nodes": [N//2]}
 
 # Deviation values for static noise experiments
 # MUST MATCH the original experiment configuration
+# devs = [
+#     (0,0),              # No noise
+#     (0, 0.2),           # Small noise range
+#     (0, 0.6),           # Medium noise range  
+#     (0, 0.8),           # Medium noise range  
+#     (0, 1),           # Medium noise range  
+# ]
+
 devs = [
     (0,0),              # No noise
     (0, 0.2),           # Small noise range
-    (0, 0.6),           # Medium noise range  
-    (0, 0.8),           # Medium noise range  
-    (0, 1),           # Medium noise range  
+    (0, 0.5),           # Medium noise range  
 ]
 
 # Data directories

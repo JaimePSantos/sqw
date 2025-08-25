@@ -23,6 +23,8 @@ Configuration:
 import os
 import sys
 import time
+import math
+import signal
 import pickle
 import logging
 import multiprocessing as mp
@@ -39,7 +41,7 @@ import gc
 # ============================================================================
 
 # Experiment parameters - EDIT THESE FOR YOUR TEST
-N = 100                # System size (small for testing)
+N = 300                # System size (small for testing)
 steps = N//4           # Time steps (25 for N=100)
 samples = 5            # Samples per deviation (small for testing)
 theta = math.pi/3      # Theta parameter for static noise
@@ -47,8 +49,8 @@ theta = math.pi/3      # Theta parameter for static noise
 # Deviation values - TEST SET
 devs = [
     (0,0),              # No noise
-    (0, 0.2),           # Small noise range
-    (0, 0.5),           # Medium noise range  
+    (0, 0.1),           # Small noise range
+    (0, 0.9),           # Medium noise range  
 ]
 
 # Directory configuration
@@ -171,17 +173,20 @@ def setup_master_logging():
 def get_experiment_dir(tesselation_func, has_noise, N, noise_params=None, noise_type="static_noise", base_dir="experiments_data", theta=None, samples=None):
     """
     Get experiment directory path with proper structure.
+    
+    Structure: base_dir/tesselation_func_noise_type/theta_value/dev_range/N_value/samples_count
+    Example: experiments_data_samples/dummy_tesselation_func_static_noise/theta_1.047198/dev_min0.000_max0.000/N_300/samples_5
     """
     # Handle deviation format
     if noise_params and len(noise_params) > 0:
         dev = noise_params[0]
         if isinstance(dev, (tuple, list)) and len(dev) == 2:
             min_val, max_val = dev
-            dev_str = f"min{min_val:.3f}_max{max_val:.3f}"
+            dev_str = f"dev_min{min_val:.3f}_max{max_val:.3f}"
         else:
-            dev_str = f"{float(dev):.3f}"
+            dev_str = f"dev_{float(dev):.3f}"
     else:
-        dev_str = "0.000"
+        dev_str = "dev_min0.000_max0.000"
     
     # Format theta for directory
     if theta is not None:
@@ -189,15 +194,23 @@ def get_experiment_dir(tesselation_func, has_noise, N, noise_params=None, noise_
     else:
         theta_str = "theta_default"
     
-    # Build directory path
-    if noise_type == "static_noise":
-        noise_dir = f"static_dev_{dev_str}"
-        if samples is not None:
-            noise_dir += f"_samples_{samples}"
-        
-        exp_dir = os.path.join(base_dir, theta_str, f"N_{N}", noise_dir)
+    # Format tessellation function name for directory
+    if tesselation_func is None or hasattr(tesselation_func, '__name__') and tesselation_func.__name__ == 'dummy_tesselation_func':
+        tessellation_name = "dummy_tesselation_func"
     else:
-        exp_dir = os.path.join(base_dir, f"N_{N}", f"dev_{dev_str}")
+        tessellation_name = getattr(tesselation_func, '__name__', 'unknown_tesselation_func')
+    
+    # Build directory path with correct structure
+    exp_dir = os.path.join(
+        base_dir,
+        f"{tessellation_name}_{noise_type}",
+        theta_str,
+        dev_str,
+        f"N_{N}"
+    )
+    
+    if samples is not None:
+        exp_dir = os.path.join(exp_dir, f"samples_{samples}")
     
     return exp_dir
 
@@ -207,6 +220,13 @@ def check_sample_exists(exp_dir, sample_id):
         step_dir = os.path.join(exp_dir, f"step_{step_idx}")
         sample_file = os.path.join(step_dir, f"sample_{sample_id}.pkl")
         if not os.path.exists(sample_file):
+            return False
+        # Also ensure the pickle file can be loaded (not corrupted)
+        try:
+            with open(sample_file, 'rb') as f:
+                _ = pickle.load(f)
+        except Exception:
+            # Corrupt or unreadable file => treat as missing
             return False
     return True
 
@@ -302,7 +322,11 @@ def generate_samples_for_dev(dev_args):
                 step_dir = os.path.join(exp_dir, f"step_{step_idx}")
                 os.makedirs(step_dir, exist_ok=True)
                 sample_file = os.path.join(step_dir, f"sample_{sample_idx}.pkl")
-                
+                # If the sample file already exists, skip writing to avoid overwriting
+                if os.path.exists(sample_file):
+                    logger.debug(f"Step file already exists, skipping write: {sample_file}")
+                    return
+
                 with open(sample_file, 'wb') as f:
                     pickle.dump(state, f)
             

@@ -199,4 +199,5 @@ sqw/__pycache__
 **/logs/*
 *.pid
 *.png
-*.tar
+**/*.tar
+**/*.tar.gz

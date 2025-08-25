@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 
 """
-Recreate Probability Distributions from Samples
+Generate Probability Distributions from Samples
 
-This script recreates probability distribution (.pkl) files from existing sample data.
+This script generates probability distribution (.pkl) files from existing sample data.
 It processes multiple deviation values in parallel, checking for missing or invalid
-probability distribution files and recreating them from the corresponding sample files.
+probability distribution files and creating them from the corresponding sample files.
 
 Key Features:
 - Multi-process execution (one process per deviation value)
@@ -15,7 +15,7 @@ Key Features:
 - Graceful error handling and recovery
 
 Usage:
-    python recreate_probdist_from_samples.py
+    python generate_probdist_from_samples.py
 
 Configuration:
     Edit the parameters section below to match your experiment setup.
@@ -33,36 +33,52 @@ import traceback
 import signal
 import math
 import numpy as np
+import shutil
+import glob
+
+# ============================================================================
+# ARCHIVING CONFIGURATION
+# ============================================================================
+
+CREATE_TAR = True  # If True, create per-dev and main tar archives
+ARCHIVE_DIR = "experiments_archive"
+
 
 # ============================================================================
 # CONFIGURATION PARAMETERS
 # ============================================================================
 
 # Experiment parameters - EDIT THESE TO MATCH YOUR SETUP
-N = 20000                # System size (small for testing)
+N = 300                # System size (small for testing)
 steps = N//4           # Time steps (25 for N=100)
-samples = 40           # Samples per deviation (small for testing)
+samples = 5           # Samples per deviation (small for testing)
 theta = math.pi/3      # Theta parameter for static noise
 
 # Deviation values - TEST SET (matching generate_samples.py)
+# devs = [
+#     # (0,0),              # No noise
+#     # (0, 0.2),           # Small noise range
+#     # (0, 0.5),           # Medium noise range  
+#     (0, 0.8),           # Medium noise range  
+# ]
+
 devs = [
-    # (0,0),              # No noise
-    # (0, 0.2),           # Small noise range
-    # (0, 0.5),           # Medium noise range  
-    (0, 0.8),           # Medium noise range  
+    (0,0),              # No noise
+    (0, 0.1),           # Small noise range
+    (0, 0.9),           # Medium noise range  
 ]
 
 # Directory configuration
 SAMPLES_BASE_DIR = "experiments_data_samples"
 PROBDIST_BASE_DIR = "experiments_data_samples_probDist"
-PROCESS_LOG_DIR = "recreate_probDist"
+PROCESS_LOG_DIR = "generate_probdist"
 
 # Multiprocessing configuration
 MAX_PROCESSES = min(len(devs), mp.cpu_count())
 PROCESS_TIMEOUT = 7200  # 2 hour timeout per process
 
 # Logging configuration
-MASTER_LOG_FILE = "recreate_probDist/probdist_recreation_master.log"
+MASTER_LOG_FILE = "generate_probdist/probdist_generation_master.log"
 
 # Global shutdown flag
 SHUTDOWN_REQUESTED = False
@@ -175,18 +191,20 @@ def setup_master_logging():
 def get_experiment_dir(tesselation_func, has_noise, N, noise_params=None, noise_type="static_noise", base_dir="experiments_data", theta=None, samples=None):
     """
     Get experiment directory path with proper structure.
-    Handles both old and new directory formats.
+    
+    Structure: base_dir/tesselation_func_noise_type/theta_value/dev_range/N_value/samples_count
+    Example: experiments_data_samples/dummy_tesselation_func_static_noise/theta_1.047198/dev_min0.000_max0.000/N_300/samples_5
     """
     # Handle deviation format
     if noise_params and len(noise_params) > 0:
         dev = noise_params[0]
         if isinstance(dev, (tuple, list)) and len(dev) == 2:
             min_val, max_val = dev
-            dev_str = f"min{min_val:.3f}_max{max_val:.3f}"
+            dev_str = f"dev_min{min_val:.3f}_max{max_val:.3f}"
         else:
-            dev_str = f"{float(dev):.3f}"
+            dev_str = f"dev_{float(dev):.3f}"
     else:
-        dev_str = "0.000"
+        dev_str = "dev_min0.000_max0.000"
     
     # Format theta for directory
     if theta is not None:
@@ -194,15 +212,23 @@ def get_experiment_dir(tesselation_func, has_noise, N, noise_params=None, noise_
     else:
         theta_str = "theta_default"
     
-    # Build directory path
-    if noise_type == "static_noise":
-        noise_dir = f"static_dev_{dev_str}"
-        if samples is not None:
-            noise_dir += f"_samples_{samples}"
-        
-        exp_dir = os.path.join(base_dir, theta_str, f"N_{N}", noise_dir)
+    # Format tessellation function name for directory
+    if tesselation_func is None or hasattr(tesselation_func, '__name__') and tesselation_func.__name__ == 'dummy_tesselation_func':
+        tessellation_name = "dummy_tesselation_func"
     else:
-        exp_dir = os.path.join(base_dir, f"N_{N}", f"dev_{dev_str}")
+        tessellation_name = getattr(tesselation_func, '__name__', 'unknown_tesselation_func')
+    
+    # Build directory path with correct structure
+    exp_dir = os.path.join(
+        base_dir,
+        f"{tessellation_name}_{noise_type}",
+        theta_str,
+        dev_str,
+        f"N_{N}"
+    )
+    
+    if samples is not None:
+        exp_dir = os.path.join(exp_dir, f"samples_{samples}")
     
     return exp_dir
 
@@ -211,13 +237,13 @@ def find_experiment_dir_flexible(tesselation_func, has_noise, N, noise_params=No
     Find experiment directory with flexible format matching.
     Tries different directory structures to find existing data.
     """
-    # Try new format first (with samples)
-    for samples_try in [samples, None]:  # Try with and without samples in path
+    # Try new format first (with and without samples in path)
+    for samples_try in [40, 20, 10, 5, None]:  # Common sample counts
         exp_dir = get_experiment_dir(tesselation_func, has_noise, N, noise_params, noise_type, base_dir, theta, samples_try)
         if os.path.exists(exp_dir):
             return exp_dir, "new_format"
     
-    # Try old format variations
+    # Try old format variations for backwards compatibility
     if noise_params and len(noise_params) > 0:
         dev = noise_params[0]
         if isinstance(dev, (tuple, list)) and len(dev) == 2:
@@ -240,7 +266,7 @@ def find_experiment_dir_flexible(tesselation_func, has_noise, N, noise_params=No
             return exp_dir, "old_format"
     
     # If nothing found, return the new format path (will be created if needed)
-    return get_experiment_dir(tesselation_func, has_noise, N, noise_params, noise_type, base_dir, theta, samples), "new_format"
+    return get_experiment_dir(tesselation_func, has_noise, N, noise_params, noise_type, base_dir, theta, None), "new_format"
 
 def validate_probdist_file(file_path):
     """
@@ -285,12 +311,12 @@ def load_sample_file(file_path):
         return None
 
 # ============================================================================
-# PROBABILITY DISTRIBUTION RECREATION FUNCTIONS
+# PROBABILITY DISTRIBUTION GENERATION FUNCTIONS
 # ============================================================================
 
-def recreate_step_probdist(samples_dir, target_dir, step_idx, N, samples_count, logger):
+def generate_step_probdist(samples_dir, target_dir, step_idx, N, samples_count, logger):
     """
-    Recreate probability distribution for a specific step from sample files.
+    Generate probability distribution for a specific step from sample files.
     
     Args:
         samples_dir: Directory containing sample files
@@ -309,22 +335,24 @@ def recreate_step_probdist(samples_dir, target_dir, step_idx, N, samples_count, 
         
         step_dir = os.path.join(samples_dir, f"step_{step_idx}")
         if not os.path.exists(step_dir):
-            logger.warning(f"Step directory not found: {step_dir}")
+            logger.error(f"Step directory not found: {step_dir}")
             return False
         
         # Collect all valid samples for this step
         valid_prob_dists = []
-        
+
         for sample_idx in range(samples_count):
             sample_file = os.path.join(step_dir, f"sample_{sample_idx}.pkl")
             sample_data = load_sample_file(sample_file)
-            
+
             if sample_data is not None:
                 # Convert amplitude to probability
                 prob_dist = amp2prob(sample_data)
                 valid_prob_dists.append(prob_dist)
             else:
-                logger.warning(f"Failed to load sample {sample_idx} for step {step_idx}")
+                logger.error(f"Failed to load sample {sample_idx} for step {step_idx}: {sample_file}")
+                # If a sample is missing/invalid, fail this step so caller can handle shutdown
+                return False
         
         if not valid_prob_dists:
             logger.error(f"No valid samples found for step {step_idx}")
@@ -340,31 +368,108 @@ def recreate_step_probdist(samples_dir, target_dir, step_idx, N, samples_count, 
         with open(mean_filepath, 'wb') as f:
             pickle.dump(mean_prob_dist, f)
         
-        logger.info(f"Recreated probDist for step {step_idx} from {len(valid_prob_dists)} samples")
+        logger.info(f"Generated probDist for step {step_idx} from {len(valid_prob_dists)} samples")
         return True
         
     except Exception as e:
-        logger.error(f"Error recreating probDist for step {step_idx}: {str(e)}")
+        logger.error(f"Error generating probDist for step {step_idx}: {str(e)}")
         return False
 
-def recreate_probdist_for_dev(dev_args):
+
+def mirror_existing_mean_files(samples_exp_dir, probdist_exp_dir, samples_count, logger):
     """
-    Worker function to recreate probability distributions for a single deviation value.
-    
-    Args:
-        dev_args: Tuple containing (dev, process_id, N, steps, samples, theta)
-    
-    Returns:
-        dict: Results from the recreation process
+    If the samples directory already contains precomputed mean_step_*.pkl files
+    (possibly because the samples base actually contains probDist outputs),
+    mirror/copy them into the probdist target directory so downstream tools
+    see the same layout as produced in experiments_data_samples_probDist.
+
+    Returns number of files copied.
     """
-    dev, process_id, N, steps, samples_count, theta_param = dev_args
+    copied = 0
+
+    # Ensure target exists
+    try:
+        os.makedirs(probdist_exp_dir, exist_ok=True)
+    except Exception as e:
+        logger.warning(f"Unable to create probdist target dir {probdist_exp_dir}: {e}")
+        return 0
+
+    # Look for mean_step_*.pkl files directly under samples_exp_dir
+    patterns = [os.path.join(samples_exp_dir, 'mean_step_*.pkl'),
+                os.path.join(samples_exp_dir, 'samples_*', 'mean_step_*.pkl'),
+                os.path.join(samples_exp_dir, 'N_*', 'samples_*', 'mean_step_*.pkl'),
+                os.path.join(samples_exp_dir, '**', 'mean_step_*.pkl')]
+
+    found_files = set()
+    for pat in patterns:
+        for f in glob.glob(pat, recursive=True):
+            found_files.add(os.path.normpath(f))
+
+    if not found_files:
+        logger.debug(f"No precomputed mean_step_*.pkl files found to mirror from {samples_exp_dir}")
+        return 0
+
+    for src in sorted(found_files):
+        # Determine destination filename: keep the same basename but place in probdist_exp_dir
+        dest = os.path.join(probdist_exp_dir, os.path.basename(src))
+        try:
+            shutil.copy2(src, dest)
+            copied += 1
+            logger.info(f"Mirrored existing probDist file: {src} -> {dest}")
+        except Exception as e:
+            logger.warning(f"Failed to copy {src} to {dest}: {e}")
+
+    # If we copied files, ensure permissions and return count
+    return copied
+
+
+def validate_samples_presence(samples_exp_dir, steps, samples_count, logger):
+    """
+    Check that expected sample files exist for all steps and samples_count.
+    Returns True if all expected sample files are present and loadable, False otherwise.
+    """
+    missing = []
+    invalid = []
+
+    for step_idx in range(steps):
+        step_dir = os.path.join(samples_exp_dir, f"step_{step_idx}")
+        if not os.path.isdir(step_dir):
+            missing.append(step_dir)
+            continue
+
+        for sample_idx in range(samples_count):
+            sample_file = os.path.join(step_dir, f"sample_{sample_idx}.pkl")
+            if not os.path.exists(sample_file):
+                missing.append(sample_file)
+            else:
+                # quick load check
+                data = load_sample_file(sample_file)
+                if data is None:
+                    invalid.append(sample_file)
+
+    if missing or invalid:
+        if missing:
+            logger.error(f"Missing sample files or step dirs: {len(missing)} items. Example: {missing[:3]}")
+        if invalid:
+            logger.error(f"Invalid sample files (failed to load): {len(invalid)} items. Example: {invalid[:3]}")
+        return False
+
+    logger.info(f"All expected sample files present and valid: steps={steps}, samples={samples_count}")
+    return True
+
+def generate_probdist_for_dev(dev_args):
+    """
+    Worker function to generate probability distributions for a single deviation value.
+    dev_args: (dev, process_id, N, steps, samples, theta, shutdown_flag)
+    """
+    dev, process_id, N, steps, samples_count, theta_param, shutdown_flag = dev_args
     
     # Setup logging for this process
     dev_str = f"{dev}" if isinstance(dev, (int, float)) else f"{dev[0]}_{dev[1]}" if isinstance(dev, (tuple, list)) else str(dev)
     logger, log_file = setup_process_logging(dev_str, process_id)
     
     try:
-        logger.info(f"=== PROBDIST RECREATION STARTED ===")
+        logger.info(f"=== PROBDIST GENERATION STARTED ===")
         logger.info(f"PID: {os.getpid()}")
         logger.info(f"Deviation: {dev}")
         logger.info(f"Parameters: N={N}, steps={steps}, samples={samples_count}, theta={theta_param:.6f}")
@@ -378,7 +483,7 @@ def recreate_probdist_for_dev(dev_args):
         else:
             has_noise = dev > 0
         
-        # Get source and target directories
+    # Get source and target directories
         noise_params = [dev]
         samples_exp_dir, found_format = find_experiment_dir_flexible(
             dummy_tesselation_func, has_noise, N, 
@@ -395,13 +500,55 @@ def recreate_probdist_for_dev(dev_args):
         logger.info(f"Samples source: {samples_exp_dir}")
         logger.info(f"ProbDist target: {probdist_exp_dir}")
         logger.info(f"Source format: {found_format}")
-        
-        # Check if samples directory exists
-        if not os.path.exists(samples_exp_dir):
-            logger.error(f"Samples directory not found: {samples_exp_dir}")
+        # If there are precomputed mean_step_*.pkl files in the samples tree,
+        # mirror them into the probdist target so the output layout matches
+        # the expected experiments_data_samples_probDist structure.
+        try:
+            copied = mirror_existing_mean_files(samples_exp_dir, probdist_exp_dir, samples_count, logger)
+            if copied > 0:
+                logger.info(f"Mirrored {copied} precomputed mean files to probdist target")
+        except Exception as e:
+            logger.warning(f"Error while attempting to mirror existing mean files: {e}")
+
+        # Validate presence and loadability of sample files for this experiment
+        valid_samples = validate_samples_presence(samples_exp_dir, steps, samples_count, logger)
+        if not valid_samples:
+            # Signal shutdown across processes
+            try:
+                shutdown_flag.value = True
+            except Exception:
+                pass
+            logger.error(f"Critical: Missing or invalid sample files for {samples_exp_dir}. Signalling shutdown.")
             return {
                 "dev": dev, "process_id": process_id, "success": False,
-                "error": f"Samples directory not found: {samples_exp_dir}",
+                "error": "Missing or invalid sample files; aborting.",
+                "processed_steps": 0, "total_steps": steps,
+                "skipped_steps": 0, "generated_steps": 0,
+                "log_file": log_file, "total_time": 0
+            }
+        
+        # Check if samples directory exists. If missing, create a placeholder
+        # directory (so paths are consistent) and return a clear message that
+        # samples must be generated first. Creating an empty samples folder
+        # won't allow generation of probDist files, but prevents hard failures
+        # elsewhere and gives a friendly next step.
+        if not os.path.exists(samples_exp_dir):
+            try:
+                os.makedirs(samples_exp_dir, exist_ok=True)
+                logger.warning(f"Samples directory not found; created placeholder: {samples_exp_dir}")
+            except Exception as e:
+                logger.error(f"Unable to create placeholder samples directory: {samples_exp_dir}: {e}")
+                return {
+                    "dev": dev, "process_id": process_id, "success": False,
+                    "error": f"Samples directory not found and could not be created: {samples_exp_dir}",
+                    "processed_steps": 0, "total_steps": steps,
+                    "log_file": log_file, "total_time": 0
+                }
+
+            # Inform the caller that samples are missing and must be generated first
+            return {
+                "dev": dev, "process_id": process_id, "success": False,
+                "error": f"Samples directory not found: {samples_exp_dir} (placeholder created). Run generate_samples.py for this deviation.",
                 "processed_steps": 0, "total_steps": steps,
                 "log_file": log_file, "total_time": 0
             }
@@ -409,7 +556,7 @@ def recreate_probdist_for_dev(dev_args):
         # Process each step
         processed_steps = 0
         skipped_steps = 0
-        recreated_steps = 0
+        generated_steps = 0
         
         for step_idx in range(steps):
             global SHUTDOWN_REQUESTED
@@ -424,11 +571,11 @@ def recreate_probdist_for_dev(dev_args):
                 logger.debug(f"Valid probDist exists for step {step_idx}, skipping")
                 skipped_steps += 1
             else:
-                logger.info(f"Recreating probDist for step {step_idx}...")
-                if recreate_step_probdist(samples_exp_dir, probdist_exp_dir, step_idx, N, samples_count, logger):
-                    recreated_steps += 1
+                logger.info(f"Generating probDist for step {step_idx}...")
+                if generate_step_probdist(samples_exp_dir, probdist_exp_dir, step_idx, N, samples_count, logger):
+                    generated_steps += 1
                 else:
-                    logger.error(f"Failed to recreate probDist for step {step_idx}")
+                    logger.error(f"Failed to generate probDist for step {step_idx}")
             
             processed_steps += 1
             
@@ -440,12 +587,35 @@ def recreate_probdist_for_dev(dev_args):
         
         dev_time = time.time() - dev_start_time
         
-        logger.info(f"=== PROBDIST RECREATION COMPLETED ===")
+        logger.info(f"=== PROBDIST GENERATION COMPLETED ===")
         logger.info(f"Processed: {processed_steps}/{steps} steps")
         logger.info(f"Skipped (already valid): {skipped_steps}")
-        logger.info(f"Recreated: {recreated_steps}")
+        logger.info(f"Generated: {generated_steps}")
         logger.info(f"Total time: {dev_time:.1f}s")
         
+        # Archive this dev's probdist directory if requested
+
+        dev_tar_path = None
+        if CREATE_TAR:
+            import tarfile
+            os.makedirs(ARCHIVE_DIR, exist_ok=True)
+            # Format dev string for filename
+            if isinstance(dev, (tuple, list)) and len(dev) == 2:
+                min_val, max_val = dev
+                devstr = f"min{min_val:.3f}_max{max_val:.3f}"
+            else:
+                devstr = f"{float(dev):.3f}"
+            # Find the theta_ folder containing this probdist_exp_dir
+            theta_dir = os.path.dirname(os.path.dirname(probdist_exp_dir))
+            theta_folder_name = os.path.basename(theta_dir)
+            dev_folder_name = os.path.basename(os.path.dirname(probdist_exp_dir))
+            # Archive only the dev folder inside theta_ (not the whole theta_ folder)
+            dev_dir = os.path.dirname(probdist_exp_dir)
+            dev_tar_path = os.path.join(ARCHIVE_DIR, f"probdist_{theta_folder_name}_{devstr}.tar")
+            with tarfile.open(dev_tar_path, "w") as tar:
+                tar.add(dev_dir, arcname=os.path.join(theta_folder_name, dev_folder_name))
+            logger.info(f"Created temporary archive: {dev_tar_path}")
+
         return {
             "dev": dev,
             "process_id": process_id,
@@ -454,13 +624,14 @@ def recreate_probdist_for_dev(dev_args):
             "processed_steps": processed_steps,
             "total_steps": steps,
             "skipped_steps": skipped_steps,
-            "recreated_steps": recreated_steps,
+            "generated_steps": generated_steps,
             "log_file": log_file,
-            "total_time": dev_time
+            "total_time": dev_time,
+            "dev_tar_path": dev_tar_path
         }
         
     except Exception as e:
-        error_msg = f"Error in probDist recreation for dev {dev_str}: {str(e)}"
+        error_msg = f"Error in probDist generation for dev {dev_str}: {str(e)}"
         logger.error(error_msg)
         logger.error(traceback.format_exc())
         
@@ -472,7 +643,7 @@ def recreate_probdist_for_dev(dev_args):
             "processed_steps": 0,
             "total_steps": steps,
             "skipped_steps": 0,
-            "recreated_steps": 0,
+            "generated_steps": 0,
             "log_file": log_file,
             "total_time": 0
         }
@@ -482,9 +653,9 @@ def recreate_probdist_for_dev(dev_args):
 # ============================================================================
 
 def main():
-    """Main execution function for probability distribution recreation."""
+    """Main execution function for probability distribution generation."""
     
-    print("=== PROBABILITY DISTRIBUTION RECREATION ===")
+    print("=== PROBABILITY DISTRIBUTION GENERATION ===")
     print(f"System parameters: N={N}, steps={steps}, samples={samples}, theta={theta:.6f}")
     print(f"Deviation values: {devs}")
     print(f"Multiprocessing: {MAX_PROCESSES} processes")
@@ -494,20 +665,51 @@ def main():
     
     # Setup master logging
     master_logger = setup_master_logging()
-    master_logger.info("=== PROBABILITY DISTRIBUTION RECREATION STARTED ===")
+    master_logger.info("=== PROBABILITY DISTRIBUTION GENERATION STARTED ===")
     master_logger.info(f"Parameters: N={N}, steps={steps}, samples={samples}, theta={theta:.6f}")
     master_logger.info(f"Deviations: {devs}")
     master_logger.info(f"Max processes: {MAX_PROCESSES}")
     
     start_time = time.time()
+
+    # Pre-flight: ensure probdist directories exist and mirror any precomputed mean files
+    master_logger.info("Preparing probdist directory structure and mirroring existing mean files (pre-flight)")
+    for dev in devs:
+        try:
+            # Determine if noise present
+            if isinstance(dev, (tuple, list)) and len(dev) == 2:
+                has_noise = dev[1] > 0
+            else:
+                has_noise = float(dev) > 0
+
+            samples_exp_dir, found_format = find_experiment_dir_flexible(
+                dummy_tesselation_func, has_noise, N, noise_params=[dev], noise_type="static_noise", base_dir=SAMPLES_BASE_DIR, theta=theta
+            )
+
+            probdist_exp_dir = get_experiment_dir(
+                dummy_tesselation_func, has_noise, N, noise_params=[dev], noise_type="static_noise", base_dir=PROBDIST_BASE_DIR, theta=theta, samples=samples
+            )
+
+            # Create target dir and mirror any mean files from samples tree
+            os.makedirs(probdist_exp_dir, exist_ok=True)
+            copied = mirror_existing_mean_files(samples_exp_dir, probdist_exp_dir, samples, master_logger)
+            if copied > 0:
+                master_logger.info(f"Pre-flight: mirrored {copied} mean files for dev {dev} into {probdist_exp_dir}")
+
+        except Exception as e:
+            master_logger.warning(f"Pre-flight error preparing probdist for dev {dev}: {e}")
     
-    # Prepare arguments for each process
+    # Prepare a shared shutdown flag for workers
+    manager = mp.Manager()
+    shutdown_flag = manager.Value('b', False)
+
+    # Prepare arguments for each process (include shutdown_flag)
     process_args = []
     for process_id, dev in enumerate(devs):
-        args = (dev, process_id, N, steps, samples, theta)
+        args = (dev, process_id, N, steps, samples, theta, shutdown_flag)
         process_args.append(args)
     
-    print(f"\nStarting {len(process_args)} processes for probDist recreation...")
+    print(f"\nStarting {len(process_args)} processes for probDist generation...")
     
     process_results = []
     
@@ -516,31 +718,27 @@ def main():
             # Submit all processes
             future_to_dev = {}
             for args in process_args:
-                future = executor.submit(recreate_probdist_for_dev, args)
+                future = executor.submit(generate_probdist_for_dev, args)
                 future_to_dev[future] = args[0]  # dev value
-            
             # Collect results with timeout handling
             for future in as_completed(future_to_dev, timeout=PROCESS_TIMEOUT * len(devs)):
                 dev = future_to_dev[future]
-                
                 try:
                     result = future.result(timeout=PROCESS_TIMEOUT)
                     process_results.append(result)
-                    
                     if result["success"]:
                         master_logger.info(f"Process for dev {dev} completed successfully: "
-                                         f"{result['recreated_steps']} recreated, "
+                                         f"{result['generated_steps']} generated, "
                                          f"{result['skipped_steps']} skipped, "
                                          f"time: {result['total_time']:.1f}s")
                     else:
                         master_logger.error(f"Process for dev {dev} failed: {result['error']}")
-                        
                 except TimeoutError:
                     master_logger.error(f"Process for dev {dev} timed out after {PROCESS_TIMEOUT}s")
                     process_results.append({
                         "dev": dev, "success": False, "error": "Timeout",
                         "processed_steps": 0, "total_steps": steps,
-                        "skipped_steps": 0, "recreated_steps": 0,
+                        "skipped_steps": 0, "generated_steps": 0,
                         "total_time": PROCESS_TIMEOUT
                     })
                 except Exception as e:
@@ -548,43 +746,75 @@ def main():
                     process_results.append({
                         "dev": dev, "success": False, "error": str(e),
                         "processed_steps": 0, "total_steps": steps,
-                        "skipped_steps": 0, "recreated_steps": 0,
+                        "skipped_steps": 0, "generated_steps": 0,
                         "total_time": 0
                     })
-    
+                # If any worker signalled shutdown via the shared flag, cancel remaining futures
+                try:
+                    if shutdown_flag.value:
+                        master_logger.warning("Shutdown flag detected; cancelling remaining tasks")
+                        # Cancel pending futures
+                        for f in future_to_dev:
+                            if not f.done():
+                                f.cancel()
+                        break
+                except Exception:
+                    pass
     except KeyboardInterrupt:
         master_logger.warning("Interrupted by user")
         print("\n[INTERRUPT] Gracefully shutting down processes...")
     except Exception as e:
         master_logger.error(f"Critical error in multiprocessing: {str(e)}")
         raise
+
+    # === MAIN ARCHIVE CREATION ===
+    if CREATE_TAR:
+        import tarfile
+        os.makedirs(ARCHIVE_DIR, exist_ok=True)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        main_tar_name = f"experiments_data_N{N}_samples{samples}_{timestamp}.tar"
+        main_tar_path = os.path.join(ARCHIVE_DIR, main_tar_name)
+        dev_tar_paths = [r.get("dev_tar_path") for r in process_results if r.get("dev_tar_path")]
+        if dev_tar_paths:
+            with tarfile.open(main_tar_path, "w") as tar:
+                for dev_tar in dev_tar_paths:
+                    tar.add(dev_tar, arcname=os.path.basename(dev_tar))
+            print(f"Created main archive: {main_tar_path}")
+            master_logger.info(f"Created main archive: {main_tar_path}")
+            # Delete temporary dev tar files
+            for dev_tar in dev_tar_paths:
+                try:
+                    os.remove(dev_tar)
+                    master_logger.info(f"Deleted temporary archive: {dev_tar}")
+                except Exception as e:
+                    master_logger.warning(f"Could not delete {dev_tar}: {e}")
     
     total_time = time.time() - start_time
     
     # Generate summary
     successful_processes = sum(1 for r in process_results if r["success"])
     failed_processes = len(process_results) - successful_processes
-    total_recreated = sum(r.get("recreated_steps", 0) for r in process_results)
+    total_generated = sum(r.get("generated_steps", 0) for r in process_results)
     total_skipped = sum(r.get("skipped_steps", 0) for r in process_results)
     total_processed = sum(r.get("processed_steps", 0) for r in process_results)
     
-    print(f"\n=== RECREATION SUMMARY ===")
+    print(f"\n=== GENERATION SUMMARY ===")
     print(f"Total time: {total_time:.1f}s")
     print(f"Processes: {successful_processes} successful, {failed_processes} failed")
-    print(f"Steps: {total_processed} processed, {total_recreated} recreated, {total_skipped} skipped")
+    print(f"Steps: {total_processed} processed, {total_generated} generated, {total_skipped} skipped")
     print(f"Log files: {MASTER_LOG_FILE}, {PROCESS_LOG_DIR}/")
     
-    master_logger.info("=== RECREATION SUMMARY ===")
+    master_logger.info("=== GENERATION SUMMARY ===")
     master_logger.info(f"Total time: {total_time:.1f}s")
     master_logger.info(f"Processes: {successful_processes} successful, {failed_processes} failed")
-    master_logger.info(f"Steps: {total_processed} processed, {total_recreated} recreated, {total_skipped} skipped")
+    master_logger.info(f"Steps: {total_processed} processed, {total_generated} generated, {total_skipped} skipped")
     
     # Log individual process results
     master_logger.info("INDIVIDUAL PROCESS RESULTS:")
     for result in process_results:
         if result["success"]:
             master_logger.info(f"  Dev {result['dev']}: SUCCESS - "
-                             f"Recreated: {result.get('recreated_steps', 0)}, "
+                             f"Generated: {result.get('generated_steps', 0)}, "
                              f"Skipped: {result.get('skipped_steps', 0)}, "
                              f"Time: {result.get('total_time', 0):.1f}s")
         else:
@@ -594,7 +824,7 @@ def main():
         "total_time": total_time,
         "successful_processes": successful_processes,
         "failed_processes": failed_processes,
-        "total_recreated": total_recreated,
+        "total_generated": total_generated,
         "total_skipped": total_skipped,
         "total_processed": total_processed,
         "process_results": process_results
