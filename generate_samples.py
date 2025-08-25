@@ -40,18 +40,28 @@ import gc
 # CONFIGURATION PARAMETERS
 # ============================================================================
 
-# Experiment parameters - EDIT THESE FOR YOUR TEST
-N = 300                # System size (small for testing)
+# Experiment parameters - EDIT THESE TO MATCH YOUR SETUP
+N = 20000                # System size (small for testing)
 steps = N//4           # Time steps (25 for N=100)
-samples = 5            # Samples per deviation (small for testing)
+samples = 40           # Samples per deviation (small for testing)
 theta = math.pi/3      # Theta parameter for static noise
 
-# Deviation values - TEST SET
+# Deviation values - TEST SET (matching generate_samples.py)
+# devs = [
+#     # (0,0),              # No noise
+#     # (0, 0.2),           # Small noise range
+#     # (0, 0.5),           # Medium noise range  
+#     (0, 0.8),           # Medium noise range  
+# ]
+
 devs = [
     (0,0),              # No noise
-    (0, 0.1),           # Small noise range
-    (0, 0.9),           # Medium noise range  
+    (0, 0.2),           # Small noise range
+    (0, 0.6),           # Medium noise range  
+    (0, 0.8),           # Medium noise range  
+    (0, 1),           # Medium noise range  
 ]
+
 
 # Directory configuration
 SAMPLES_BASE_DIR = "experiments_data_samples"
