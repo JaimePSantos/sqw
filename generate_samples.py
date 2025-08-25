@@ -43,7 +43,7 @@ import gc
 # Experiment parameters - EDIT THESE TO MATCH YOUR SETUP
 N = 20000                # System size (small for testing)
 steps = N//4           # Time steps (25 for N=100)
-samples = 40           # Samples per deviation (small for testing)
+samples = 40          # Samples per deviation (small for testing)
 theta = math.pi/3      # Theta parameter for static noise
 
 # Deviation values - TEST SET (matching generate_samples.py)
@@ -65,14 +65,17 @@ devs = [
 
 # Directory configuration
 SAMPLES_BASE_DIR = "experiments_data_samples"
-PROCESS_LOG_DIR = "sample_generation_logs"
+
+# Create date-based logging directories
+current_date = datetime.now().strftime("%d-%m-%y")
+PROCESS_LOG_DIR = os.path.join("logs", current_date, "sample_generation")
 
 # Multiprocessing configuration
 MAX_PROCESSES = min(len(devs), mp.cpu_count())
 PROCESS_TIMEOUT = 3600  # 1 hour timeout per process
 
 # Logging configuration
-MASTER_LOG_FILE = "sample_generation_master.log"
+MASTER_LOG_FILE = os.path.join("logs", current_date, "sample_generation", "sample_generation_master.log")
 
 # Global shutdown flag
 SHUTDOWN_REQUESTED = False
@@ -154,6 +157,11 @@ def setup_master_logging():
     # Remove any existing handlers
     for handler in master_logger.handlers[:]:
         master_logger.removeHandler(handler)
+    
+    # Ensure the directory exists for master log file
+    master_log_dir = os.path.dirname(MASTER_LOG_FILE)
+    if master_log_dir:
+        os.makedirs(master_log_dir, exist_ok=True)
     
     # Create file handler
     file_handler = logging.FileHandler(MASTER_LOG_FILE, mode='w')

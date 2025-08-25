@@ -73,7 +73,10 @@ devs = [
 # Directory configuration
 SAMPLES_BASE_DIR = "experiments_data_samples"
 PROBDIST_BASE_DIR = "experiments_data_samples_probDist"
-PROCESS_LOG_DIR = "generate_probdist"
+
+# Create date-based logging directories
+current_date = datetime.now().strftime("%d-%m-%y")
+PROCESS_LOG_DIR = os.path.join("logs", current_date, "generate_probdist")
 
 # Multiprocessing configuration
 MAX_PROCESSES = min(len(devs), mp.cpu_count())
@@ -89,7 +92,7 @@ print(f"[TIMEOUT] Based on N={N}, steps={steps}, samples={samples}")
 print(f"[RESOURCE] Using {MAX_PROCESSES} processes out of {mp.cpu_count()} CPUs")
 
 # Logging configuration
-MASTER_LOG_FILE = "generate_probdist/probdist_generation_master.log"
+MASTER_LOG_FILE = os.path.join("logs", current_date, "generate_probdist", "probdist_generation_master.log")
 
 # Global shutdown flag
 SHUTDOWN_REQUESTED = False
@@ -201,7 +204,7 @@ def setup_process_logging(dev_value, process_id):
         logger.removeHandler(handler)
     
     # Create file handler
-    file_handler = logging.FileHandler(log_filename, mode='w')
+    file_handler = logging.FileHandler(log_filename, mode='w', encoding='utf-8')
     file_handler.setLevel(logging.INFO)
     
     # Create console handler
@@ -237,7 +240,7 @@ def setup_master_logging():
         os.makedirs(master_log_dir, exist_ok=True)
     
     # Create file handler
-    file_handler = logging.FileHandler(MASTER_LOG_FILE, mode='w')
+    file_handler = logging.FileHandler(MASTER_LOG_FILE, mode='w', encoding='utf-8')
     file_handler.setLevel(logging.INFO)
     
     # Create console handler
@@ -419,8 +422,8 @@ def generate_step_probdist(samples_dir, target_dir, step_idx, N, samples_count, 
         valid_samples = 0
         
         for sample_idx in range(samples_count):
-            # Use the same filename format as static_cluster_logged_mp.py
-            filename = f"final_step_{step_idx}_sample{sample_idx}.pkl"
+            # Use the actual filename format found in the directories
+            filename = f"sample_{sample_idx}.pkl"
             filepath = os.path.join(step_dir, filename)
             
             if os.path.exists(filepath):
@@ -585,12 +588,21 @@ def generate_probdist_for_dev(dev_args):
             base_dir=source_base_dir, theta=theta_param
         )
         
+        # Check if the actual samples are in a samples_X subdirectory
+        potential_samples_dir = os.path.join(samples_exp_dir, f"samples_{samples_count}")
+        if os.path.exists(potential_samples_dir) and os.path.isdir(potential_samples_dir):
+            # Check if this subdirectory contains step directories
+            sample_step_dirs = [d for d in os.listdir(potential_samples_dir) 
+                              if os.path.isdir(os.path.join(potential_samples_dir, d)) and d.startswith('step_')]
+            if sample_step_dirs:
+                samples_exp_dir = potential_samples_dir
+                logger.info(f"Found samples in subdirectory: samples_{samples_count}")
+        
         probdist_exp_dir = get_experiment_dir(
             dummy_tesselation_func, has_noise, N, 
             noise_params=noise_params, noise_type="static_noise", 
             base_dir=target_base_dir, theta=theta_param, samples=samples_count
         )
-        
         logger.info(f"Samples source: {samples_exp_dir}")
         logger.info(f"ProbDist target: {probdist_exp_dir}")
         logger.info(f"Source format: {found_format}")
@@ -1045,10 +1057,10 @@ def main():
                             dev_str = f"{float(dev):.3f}"
                         
                         if result["success"]:
-                            master_logger.info(f"✓ Dev {dev_str}: {result['generated_steps']} generated, "
+                            master_logger.info(f"[SUCCESS] Dev {dev_str}: {result['generated_steps']} generated, "
                                              f"{result['skipped_steps']} skipped, {result['total_time']:.1f}s")
                         else:
-                            master_logger.error(f"✗ Dev {dev_str}: {result['error']}")
+                            master_logger.error(f"[FAILED] Dev {dev_str}: {result['error']}")
                             
                     except TimeoutError:
                         error_msg = f"Process result timeout after completion for dev {dev}"
@@ -1118,7 +1130,8 @@ def main():
         import tarfile
         os.makedirs(ARCHIVE_DIR, exist_ok=True)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        main_tar_name = f"experiments_data_N{N}_samples{samples}_{timestamp}.tar"
+
+        main_tar_name = f"experiments_data_probDist_N{N}_samples{samples}_{timestamp}.tar"
         main_tar_path = os.path.join(ARCHIVE_DIR, main_tar_name)
         dev_tar_paths = [r.get("dev_tar_path") for r in process_results if r.get("dev_tar_path")]
         if dev_tar_paths:

@@ -46,29 +46,44 @@ ARCHIVE_DIR = "experiments_archive"
 # ============================================================================
 
 # Experiment parameters - EDIT THESE TO MATCH YOUR SETUP
-N = 300                # System size
+N = 20000                # System size
 steps = N//4           # Time steps
-samples = 5            # Samples per deviation
+samples = 40           # Samples per deviation
 theta = math.pi/3      # Theta parameter for static noise
 
 # Deviation values - TEST SET (matching other scripts)
 devs = [
     (0,0),              # No noise
-    (0, 0.1),           # Small noise range
-    (0, 0.9),           # Medium noise range  
+    (0, 0.2),           # Small noise range
+    (0, 0.6),           # Medium noise range  
+    (0, 0.8),           # Medium noise range  
+    (0, 1),           # Medium noise range  
 ]
+
 
 # Directory configuration
 PROBDIST_BASE_DIR = "experiments_data_samples_probDist"
 STD_BASE_DIR = "experiments_data_samples_std"
-PROCESS_LOG_DIR = "generate_std"
+
+# Create date-based logging directories
+current_date = datetime.now().strftime("%d-%m-%y")
+PROCESS_LOG_DIR = os.path.join("logs", current_date, "generate_std")
 
 # Multiprocessing configuration
 MAX_PROCESSES = min(len(devs), mp.cpu_count())
-PROCESS_TIMEOUT = 3600  # 1 hour timeout per process
+
+# Timeout configuration - Scale with problem size (matches static_cluster_logged_mp.py)
+# Base timeout for each process, scaled by N and steps
+BASE_TIMEOUT_PER_SAMPLE = 30  # seconds per sample for small N
+TIMEOUT_SCALE_FACTOR = (N * steps) / 1000000  # Scale based on computational complexity
+PROCESS_TIMEOUT = max(3600, int(BASE_TIMEOUT_PER_SAMPLE * samples * TIMEOUT_SCALE_FACTOR))  # Minimum 1 hour
+
+print(f"[TIMEOUT] Process timeout: {PROCESS_TIMEOUT} seconds ({PROCESS_TIMEOUT/3600:.1f} hours)")
+print(f"[TIMEOUT] Based on N={N}, steps={steps}, samples={samples}")
+print(f"[RESOURCE] Using {MAX_PROCESSES} processes out of {mp.cpu_count()} CPUs")
 
 # Logging configuration
-MASTER_LOG_FILE = "generate_std/std_generation_master.log"
+MASTER_LOG_FILE = os.path.join("logs", current_date, "generate_std", "std_generation_master.log")
 
 # Global shutdown flag
 SHUTDOWN_REQUESTED = False
@@ -91,6 +106,60 @@ signal.signal(signal.SIGTERM, signal_handler)  # Termination signal
 def dummy_tesselation_func(N):
     """Dummy tessellation function for static noise (tessellations are built-in)"""
     return None
+
+# ============================================================================
+# SYSTEM MONITORING AND LOGGING UTILITIES
+# ============================================================================
+
+def log_system_resources(logger=None, prefix="[SYSTEM]"):
+    """Log current system resource usage (matches static_cluster_logged_mp.py)"""
+    try:
+        import psutil
+        memory = psutil.virtual_memory()
+        cpu_percent = psutil.cpu_percent(interval=1)
+        
+        msg = f"{prefix} Memory: {memory.percent:.1f}% used ({memory.available / (1024**3):.1f}GB free), CPU: {cpu_percent:.1f}%"
+        if logger:
+            logger.info(msg)
+        else:
+            print(msg)
+        
+        # Check for concerning resource usage
+        if memory.percent > 90:
+            logger.warning(f"{prefix} High memory usage: {memory.percent:.1f}%") if logger else print(f"WARNING: {prefix} High memory usage: {memory.percent:.1f}%")
+        
+        if cpu_percent > 95:
+            logger.warning(f"{prefix} High CPU usage: {cpu_percent:.1f}%") if logger else print(f"WARNING: {prefix} High CPU usage: {cpu_percent:.1f}%")
+            
+    except ImportError:
+        msg = f"{prefix} psutil not available - cannot monitor resources"
+        if logger:
+            logger.info(msg)
+        else:
+            print(msg)
+    except Exception as e:
+        msg = f"{prefix} Error monitoring resources: {e}"
+        if logger:
+            logger.error(msg)
+        else:
+            print(msg)
+
+def log_progress_update(phase, completed, total, start_time, logger=None):
+    """Log detailed progress update with ETA (matches static_cluster_logged_mp.py)"""
+    elapsed = time.time() - start_time
+    if completed > 0:
+        eta = (elapsed / completed) * (total - completed)
+        eta_str = f"{eta/60:.1f}m" if eta < 3600 else f"{eta/3600:.1f}h"
+        progress_pct = (completed / total) * 100
+        
+        msg = f"[{phase}] Progress: {completed}/{total} ({progress_pct:.1f}%) - Elapsed: {elapsed/60:.1f}m - ETA: {eta_str}"
+    else:
+        msg = f"[{phase}] Progress: {completed}/{total} (0.0%) - Elapsed: {elapsed/60:.1f}m - ETA: unknown"
+    
+    if logger:
+        logger.info(msg)
+    else:
+        print(msg)
 
 # ============================================================================
 # LOGGING SETUP
@@ -118,7 +187,7 @@ def setup_process_logging(dev_value, process_id):
         logger.removeHandler(handler)
     
     # Create file handler
-    file_handler = logging.FileHandler(log_filename, mode='w')
+    file_handler = logging.FileHandler(log_filename, mode='w', encoding='utf-8')
     file_handler.setLevel(logging.INFO)
     
     # Create console handler
@@ -154,7 +223,7 @@ def setup_master_logging():
         os.makedirs(master_log_dir, exist_ok=True)
     
     # Create file handler
-    file_handler = logging.FileHandler(MASTER_LOG_FILE, mode='w')
+    file_handler = logging.FileHandler(MASTER_LOG_FILE, mode='w', encoding='utf-8')
     file_handler.setLevel(logging.INFO)
     
     # Create console handler
@@ -399,6 +468,9 @@ def generate_std_for_dev(dev_args):
         
         dev_start_time = time.time()
         
+        # Log initial system resources
+        log_system_resources(logger, "[WORKER]")
+        
         # Handle deviation format for has_noise check
         if isinstance(dev, (tuple, list)) and len(dev) == 2:
             min_val, max_val = dev
@@ -571,6 +643,11 @@ def main():
     
     process_results = []
     
+    # Track process information (matches static_cluster_logged_mp.py)
+    process_info = {}
+    for i, (dev, process_id, *_) in enumerate(process_args):
+        process_info[dev] = {"index": i, "process_id": process_id, "status": "queued"}
+    
     try:
         with ProcessPoolExecutor(max_workers=MAX_PROCESSES) as executor:
             # Submit all processes
@@ -578,12 +655,15 @@ def main():
             for args in process_args:
                 future = executor.submit(generate_std_for_dev, args)
                 future_to_dev[future] = args[0]  # dev value
+                process_info[args[0]]["status"] = "running"
+            
             # Collect results with timeout handling
             for future in as_completed(future_to_dev, timeout=PROCESS_TIMEOUT * len(devs)):
                 dev = future_to_dev[future]
                 try:
                     result = future.result(timeout=PROCESS_TIMEOUT)
                     process_results.append(result)
+                    process_info[dev]["status"] = "completed"
                     if result["success"]:
                         action = result.get("action", "processed")
                         message = result.get("message", "")
@@ -592,14 +672,17 @@ def main():
                                          f"time: {result['total_time']:.1f}s")
                     else:
                         master_logger.error(f"Process for dev {dev} failed: {result['error']}")
+                        process_info[dev]["status"] = "failed"
                 except TimeoutError:
                     master_logger.error(f"Process for dev {dev} timed out after {PROCESS_TIMEOUT}s")
+                    process_info[dev]["status"] = "timeout"
                     process_results.append({
                         "dev": dev, "success": False, "error": "Timeout",
                         "total_time": PROCESS_TIMEOUT
                     })
                 except Exception as e:
                     master_logger.error(f"Process for dev {dev} crashed: {str(e)}")
+                    process_info[dev]["status"] = "crashed"
                     process_results.append({
                         "dev": dev, "success": False, "error": str(e),
                         "total_time": 0
@@ -615,7 +698,7 @@ def main():
     if CREATE_TAR:
         os.makedirs(ARCHIVE_DIR, exist_ok=True)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        main_tar_name = f"experiments_std_N{N}_samples{samples}_{timestamp}.tar"
+        main_tar_name = f"experiments_data_std_N{N}_samples{samples}_{timestamp}.tar"
         main_tar_path = os.path.join(ARCHIVE_DIR, main_tar_name)
         dev_tar_paths = [r.get("dev_tar_path") for r in process_results if r.get("dev_tar_path")]
         if dev_tar_paths:
