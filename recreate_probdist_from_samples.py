@@ -39,16 +39,17 @@ import numpy as np
 # ============================================================================
 
 # Experiment parameters - EDIT THESE TO MATCH YOUR SETUP
-N = 100                # System size (small for testing)
+N = 20000                # System size (small for testing)
 steps = N//4           # Time steps (25 for N=100)
-samples = 5            # Samples per deviation (small for testing)
+samples = 40           # Samples per deviation (small for testing)
 theta = math.pi/3      # Theta parameter for static noise
 
 # Deviation values - TEST SET (matching generate_samples.py)
 devs = [
-    (0,0),              # No noise
-    (0, 0.2),           # Small noise range
-    (0, 0.5),           # Medium noise range  
+    # (0,0),              # No noise
+    # (0, 0.2),           # Small noise range
+    # (0, 0.5),           # Medium noise range  
+    (0, 0.8),           # Medium noise range  
 ]
 
 # Directory configuration
@@ -58,7 +59,7 @@ PROCESS_LOG_DIR = "recreate_probDist"
 
 # Multiprocessing configuration
 MAX_PROCESSES = min(len(devs), mp.cpu_count())
-PROCESS_TIMEOUT = 3600  # 1 hour timeout per process
+PROCESS_TIMEOUT = 7200  # 2 hour timeout per process
 
 # Logging configuration
 MASTER_LOG_FILE = "recreate_probDist/probdist_recreation_master.log"
