@@ -54,8 +54,10 @@ ARCHIVE_DIR = "experiments_archive"
 # Experiment parameters - EDIT THESE TO MATCH YOUR SETUP
 N = 20000                # System size
 steps = N//4           # Time steps
-samples = 40           # Samples per deviation
-theta = math.pi/3      # Theta parameter for static noise
+# samples = 40         # Samples per deviation (small for testing)
+# theta = math.pi/3      # Theta parameter for static noise
+samples = 5          # Samples per deviation (small for testing)
+theta = math.pi     # Theta parameter for static noise
 
 # Deviation values - TEST SET (matching other scripts)
 devs = [
@@ -588,7 +590,7 @@ def generate_std_for_dev(dev_args):
             theta_folder_name = os.path.basename(theta_dir)
             dev_folder_name = os.path.basename(os.path.dirname(std_exp_dir))
             dev_dir = os.path.dirname(std_exp_dir)
-            dev_tar_path = os.path.join(ARCHIVE_DIR, f"std_{theta_folder_name}_{devstr}.tar")
+            dev_tar_path = os.path.join(ARCHIVE_DIR, f"std_{theta_folder_name}_theta{theta_param:.6f}_{devstr}.tar")
             with tarfile.open(dev_tar_path, "w") as tar:
                 tar.add(dev_dir, arcname=os.path.join(theta_folder_name, dev_folder_name))
             logger.info(f"Created temporary archive: {dev_tar_path}")
@@ -710,7 +712,7 @@ def main():
     if CREATE_TAR:
         os.makedirs(ARCHIVE_DIR, exist_ok=True)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        main_tar_name = f"experiments_data_std_N{N}_samples{samples}_{timestamp}.tar"
+        main_tar_name = f"experiments_data_std_N{N}_samples{samples}_theta{theta:.6f}_{timestamp}.tar"
         main_tar_path = os.path.join(ARCHIVE_DIR, main_tar_name)
         dev_tar_paths = [r.get("dev_tar_path") for r in process_results if r.get("dev_tar_path")]
         if dev_tar_paths:
