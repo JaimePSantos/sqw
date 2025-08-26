@@ -1832,6 +1832,9 @@ def main():
                 except Exception as e:
                     master_logger.warning(f"Could not delete {dev_tar}: {e}")
     
+    # Calculate total execution time
+    total_time = time.time() - start_time
+    
     # Generate final summary with enhanced validation
     successful_processes = sum(1 for r in process_results if r["success"])
     failed_processes = len(process_results) - successful_processes
