@@ -1443,7 +1443,7 @@ def generate_probdist_for_dev(dev_args):
             dev_folder_name = os.path.basename(os.path.dirname(probdist_exp_dir))
             # Archive only the dev folder inside theta_ (not the whole theta_ folder)
             dev_dir = os.path.dirname(probdist_exp_dir)
-            dev_tar_path = os.path.join(ARCHIVE_DIR, f"probdist_{theta_folder_name}_{devstr}.tar")
+            dev_tar_path = os.path.join(ARCHIVE_DIR, f"probdist_{theta_folder_name}_theta{theta_param:.6f}_{devstr}.tar")
             with tarfile.open(dev_tar_path, "w") as tar:
                 tar.add(dev_dir, arcname=os.path.join(theta_folder_name, dev_folder_name))
             logger.info(f"Created temporary archive: {dev_tar_path}")
@@ -1815,7 +1815,7 @@ def main():
         os.makedirs(ARCHIVE_DIR, exist_ok=True)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
-        main_tar_name = f"experiments_data_probDist_N{N}_samples{samples}_{timestamp}.tar"
+        main_tar_name = f"experiments_data_probDist_N{N}_samples{samples}_theta{theta:.6f}_{timestamp}.tar"
         main_tar_path = os.path.join(ARCHIVE_DIR, main_tar_name)
         dev_tar_paths = [r.get("dev_tar_path") for r in process_results if r.get("dev_tar_path")]
         if dev_tar_paths:
