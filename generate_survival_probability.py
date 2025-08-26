@@ -52,10 +52,10 @@ ARCHIVE_DIR = "experiments_archive"
 # Experiment parameters - EDIT THESE TO MATCH YOUR SETUP
 N = 20000                # System size
 steps = N//4           # Time steps
-# samples = 40         # Samples per deviation (small for testing)
-# theta = math.pi/3      # Theta parameter for static noise
-samples = 5          # Samples per deviation (small for testing)
-theta = math.pi/4     # Theta parameter for static noise
+samples = 40         # Samples per deviation (small for testing)
+theta = math.pi/3      # Theta parameter for static noise
+# samples = 5          # Samples per deviation (small for testing)
+# theta = math.pi/4     # Theta parameter for static noise
 
 devs = [
     (0,0),              # No noise
@@ -70,6 +70,10 @@ SURVIVAL_RANGES = {
     "center": {
         "description": "Central nodes (N//4 around center)",
         "range_func": lambda N: range(N//2 - N//8, N//2 + N//8 + 1)
+    },
+    "range_80_80": {
+        "description": "Nodes from -80 to +80 relative to center",
+        "range_func": lambda N: range(max(0, N//2 - 80), min(N, N//2 + 80 + 1))
     },
     "system": {
         "description": "Full system",
