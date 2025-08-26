@@ -378,6 +378,88 @@ def validate_probdist_file(file_path):
     except (pickle.PickleError, EOFError, ValueError, TypeError) as e:
         return False
 
+def validate_probdist_directory_structure(probdist_base_dir, N, steps, samples_count, devs, theta, logger):
+    """
+    Validate the probability distribution directory structure and check for missing files.
+    
+    Args:
+        probdist_base_dir: Base directory for probability distributions
+        N: System size
+        steps: Number of time steps
+        samples_count: Number of samples
+        devs: List of deviation values
+        theta: Theta parameter
+        logger: Logger instance
+    
+    Returns:
+        dict: {"complete": bool, "missing_devs": list, "incomplete_devs": dict}
+    """
+    logger.info(f"Validating probDist directory structure:")
+    logger.info(f"  Base dir: {probdist_base_dir}")
+    logger.info(f"  Configuration: N={N}, steps={steps}, samples={samples_count}, theta={theta:.6f}")
+    logger.info(f"  Deviations: {len(devs)} values")
+    
+    missing_devs = []
+    incomplete_devs = {}
+    
+    for dev in devs:
+        # Determine noise and get directory
+        if isinstance(dev, (tuple, list)) and len(dev) == 2:
+            has_noise = dev[1] > 0
+        else:
+            has_noise = float(dev) > 0
+        
+        probdist_dir = get_experiment_dir(
+            dummy_tesselation_func, has_noise, N, 
+            noise_params=[dev], noise_type="static_noise", 
+            base_dir=probdist_base_dir, theta=theta, samples=samples_count
+        )
+        
+        if not os.path.exists(probdist_dir):
+            missing_devs.append(dev)
+            logger.warning(f"Missing probDist directory for dev {dev}: {probdist_dir}")
+            continue
+        
+        # Check for all expected mean_step files
+        missing_steps = []
+        invalid_steps = []
+        
+        for step_idx in range(steps):
+            probdist_file = os.path.join(probdist_dir, f"mean_step_{step_idx}.pkl")
+            
+            if not os.path.exists(probdist_file):
+                missing_steps.append(step_idx)
+            elif not validate_probdist_file(probdist_file):
+                invalid_steps.append(step_idx)
+        
+        if missing_steps or invalid_steps:
+            incomplete_devs[dev] = {
+                "missing_steps": missing_steps,
+                "invalid_steps": invalid_steps,
+                "directory": probdist_dir
+            }
+            
+            logger.warning(f"Incomplete probDist for dev {dev}:")
+            if missing_steps:
+                logger.warning(f"  Missing steps: {len(missing_steps)} (e.g., {missing_steps[:5]})")
+            if invalid_steps:
+                logger.warning(f"  Invalid steps: {len(invalid_steps)} (e.g., {invalid_steps[:5]})")
+        else:
+            logger.info(f"Complete probDist for dev {dev}: {steps} steps validated")
+    
+    complete = len(missing_devs) == 0 and len(incomplete_devs) == 0
+    
+    logger.info(f"ProbDist validation summary:")
+    logger.info(f"  Complete: {complete}")
+    logger.info(f"  Missing deviations: {len(missing_devs)}")
+    logger.info(f"  Incomplete deviations: {len(incomplete_devs)}")
+    
+    return {
+        "complete": complete,
+        "missing_devs": missing_devs,
+        "incomplete_devs": incomplete_devs
+    }
+
 def load_sample_file(file_path):
     """
     Load a sample file and return the state data.
@@ -527,38 +609,235 @@ def mirror_existing_mean_files(samples_exp_dir, probdist_exp_dir, samples_count,
     return copied
 
 
-def validate_samples_presence(samples_exp_dir, steps, samples_count, logger):
+def validate_samples_configuration(samples_exp_dir, expected_samples, expected_steps, expected_N, expected_theta, logger):
+    """
+    Validate that the samples directory contains data for the expected configuration.
+    Checks both the directory structure and a sample of files to ensure consistency.
+    
+    Returns:
+        dict: {"valid": bool, "found_samples": int, "found_steps": int, "issues": [str]}
+    """
+    issues = []
+    found_steps = 0
+    found_samples = 0
+    
+    logger.info(f"Validating samples configuration:")
+    logger.info(f"  Expected: N={expected_N}, steps={expected_steps}, samples={expected_samples}, theta={expected_theta:.6f}")
+    logger.info(f"  Directory: {samples_exp_dir}")
+    
+    if not os.path.exists(samples_exp_dir):
+        issues.append(f"Samples directory does not exist: {samples_exp_dir}")
+        return {"valid": False, "found_samples": 0, "found_steps": 0, "issues": issues}
+    
+    # Count available steps
+    step_dirs = [d for d in os.listdir(samples_exp_dir) if os.path.isdir(os.path.join(samples_exp_dir, d)) and d.startswith("step_")]
+    found_steps = len(step_dirs)
+    
+    if found_steps == 0:
+        issues.append(f"No step directories found in {samples_exp_dir}")
+        return {"valid": False, "found_samples": 0, "found_steps": 0, "issues": issues}
+    
+    # Check a few steps to determine sample count
+    sample_counts = []
+    for step_dir_name in sorted(step_dirs)[:min(5, len(step_dirs))]:  # Check first 5 steps
+        step_dir = os.path.join(samples_exp_dir, step_dir_name)
+        step_idx = int(step_dir_name.replace("step_", ""))
+        
+        # Count sample files in this step
+        sample_files = [f for f in os.listdir(step_dir) if f.startswith(f"final_step_{step_idx}_sample") and f.endswith(".pkl")]
+        step_sample_count = len(sample_files)
+        sample_counts.append(step_sample_count)
+        
+        # Extract sample indices to check for gaps
+        sample_indices = []
+        for f in sample_files:
+            try:
+                # Extract sample index from filename like "final_step_0_sample15.pkl"
+                sample_idx = int(f.replace(f"final_step_{step_idx}_sample", "").replace(".pkl", ""))
+                sample_indices.append(sample_idx)
+            except ValueError:
+                issues.append(f"Invalid sample filename format: {f}")
+        
+        # Check for consecutive sample indices (0, 1, 2, ...)
+        sample_indices.sort()
+        expected_indices = list(range(step_sample_count))
+        if sample_indices != expected_indices:
+            missing_indices = set(expected_indices) - set(sample_indices)
+            if missing_indices:
+                issues.append(f"Step {step_idx}: Missing sample indices {sorted(missing_indices)}")
+    
+    # Determine the actual sample count
+    if sample_counts:
+        found_samples = max(sample_counts)  # Use the maximum found
+        min_samples = min(sample_counts)
+        if min_samples != found_samples:
+            issues.append(f"Inconsistent sample counts across steps: min={min_samples}, max={found_samples}")
+    
+    # Validate against expected values
+    if found_steps != expected_steps:
+        issues.append(f"Step count mismatch: found {found_steps}, expected {expected_steps}")
+    
+    if found_samples != expected_samples:
+        issues.append(f"Sample count mismatch: found {found_samples}, expected {expected_samples}")
+    
+    # Log results
+    if issues:
+        logger.warning(f"Configuration validation found {len(issues)} issues:")
+        for issue in issues:
+            logger.warning(f"  - {issue}")
+    else:
+        logger.info(f"Configuration validation PASSED: {found_steps} steps, {found_samples} samples")
+    
+    return {
+        "valid": len(issues) == 0,
+        "found_samples": found_samples,
+        "found_steps": found_steps,
+        "issues": issues
+    }
+
+def find_samples_directory_for_config(base_dir, N, theta, dev, samples_count, logger):
+    """
+    Find the samples directory that contains data for the specified configuration.
+    Tries multiple directory structures and validates the sample count.
+    
+    Returns:
+        tuple: (samples_dir_path, format_type) or (None, None) if not found
+    """
+    logger.info(f"Searching for samples directory: N={N}, samples={samples_count}, dev={dev}")
+    
+    # Handle deviation format
+    if isinstance(dev, (tuple, list)) and len(dev) == 2:
+        min_val, max_val = dev
+        has_noise = max_val > 0
+        dev_str = f"dev_min{min_val:.3f}_max{max_val:.3f}"
+    else:
+        has_noise = float(dev) > 0
+        dev_str = f"dev_{float(dev):.3f}"
+    
+    # Try different directory structures
+    search_paths = []
+    
+    # New format with samples folder
+    theta_str = f"theta_{theta:.6f}"
+    base_path = os.path.join(base_dir, "dummy_tesselation_func_static_noise", theta_str, dev_str, f"N_{N}")
+    
+    # Try with samples folder first
+    samples_path = os.path.join(base_path, f"samples_{samples_count}")
+    search_paths.append((samples_path, "new_format_with_samples"))
+    
+    # Try without samples folder (direct access to step directories)
+    search_paths.append((base_path, "new_format_direct"))
+    
+    # Try other common sample counts in case the directory exists but with different sample count
+    for alt_samples in [40, 20, 10, 5]:
+        if alt_samples != samples_count:
+            alt_path = os.path.join(base_path, f"samples_{alt_samples}")
+            search_paths.append((alt_path, f"new_format_alt_samples_{alt_samples}"))
+    
+    # Old format fallbacks
+    if isinstance(dev, (tuple, list)) and len(dev) == 2:
+        min_val, max_val = dev
+        old_dev_str = f"min{min_val:.3f}_max{max_val:.3f}"
+    else:
+        old_dev_str = f"{float(dev):.3f}"
+    
+    old_paths = [
+        (os.path.join(base_dir, f"N_{N}", f"static_dev_{old_dev_str}"), "old_format_static"),
+        (os.path.join(base_dir, f"N_{N}", f"dev_{old_dev_str}"), "old_format_dev"),
+        (os.path.join(base_dir, f"static_dev_{old_dev_str}", f"N_{N}"), "old_format_dev_first"),
+    ]
+    search_paths.extend(old_paths)
+    
+    # Test each path
+    for search_path, format_type in search_paths:
+        logger.debug(f"Checking path: {search_path} ({format_type})")
+        
+        if os.path.exists(search_path):
+            # Quick validation - check if it has step directories
+            step_dirs = [d for d in os.listdir(search_path) if os.path.isdir(os.path.join(search_path, d)) and d.startswith("step_")]
+            
+            if step_dirs:
+                # Check sample count in first few steps
+                config_validation = validate_samples_configuration(search_path, samples_count, len(step_dirs), N, theta, logger)
+                
+                if config_validation["valid"]:
+                    logger.info(f"Found valid samples directory: {search_path} ({format_type})")
+                    return search_path, format_type
+                elif config_validation["found_samples"] > 0:
+                    logger.warning(f"Found samples directory with different configuration: {search_path}")
+                    logger.warning(f"  Found: {config_validation['found_steps']} steps, {config_validation['found_samples']} samples")
+                    logger.warning(f"  Expected: samples={samples_count}")
+                    # Continue searching for exact match
+                else:
+                    logger.debug(f"Path exists but no valid samples found: {search_path}")
+            else:
+                logger.debug(f"Path exists but no step directories found: {search_path}")
+    
+    logger.warning(f"No valid samples directory found for configuration: N={N}, samples={samples_count}, dev={dev}")
+    return None, None
     """
     Check that expected sample files exist for all steps and samples_count.
     Returns True if all expected sample files are present and loadable, False otherwise.
     """
     missing = []
     invalid = []
+    missing_steps = []
+    
+    logger.info(f"Validating sample presence: {samples_count} samples across {steps} steps in {samples_exp_dir}")
 
     for step_idx in range(steps):
         step_dir = os.path.join(samples_exp_dir, f"step_{step_idx}")
         if not os.path.isdir(step_dir):
+            missing_steps.append(step_idx)
             missing.append(step_dir)
             continue
 
+        step_missing = []
+        step_invalid = []
         for sample_idx in range(samples_count):
             sample_file = os.path.join(step_dir, f"final_step_{step_idx}_sample{sample_idx}.pkl")
             if not os.path.exists(sample_file):
                 missing.append(sample_file)
+                step_missing.append(sample_idx)
             else:
                 # quick load check
                 data = load_sample_file(sample_file)
                 if data is None:
                     invalid.append(sample_file)
+                    step_invalid.append(sample_idx)
+        
+        # Log detailed info for problematic steps
+        if step_missing or step_invalid:
+            if step_missing:
+                logger.warning(f"Step {step_idx}: Missing {len(step_missing)} samples: {step_missing[:10]}")
+            if step_invalid:
+                logger.warning(f"Step {step_idx}: Invalid {len(step_invalid)} samples: {step_invalid[:10]}")
 
+    # Comprehensive reporting
     if missing or invalid:
+        logger.error(f"Sample validation FAILED for {samples_count} samples across {steps} steps:")
+        if missing_steps:
+            logger.error(f"  Missing step directories: {len(missing_steps)} steps - {missing_steps[:10]}")
         if missing:
-            logger.error(f"Missing sample files or step dirs: {len(missing)} items. Example: {missing[:3]}")
+            logger.error(f"  Missing sample files: {len(missing)} files total")
         if invalid:
-            logger.error(f"Invalid sample files (failed to load): {len(invalid)} items. Example: {invalid[:3]}")
+            logger.error(f"  Invalid sample files (failed to load): {len(invalid)} files total")
+        
+        # Provide specific guidance
+        missing_count = len(missing)
+        invalid_count = len(invalid)
+        total_expected = steps * samples_count
+        valid_count = total_expected - missing_count - invalid_count
+        
+        logger.error(f"  Summary: {valid_count}/{total_expected} valid samples found")
+        logger.error(f"  Required: ALL {total_expected} samples must be present and valid")
+        logger.error(f"  Action needed: Run generate_samples.py with samples={samples_count} for this configuration")
+        
         return False
 
-    logger.info(f"All expected sample files present and valid: steps={steps}, samples={samples_count}")
+    logger.info(f"Sample validation PASSED: All {steps * samples_count} sample files present and valid")
+    logger.info(f"  Configuration: steps={steps}, samples={samples_count}")
+    logger.info(f"  Directory: {samples_exp_dir}")
     return True
 
 def generate_probdist_for_dev(dev_args):
@@ -587,28 +866,81 @@ def generate_probdist_for_dev(dev_args):
         else:
             has_noise = dev > 0
         
-        # Get source and target directories using smart_loading_static
-        from smart_loading_static import find_experiment_dir_flexible, get_experiment_dir
+        # Get source and target directories with robust validation
+        logger.info(f"Finding samples directory for configuration: N={N}, samples={samples_count}, dev={dev}")
         
-        noise_params = [dev]
-        samples_exp_dir, found_format = find_experiment_dir_flexible(
-            dummy_tesselation_func, has_noise, N, 
-            noise_params=noise_params, noise_type="static_noise", 
-            base_dir=source_base_dir, theta=theta_param
+        # Use the new robust sample directory finder
+        samples_exp_dir, found_format = find_samples_directory_for_config(
+            source_base_dir, N, theta_param, dev, samples_count, logger
         )
         
-        # The samples are stored directly in step_x/ directories under the base experiment directory
-        # No samples_X subdirectory is used - that's only for the probDist output
-        logger.info(f"Using samples directly from step directories in: {samples_exp_dir}")
+        if samples_exp_dir is None:
+            error_msg = f"No valid samples directory found for N={N}, samples={samples_count}, dev={dev}, theta={theta_param:.6f}"
+            logger.error(error_msg)
+            logger.error(f"Searched in base directory: {source_base_dir}")
+            logger.error(f"Expected sample count: {samples_count}")
+            logger.error(f"Action needed: Run generate_samples.py with exactly samples={samples_count} for this configuration")
+            
+            return {
+                "dev": dev, "process_id": process_id, "success": False,
+                "error": error_msg,
+                "processed_steps": 0, "total_steps": steps,
+                "skipped_steps": 0, "generated_steps": 0,
+                "log_file": log_file, "total_time": 0
+            }
+        
+        # Determine target directory for probDist files (always uses sample count in path)
+        if isinstance(dev, (tuple, list)) and len(dev) == 2:
+            min_val, max_val = dev
+            has_noise = max_val > 0
+        else:
+            has_noise = dev > 0
         
         probdist_exp_dir = get_experiment_dir(
             dummy_tesselation_func, has_noise, N, 
-            noise_params=noise_params, noise_type="static_noise", 
+            noise_params=[dev], noise_type="static_noise", 
             base_dir=target_base_dir, theta=theta_param, samples=samples_count
         )
-        logger.info(f"Samples source: {samples_exp_dir}")
-        logger.info(f"ProbDist target: {probdist_exp_dir}")
-        logger.info(f"Source format: {found_format}")
+        
+        logger.info(f"Configuration validated successfully:")
+        logger.info(f"  Samples source: {samples_exp_dir} ({found_format})")
+        logger.info(f"  ProbDist target: {probdist_exp_dir}")
+        logger.info(f"  Parameters: N={N}, steps={steps}, samples={samples_count}, theta={theta_param:.6f}")
+        
+        # Perform comprehensive sample validation
+        logger.info(f"Performing comprehensive sample validation...")
+        config_validation = validate_samples_configuration(samples_exp_dir, samples_count, steps, N, theta_param, logger)
+        
+        if not config_validation["valid"]:
+            error_msg = f"Sample validation failed: {'; '.join(config_validation['issues'])}"
+            logger.error(error_msg)
+            logger.error(f"Found: {config_validation['found_steps']} steps, {config_validation['found_samples']} samples")
+            logger.error(f"Expected: {steps} steps, {samples_count} samples")
+            
+            return {
+                "dev": dev, "process_id": process_id, "success": False,
+                "error": error_msg,
+                "processed_steps": 0, "total_steps": steps,
+                "skipped_steps": 0, "generated_steps": 0,
+                "log_file": log_file, "total_time": 0
+            }
+        
+        # Additional detailed file presence validation
+        detailed_validation = validate_samples_presence(samples_exp_dir, steps, samples_count, logger)
+        if not detailed_validation:
+            error_msg = f"Detailed sample file validation failed for {samples_exp_dir}"
+            logger.error(error_msg)
+            
+            return {
+                "dev": dev, "process_id": process_id, "success": False,
+                "error": error_msg,
+                "processed_steps": 0, "total_steps": steps,
+                "skipped_steps": 0, "generated_steps": 0,
+                "log_file": log_file, "total_time": 0
+            }
+        
+        logger.info(f"All sample validations PASSED - proceeding with probDist generation")
+        
         # If there are precomputed mean_step_*.pkl files in the samples tree,
         # mirror them into the probdist target so the output layout matches
         # the expected experiments_data_samples_probDist structure.
@@ -618,49 +950,6 @@ def generate_probdist_for_dev(dev_args):
                 logger.info(f"Mirrored {copied} precomputed mean files to probdist target")
         except Exception as e:
             logger.warning(f"Error while attempting to mirror existing mean files: {e}")
-
-        # Validate presence and loadability of sample files for this experiment
-        valid_samples = validate_samples_presence(samples_exp_dir, steps, samples_count, logger)
-        if not valid_samples:
-            # Signal shutdown across processes
-            try:
-                shutdown_flag.value = True
-            except Exception:
-                pass
-            logger.error(f"Critical: Missing or invalid sample files for {samples_exp_dir}. Signalling shutdown.")
-            return {
-                "dev": dev, "process_id": process_id, "success": False,
-                "error": "Missing or invalid sample files; aborting.",
-                "processed_steps": 0, "total_steps": steps,
-                "skipped_steps": 0, "generated_steps": 0,
-                "log_file": log_file, "total_time": 0
-            }
-        
-        # Check if samples directory exists. If missing, create a placeholder
-        # directory (so paths are consistent) and return a clear message that
-        # samples must be generated first. Creating an empty samples folder
-        # won't allow generation of probDist files, but prevents hard failures
-        # elsewhere and gives a friendly next step.
-        if not os.path.exists(samples_exp_dir):
-            try:
-                os.makedirs(samples_exp_dir, exist_ok=True)
-                logger.warning(f"Samples directory not found; created placeholder: {samples_exp_dir}")
-            except Exception as e:
-                logger.error(f"Unable to create placeholder samples directory: {samples_exp_dir}: {e}")
-                return {
-                    "dev": dev, "process_id": process_id, "success": False,
-                    "error": f"Samples directory not found and could not be created: {samples_exp_dir}",
-                    "processed_steps": 0, "total_steps": steps,
-                    "log_file": log_file, "total_time": 0
-                }
-
-            # Inform the caller that samples are missing and must be generated first
-            return {
-                "dev": dev, "process_id": process_id, "success": False,
-                "error": f"Samples directory not found: {samples_exp_dir} (placeholder created). Run generate_samples.py for this deviation.",
-                "processed_steps": 0, "total_steps": steps,
-                "log_file": log_file, "total_time": 0
-            }
         
         # Process each step with enhanced monitoring (matches static_cluster_logged_mp.py)
         processed_steps = 0
@@ -950,19 +1239,92 @@ def main():
     
     start_time = time.time()
 
+    # Pre-validation: Check if samples exist for all requested configurations
+    master_logger.info("=== PRE-VALIDATION: Checking sample availability ===")
+    samples_validation_failed = False
+    
+    for dev in devs:
+        logger_msg = f"Validating samples for dev {dev}..."
+        master_logger.info(logger_msg)
+        
+        # Check if samples directory exists with correct configuration
+        samples_dir, format_type = find_samples_directory_for_config(
+            SAMPLES_BASE_DIR, N, theta, dev, samples, master_logger
+        )
+        
+        if samples_dir is None:
+            master_logger.error(f"No valid samples found for dev {dev} with {samples} samples")
+            samples_validation_failed = True
+        else:
+            # Quick validation
+            config_check = validate_samples_configuration(samples_dir, samples, steps, N, theta, master_logger)
+            if not config_check["valid"]:
+                master_logger.error(f"Invalid sample configuration for dev {dev}: {config_check['issues']}")
+                samples_validation_failed = True
+            else:
+                master_logger.info(f"Valid samples found for dev {dev}: {samples_dir} ({format_type})")
+    
+    if samples_validation_failed:
+        master_logger.error("=== PRE-VALIDATION FAILED ===")
+        master_logger.error("Some required sample configurations are missing or invalid")
+        master_logger.error(f"Required configuration: N={N}, steps={steps}, samples={samples}, theta={theta:.6f}")
+        master_logger.error("Action needed: Run generate_samples.py with the correct parameters for missing configurations")
+        print("\n[ERROR] Pre-validation failed - see log for details")
+        print(f"Log file: {MASTER_LOG_FILE}")
+        return {
+            "total_time": 0,
+            "successful_processes": 0,
+            "failed_processes": len(devs),
+            "total_generated": 0,
+            "total_skipped": 0,
+            "total_processed": 0,
+            "process_results": [],
+            "pre_validation_failed": True
+        }
+    
+    master_logger.info("=== PRE-VALIDATION PASSED ===")
+    master_logger.info("All required sample configurations are available")
+
+    # Check current probDist status before processing
+    master_logger.info("=== PROBDIST STATUS CHECK ===")
+    probdist_status = validate_probdist_directory_structure(
+        PROBDIST_BASE_DIR, N, steps, samples, devs, theta, master_logger
+    )
+    
+    if probdist_status["complete"]:
+        master_logger.info("All probDist files already exist and are valid")
+        print("\n[INFO] All probability distributions already exist and are valid")
+        print("Use different parameters or delete existing files to regenerate")
+        return {
+            "total_time": 0,
+            "successful_processes": len(devs),
+            "failed_processes": 0,
+            "total_generated": 0,
+            "total_skipped": len(devs) * steps,
+            "total_processed": len(devs) * steps,
+            "process_results": [],
+            "already_complete": True
+        }
+    else:
+        master_logger.info(f"ProbDist status: {len(probdist_status['missing_devs'])} missing, {len(probdist_status['incomplete_devs'])} incomplete")
+
     # Pre-flight: ensure probdist directories exist and mirror any precomputed mean files
-    master_logger.info("Preparing probdist directory structure and mirroring existing mean files (pre-flight)")
+    master_logger.info("=== PRE-FLIGHT: Directory setup and mirroring ===")
     for dev in devs:
         try:
-            # Determine if noise present
+            # Find samples directory
+            samples_exp_dir, found_format = find_samples_directory_for_config(
+                SAMPLES_BASE_DIR, N, theta, dev, samples, master_logger
+            )
+            
+            if samples_exp_dir is None:
+                continue  # Already logged in pre-validation
+            
+            # Determine probdist directory
             if isinstance(dev, (tuple, list)) and len(dev) == 2:
                 has_noise = dev[1] > 0
             else:
                 has_noise = float(dev) > 0
-
-            samples_exp_dir, found_format = find_experiment_dir_flexible(
-                dummy_tesselation_func, has_noise, N, noise_params=[dev], noise_type="static_noise", base_dir=SAMPLES_BASE_DIR, theta=theta
-            )
 
             probdist_exp_dir = get_experiment_dir(
                 dummy_tesselation_func, has_noise, N, noise_params=[dev], noise_type="static_noise", base_dir=PROBDIST_BASE_DIR, theta=theta, samples=samples
@@ -988,6 +1350,7 @@ def main():
         process_args.append(args)
     
     print(f"\nStarting {len(process_args)} processes for probDist generation...")
+    master_logger.info(f"=== MULTIPROCESSING EXECUTION: {len(process_args)} processes ===")
     
     process_results = []
     
@@ -1151,25 +1514,41 @@ def main():
                 except Exception as e:
                     master_logger.warning(f"Could not delete {dev_tar}: {e}")
     
-    total_time = time.time() - start_time
-    
-    # Generate summary
+    # Generate final summary with enhanced validation
     successful_processes = sum(1 for r in process_results if r["success"])
     failed_processes = len(process_results) - successful_processes
     total_generated = sum(r.get("generated_steps", 0) for r in process_results)
     total_skipped = sum(r.get("skipped_steps", 0) for r in process_results)
     total_processed = sum(r.get("processed_steps", 0) for r in process_results)
     
+    # Final validation of completed probDist structure
+    master_logger.info("=== FINAL VALIDATION ===")
+    final_probdist_status = validate_probdist_directory_structure(
+        PROBDIST_BASE_DIR, N, steps, samples, devs, theta, master_logger
+    )
+    
     print(f"\n=== GENERATION SUMMARY ===")
     print(f"Total time: {total_time:.1f}s")
     print(f"Processes: {successful_processes} successful, {failed_processes} failed")
     print(f"Steps: {total_processed} processed, {total_generated} generated, {total_skipped} skipped")
+    print(f"Final status: {'COMPLETE' if final_probdist_status['complete'] else 'INCOMPLETE'}")
+    if not final_probdist_status['complete']:
+        print(f"  Missing deviations: {len(final_probdist_status['missing_devs'])}")
+        print(f"  Incomplete deviations: {len(final_probdist_status['incomplete_devs'])}")
     print(f"Log files: {MASTER_LOG_FILE}, {PROCESS_LOG_DIR}/")
     
     master_logger.info("=== GENERATION SUMMARY ===")
     master_logger.info(f"Total time: {total_time:.1f}s")
     master_logger.info(f"Processes: {successful_processes} successful, {failed_processes} failed")
     master_logger.info(f"Steps: {total_processed} processed, {total_generated} generated, {total_skipped} skipped")
+    master_logger.info(f"Final validation: {'COMPLETE' if final_probdist_status['complete'] else 'INCOMPLETE'}")
+    
+    if not final_probdist_status['complete']:
+        master_logger.warning("INCOMPLETE GENERATION DETECTED:")
+        for dev in final_probdist_status['missing_devs']:
+            master_logger.warning(f"  Missing dev {dev}: No probDist directory found")
+        for dev, info in final_probdist_status['incomplete_devs'].items():
+            master_logger.warning(f"  Incomplete dev {dev}: {len(info['missing_steps'])} missing, {len(info['invalid_steps'])} invalid steps")
     
     # Log individual process results
     master_logger.info("INDIVIDUAL PROCESS RESULTS:")
@@ -1189,7 +1568,8 @@ def main():
         "total_generated": total_generated,
         "total_skipped": total_skipped,
         "total_processed": total_processed,
-        "process_results": process_results
+        "process_results": process_results,
+        "final_validation": final_probdist_status
     }
 
 if __name__ == "__main__":
