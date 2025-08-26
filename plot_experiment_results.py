@@ -35,18 +35,19 @@ from datetime import datetime
 # ============================================================================
 
 # Experiment parameters - EDIT THESE TO MATCH YOUR SETUP
-N = 300                # System size
+N = 20000                # System size
 steps = N//4           # Time steps
-samples = 5            # Samples per deviation
-theta = math.pi/3      # Theta parameter for static noise
+samples = 5           # Samples per deviation
+theta = math.pi     # Theta parameter for static noise
 
 # Deviation values - TEST SET (matching other scripts)
 devs = [
     (0,0),              # No noise
-    (0, 0.1),           # Small noise range
-    (0, 0.9),           # Medium noise range  
+    (0, 0.2),           # Small noise range
+    (0, 0.6),           # Medium noise range  
+    (0, 0.8),           # Medium noise range  
+    (0, 1),           # Medium noise range  
 ]
-
 # Directory configuration (matching the generation scripts)
 PROBDIST_BASE_DIR = "experiments_data_samples_probDist"
 STD_BASE_DIR = "experiments_data_samples_std"
