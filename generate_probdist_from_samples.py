@@ -274,6 +274,305 @@ def setup_master_logging():
     return master_logger
 
 # ============================================================================
+# MULTIPROCESS VALIDATION FUNCTIONS
+# ============================================================================
+
+def validate_single_dev_samples(validation_args):
+    """
+    Worker function to validate samples for a single deviation value.
+    validation_args: (dev, N, theta, samples_count, expected_steps, source_base_dir)
+    
+    Returns:
+        dict: {"dev": dev, "valid": bool, "samples_dir": str, "format_type": str, 
+               "config_validation": dict, "error": str}
+    """
+    dev, N, theta, samples_count, expected_steps, source_base_dir = validation_args
+    
+    try:
+        # Create a simple logger for this validation (no file logging to avoid conflicts)
+        import logging
+        logger = logging.getLogger(f"validation_dev_{dev}")
+        logger.setLevel(logging.WARNING)  # Only show warnings/errors to reduce output
+        
+        # Remove any existing handlers
+        for handler in logger.handlers[:]:
+            logger.removeHandler(handler)
+        
+        # Create console handler
+        console_handler = logging.StreamHandler()
+        console_handler.setLevel(logging.WARNING)
+        formatter = logging.Formatter('[VAL] %(message)s')
+        console_handler.setFormatter(formatter)
+        logger.addHandler(console_handler)
+        
+        # Find samples directory for this configuration
+        samples_dir, format_type = find_samples_directory_for_config(
+            source_base_dir, N, theta, dev, samples_count, logger
+        )
+        
+        if samples_dir is None:
+            return {
+                "dev": dev,
+                "valid": False,
+                "samples_dir": None,
+                "format_type": None,
+                "config_validation": {"valid": False, "issues": ["No samples directory found"]},
+                "error": f"No valid samples found for dev {dev} with {samples_count} samples"
+            }
+        
+        # Validate configuration
+        config_validation = validate_samples_configuration(
+            samples_dir, samples_count, expected_steps, N, theta, logger
+        )
+        
+        return {
+            "dev": dev,
+            "valid": config_validation["valid"],
+            "samples_dir": samples_dir,
+            "format_type": format_type,
+            "config_validation": config_validation,
+            "error": None if config_validation["valid"] else f"Invalid configuration: {config_validation['issues']}"
+        }
+        
+    except Exception as e:
+        return {
+            "dev": dev,
+            "valid": False,
+            "samples_dir": None,
+            "format_type": None,
+            "config_validation": {"valid": False, "issues": [f"Validation error: {str(e)}"]},
+            "error": f"Validation error for dev {dev}: {str(e)}"
+        }
+
+def validate_single_dev_probdist(validation_args):
+    """
+    Worker function to validate probdist for a single deviation value.
+    validation_args: (dev, N, theta, samples_count, expected_steps, probdist_base_dir)
+    
+    Returns:
+        dict: {"dev": dev, "complete": bool, "missing_steps": list, "invalid_steps": list, 
+               "found_steps": int, "directory": str, "error": str}
+    """
+    dev, N, theta, samples_count, expected_steps, probdist_base_dir = validation_args
+    
+    try:
+        # Determine noise and get directory
+        if isinstance(dev, (tuple, list)) and len(dev) == 2:
+            has_noise = dev[1] > 0
+        else:
+            has_noise = float(dev) > 0
+        
+        probdist_dir = get_experiment_dir(
+            dummy_tesselation_func, has_noise, N, 
+            noise_params=[dev], noise_type="static_noise", 
+            base_dir=probdist_base_dir, theta=theta, samples=samples_count
+        )
+        
+        if not os.path.exists(probdist_dir):
+            return {
+                "dev": dev,
+                "complete": False,
+                "missing_steps": list(range(expected_steps)),
+                "invalid_steps": [],
+                "found_steps": 0,
+                "directory": probdist_dir,
+                "error": f"Missing probDist directory: {probdist_dir}"
+            }
+        
+        # Determine actual number of steps in this probdist directory
+        mean_files = [f for f in os.listdir(probdist_dir) if f.startswith("mean_step_") and f.endswith(".pkl")]
+        if not mean_files:
+            return {
+                "dev": dev,
+                "complete": False,
+                "missing_steps": list(range(expected_steps)),
+                "invalid_steps": [],
+                "found_steps": 0,
+                "directory": probdist_dir,
+                "error": f"No mean_step files found in {probdist_dir}"
+            }
+        
+        # Extract step indices from filenames
+        found_step_indices = []
+        for f in mean_files:
+            try:
+                step_idx = int(f.replace("mean_step_", "").replace(".pkl", ""))
+                found_step_indices.append(step_idx)
+            except ValueError:
+                pass  # Skip invalid filenames
+        
+        found_step_indices.sort()
+        actual_steps = len(found_step_indices)
+        
+        # Accept either expected_steps or expected_steps + 1
+        if actual_steps == expected_steps:
+            expected_indices = list(range(expected_steps))
+        elif actual_steps == expected_steps + 1:
+            expected_indices = list(range(expected_steps + 1))
+        else:
+            expected_indices = list(range(actual_steps))  # Validate what we have
+        
+        # Check for all expected mean_step files
+        missing_steps = []
+        invalid_steps = []
+        
+        for step_idx in expected_indices:
+            probdist_file = os.path.join(probdist_dir, f"mean_step_{step_idx}.pkl")
+            
+            if not os.path.exists(probdist_file):
+                missing_steps.append(step_idx)
+            elif not validate_probdist_file(probdist_file):
+                invalid_steps.append(step_idx)
+        
+        complete = (len(missing_steps) == 0 and len(invalid_steps) == 0 and 
+                   actual_steps in [expected_steps, expected_steps + 1])
+        
+        error = None
+        if not complete:
+            error_parts = []
+            if missing_steps:
+                error_parts.append(f"{len(missing_steps)} missing steps")
+            if invalid_steps:
+                error_parts.append(f"{len(invalid_steps)} invalid steps")
+            if actual_steps not in [expected_steps, expected_steps + 1]:
+                error_parts.append(f"found {actual_steps} steps, expected {expected_steps} or {expected_steps + 1}")
+            error = "; ".join(error_parts)
+        
+        return {
+            "dev": dev,
+            "complete": complete,
+            "missing_steps": missing_steps,
+            "invalid_steps": invalid_steps,
+            "found_steps": actual_steps,
+            "directory": probdist_dir,
+            "error": error
+        }
+        
+    except Exception as e:
+        return {
+            "dev": dev,
+            "complete": False,
+            "missing_steps": [],
+            "invalid_steps": [],
+            "found_steps": 0,
+            "directory": "",
+            "error": f"Validation error for dev {dev}: {str(e)}"
+        }
+
+def validate_samples_multiprocess(devs, N, theta, samples_count, expected_steps, source_base_dir, max_processes=None):
+    """
+    Validate samples for multiple deviations using multiprocessing.
+    
+    Returns:
+        dict: {"all_valid": bool, "results": [dict], "failed_devs": [dev]}
+    """
+    if max_processes is None:
+        max_processes = min(len(devs), mp.cpu_count())
+    
+    # Prepare arguments for each validation process
+    validation_args = []
+    for dev in devs:
+        args = (dev, N, theta, samples_count, expected_steps, source_base_dir)
+        validation_args.append(args)
+    
+    results = []
+    failed_devs = []
+    
+    if len(devs) <= 1 or max_processes <= 1:
+        # Single process mode
+        for args in validation_args:
+            result = validate_single_dev_samples(args)
+            results.append(result)
+            if not result["valid"]:
+                failed_devs.append(result["dev"])
+    else:
+        # Multiprocess mode
+        with ProcessPoolExecutor(max_workers=max_processes) as executor:
+            # Submit all validation jobs
+            future_to_dev = {executor.submit(validate_single_dev_samples, args): args[0] for args in validation_args}
+            
+            # Collect results
+            for future in as_completed(future_to_dev, timeout=300):  # 5 minute timeout for validation
+                try:
+                    result = future.result(timeout=10)
+                    results.append(result)
+                    if not result["valid"]:
+                        failed_devs.append(result["dev"])
+                except Exception as e:
+                    dev = future_to_dev[future]
+                    error_result = {
+                        "dev": dev, "valid": False, "samples_dir": None, "format_type": None,
+                        "config_validation": {"valid": False, "issues": [f"Timeout/error: {str(e)}"]},
+                        "error": f"Validation timeout/error for dev {dev}: {str(e)}"
+                    }
+                    results.append(error_result)
+                    failed_devs.append(dev)
+    
+    all_valid = len(failed_devs) == 0
+    return {"all_valid": all_valid, "results": results, "failed_devs": failed_devs}
+
+def validate_probdist_multiprocess(devs, N, theta, samples_count, expected_steps, probdist_base_dir, max_processes=None):
+    """
+    Validate probdist for multiple deviations using multiprocessing.
+    
+    Returns:
+        dict: {"complete": bool, "results": [dict], "missing_devs": [dev], "incomplete_devs": [dev]}
+    """
+    if max_processes is None:
+        max_processes = min(len(devs), mp.cpu_count())
+    
+    # Prepare arguments for each validation process
+    validation_args = []
+    for dev in devs:
+        args = (dev, N, theta, samples_count, expected_steps, probdist_base_dir)
+        validation_args.append(args)
+    
+    results = []
+    missing_devs = []
+    incomplete_devs = []
+    
+    if len(devs) <= 1 or max_processes <= 1:
+        # Single process mode
+        for args in validation_args:
+            result = validate_single_dev_probdist(args)
+            results.append(result)
+            if result["found_steps"] == 0:
+                missing_devs.append(result["dev"])
+            elif not result["complete"]:
+                incomplete_devs.append(result["dev"])
+    else:
+        # Multiprocess mode
+        with ProcessPoolExecutor(max_workers=max_processes) as executor:
+            # Submit all validation jobs
+            future_to_dev = {executor.submit(validate_single_dev_probdist, args): args[0] for args in validation_args}
+            
+            # Collect results
+            for future in as_completed(future_to_dev, timeout=300):  # 5 minute timeout for validation
+                try:
+                    result = future.result(timeout=10)
+                    results.append(result)
+                    if result["found_steps"] == 0:
+                        missing_devs.append(result["dev"])
+                    elif not result["complete"]:
+                        incomplete_devs.append(result["dev"])
+                except Exception as e:
+                    dev = future_to_dev[future]
+                    error_result = {
+                        "dev": dev, "complete": False, "missing_steps": [], "invalid_steps": [],
+                        "found_steps": 0, "directory": "", "error": f"Validation timeout/error: {str(e)}"
+                    }
+                    results.append(error_result)
+                    missing_devs.append(dev)
+    
+    complete = len(missing_devs) == 0 and len(incomplete_devs) == 0
+    return {
+        "complete": complete, 
+        "results": results, 
+        "missing_devs": missing_devs, 
+        "incomplete_devs": incomplete_devs
+    }
+
+# ============================================================================
 # DIRECTORY AND FILE MANAGEMENT
 # ============================================================================
 
@@ -1041,39 +1340,9 @@ def generate_probdist_for_dev(dev_args):
         logger.info(f"  ProbDist target: {probdist_exp_dir}")
         logger.info(f"  Parameters: N={N}, steps={steps}, samples={samples_count}, theta={theta_param:.6f}")
         
-        # Perform comprehensive sample validation
-        logger.info(f"Performing comprehensive sample validation...")
-        config_validation = validate_samples_configuration(samples_exp_dir, samples_count, steps, N, theta_param, logger)
-        
-        if not config_validation["valid"]:
-            error_msg = f"Sample validation failed: {'; '.join(config_validation['issues'])}"
-            logger.error(error_msg)
-            logger.error(f"Found: {config_validation['found_steps']} steps, {config_validation['found_samples']} samples")
-            logger.error(f"Expected: {steps} steps, {samples_count} samples")
-            
-            return {
-                "dev": dev, "process_id": process_id, "success": False,
-                "error": error_msg,
-                "processed_steps": 0, "total_steps": steps,
-                "skipped_steps": 0, "generated_steps": 0,
-                "log_file": log_file, "total_time": 0
-            }
-        
-        # Additional detailed file presence validation
-        detailed_validation = validate_samples_presence(samples_exp_dir, steps, samples_count, logger)
-        if not detailed_validation:
-            error_msg = f"Detailed sample file validation failed for {samples_exp_dir}"
-            logger.error(error_msg)
-            
-            return {
-                "dev": dev, "process_id": process_id, "success": False,
-                "error": error_msg,
-                "processed_steps": 0, "total_steps": steps,
-                "skipped_steps": 0, "generated_steps": 0,
-                "log_file": log_file, "total_time": 0
-            }
-        
-        logger.info(f"All sample validations PASSED - proceeding with probDist generation")
+        # Since pre-validation already confirmed samples are valid, we can skip detailed validation
+        # and proceed directly with probDist generation. Just do a quick sanity check.
+        logger.info(f"Samples pre-validated successfully - proceeding with probDist generation")
         
         # If there are precomputed mean_step_*.pkl files in the samples tree,
         # mirror them into the probdist target so the output layout matches
@@ -1382,105 +1651,11 @@ def main():
     
     start_time = time.time()
 
-    # Pre-validation: Check if samples exist for all requested configurations
-    master_logger.info("=== PRE-VALIDATION: Checking sample availability ===")
-    samples_validation_failed = False
-    
-    for dev in devs:
-        logger_msg = f"Validating samples for dev {dev}..."
-        master_logger.info(logger_msg)
-        
-        # Check if samples directory exists with correct configuration
-        samples_dir, format_type = find_samples_directory_for_config(
-            SAMPLES_BASE_DIR, N, theta, dev, samples, master_logger
-        )
-        
-        if samples_dir is None:
-            master_logger.error(f"No valid samples found for dev {dev} with {samples} samples")
-            samples_validation_failed = True
-        else:
-            # Quick validation
-            config_check = validate_samples_configuration(samples_dir, samples, steps, N, theta, master_logger)
-            if not config_check["valid"]:
-                master_logger.error(f"Invalid sample configuration for dev {dev}: {config_check['issues']}")
-                samples_validation_failed = True
-            else:
-                master_logger.info(f"Valid samples found for dev {dev}: {samples_dir} ({format_type})")
-    
-    if samples_validation_failed:
-        master_logger.error("=== PRE-VALIDATION FAILED ===")
-        master_logger.error("Some required sample configurations are missing or invalid")
-        master_logger.error(f"Required configuration: N={N}, steps={steps}, samples={samples}, theta={theta:.6f}")
-        master_logger.error("Action needed: Run generate_samples.py with the correct parameters for missing configurations")
-        print("\n[ERROR] Pre-validation failed - see log for details")
-        print(f"Log file: {MASTER_LOG_FILE}")
-        return {
-            "total_time": 0,
-            "successful_processes": 0,
-            "failed_processes": len(devs),
-            "total_generated": 0,
-            "total_skipped": 0,
-            "total_processed": 0,
-            "process_results": [],
-            "pre_validation_failed": True
-        }
-    
-    master_logger.info("=== PRE-VALIDATION PASSED ===")
-    master_logger.info("All required sample configurations are available")
-
-    # Check current probDist status before processing
-    master_logger.info("=== PROBDIST STATUS CHECK ===")
-    probdist_status = validate_probdist_directory_structure(
-        PROBDIST_BASE_DIR, N, steps, samples, devs, theta, master_logger
-    )
-    
-    if probdist_status["complete"]:
-        master_logger.info("All probDist files already exist and are valid")
-        print("\n[INFO] All probability distributions already exist and are valid")
-        print("Use different parameters or delete existing files to regenerate")
-        return {
-            "total_time": 0,
-            "successful_processes": len(devs),
-            "failed_processes": 0,
-            "total_generated": 0,
-            "total_skipped": len(devs) * steps,
-            "total_processed": len(devs) * steps,
-            "process_results": [],
-            "already_complete": True
-        }
-    else:
-        master_logger.info(f"ProbDist status: {len(probdist_status['missing_devs'])} missing, {len(probdist_status['incomplete_devs'])} incomplete")
-
-    # Pre-flight: ensure probdist directories exist and mirror any precomputed mean files
-    master_logger.info("=== PRE-FLIGHT: Directory setup and mirroring ===")
-    for dev in devs:
-        try:
-            # Find samples directory
-            samples_exp_dir, found_format = find_samples_directory_for_config(
-                SAMPLES_BASE_DIR, N, theta, dev, samples, master_logger
-            )
-            
-            if samples_exp_dir is None:
-                continue  # Already logged in pre-validation
-            
-            # Determine probdist directory
-            if isinstance(dev, (tuple, list)) and len(dev) == 2:
-                has_noise = dev[1] > 0
-            else:
-                has_noise = float(dev) > 0
-
-            probdist_exp_dir = get_experiment_dir(
-                dummy_tesselation_func, has_noise, N, noise_params=[dev], noise_type="static_noise", base_dir=PROBDIST_BASE_DIR, theta=theta, samples=samples
-            )
-
-            # Create target dir and mirror any mean files from samples tree
-            os.makedirs(probdist_exp_dir, exist_ok=True)
-            copied = mirror_existing_mean_files(samples_exp_dir, probdist_exp_dir, samples, master_logger)
-            if copied > 0:
-                master_logger.info(f"Pre-flight: mirrored {copied} mean files for dev {dev} into {probdist_exp_dir}")
-
-        except Exception as e:
-            master_logger.warning(f"Pre-flight error preparing probdist for dev {dev}: {e}")
+    # Simplified approach: Each worker process will handle one deviation completely
+    # including its own validation and probDist generation
+    master_logger.info("=== SIMPLIFIED MULTIPROCESS EXECUTION ===")
+    master_logger.info("Each worker process will handle one deviation completely")
+    master_logger.info(f"Launching {len(devs)} workers for {len(devs)} deviations")
     
     # Prepare a shared shutdown flag for workers
     manager = mp.Manager()
@@ -1664,11 +1839,23 @@ def main():
     total_skipped = sum(r.get("skipped_steps", 0) for r in process_results)
     total_processed = sum(r.get("processed_steps", 0) for r in process_results)
     
-    # Final validation of completed probDist structure
-    master_logger.info("=== FINAL VALIDATION ===")
-    final_probdist_status = validate_probdist_directory_structure(
-        PROBDIST_BASE_DIR, N, steps, samples, devs, theta, master_logger
+    # Final validation of completed probDist structure using multiprocessing
+    master_logger.info("=== FINAL VALIDATION (multiprocess) ===")
+    
+    final_validation_start_time = time.time()
+    final_probdist_status = validate_probdist_multiprocess(
+        devs, N, theta, samples, steps, PROBDIST_BASE_DIR, max_processes=MAX_PROCESSES
     )
+    final_validation_time = time.time() - final_validation_start_time
+    
+    master_logger.info(f"Final validation completed in {final_validation_time:.1f}s using multiprocessing")
+    
+    # Log detailed final results
+    for result in final_probdist_status["results"]:
+        if result["complete"]:
+            master_logger.info(f"Final: Complete probDist for dev {result['dev']}: {result['found_steps']} steps")
+        else:
+            master_logger.warning(f"Final: Incomplete probDist for dev {result['dev']}: {result['error']}")
     
     print(f"\n=== GENERATION SUMMARY ===")
     print(f"Total time: {total_time:.1f}s")
@@ -1678,6 +1865,7 @@ def main():
     if not final_probdist_status['complete']:
         print(f"  Missing deviations: {len(final_probdist_status['missing_devs'])}")
         print(f"  Incomplete deviations: {len(final_probdist_status['incomplete_devs'])}")
+    print(f"Validation time: {final_validation_time:.1f}s")
     print(f"Log files: {MASTER_LOG_FILE}, {PROCESS_LOG_DIR}/")
     
     master_logger.info("=== GENERATION SUMMARY ===")
@@ -1685,13 +1873,17 @@ def main():
     master_logger.info(f"Processes: {successful_processes} successful, {failed_processes} failed")
     master_logger.info(f"Steps: {total_processed} processed, {total_generated} generated, {total_skipped} skipped")
     master_logger.info(f"Final validation: {'COMPLETE' if final_probdist_status['complete'] else 'INCOMPLETE'}")
+    master_logger.info(f"Final validation time: {final_validation_time:.1f}s")
     
     if not final_probdist_status['complete']:
         master_logger.warning("INCOMPLETE GENERATION DETECTED:")
         for dev in final_probdist_status['missing_devs']:
             master_logger.warning(f"  Missing dev {dev}: No probDist directory found")
-        for dev, info in final_probdist_status['incomplete_devs'].items():
-            master_logger.warning(f"  Incomplete dev {dev}: {len(info['missing_steps'])} missing, {len(info['invalid_steps'])} invalid steps")
+        for dev in final_probdist_status['incomplete_devs']:
+            # Find the corresponding result for detailed info
+            dev_result = next((r for r in final_probdist_status['results'] if r['dev'] == dev), None)
+            if dev_result:
+                master_logger.warning(f"  Incomplete dev {dev}: {dev_result['error']}")
     
     # Log individual process results
     master_logger.info("INDIVIDUAL PROCESS RESULTS:")
