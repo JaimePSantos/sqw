@@ -54,7 +54,7 @@ steps = N//4           # Time steps (25 for N=100)
 # samples = 40         # Samples per deviation (small for testing)
 # theta = math.pi/3      # Theta parameter for static noise
 samples = 5          # Samples per deviation (small for testing)
-theta = math.pi      # Theta parameter for static noise
+theta = math.pi/3      # Theta parameter for static noise
 
 
 # Deviation values - TEST SET (matching generate_samples.py)
@@ -432,7 +432,7 @@ def generate_step_probdist(samples_dir, target_dir, step_idx, N, samples_count, 
         
         for sample_idx in range(samples_count):
             # Use the actual filename format found in the directories
-            filename = f"sample_{sample_idx}.pkl"
+            filename = f"final_step_{step_idx}_sample{sample_idx}.pkl"
             filepath = os.path.join(step_dir, filename)
             
             if os.path.exists(filepath):
@@ -542,7 +542,7 @@ def validate_samples_presence(samples_exp_dir, steps, samples_count, logger):
             continue
 
         for sample_idx in range(samples_count):
-            sample_file = os.path.join(step_dir, f"sample_{sample_idx}.pkl")
+            sample_file = os.path.join(step_dir, f"final_step_{step_idx}_sample{sample_idx}.pkl")
             if not os.path.exists(sample_file):
                 missing.append(sample_file)
             else:
@@ -597,15 +597,9 @@ def generate_probdist_for_dev(dev_args):
             base_dir=source_base_dir, theta=theta_param
         )
         
-        # Check if the actual samples are in a samples_X subdirectory
-        potential_samples_dir = os.path.join(samples_exp_dir, f"samples_{samples_count}")
-        if os.path.exists(potential_samples_dir) and os.path.isdir(potential_samples_dir):
-            # Check if this subdirectory contains step directories
-            sample_step_dirs = [d for d in os.listdir(potential_samples_dir) 
-                              if os.path.isdir(os.path.join(potential_samples_dir, d)) and d.startswith('step_')]
-            if sample_step_dirs:
-                samples_exp_dir = potential_samples_dir
-                logger.info(f"Found samples in subdirectory: samples_{samples_count}")
+        # The samples are stored directly in step_x/ directories under the base experiment directory
+        # No samples_X subdirectory is used - that's only for the probDist output
+        logger.info(f"Using samples directly from step directories in: {samples_exp_dir}")
         
         probdist_exp_dir = get_experiment_dir(
             dummy_tesselation_func, has_noise, N, 
