@@ -54,7 +54,7 @@ steps = N//4           # Time steps (25 for N=100)
 # samples = 40         # Samples per deviation (small for testing)
 # theta = math.pi/3      # Theta parameter for static noise
 samples = 5          # Samples per deviation (small for testing)
-theta = math.pi/3      # Theta parameter for static noise
+theta = math.pi     # Theta parameter for static noise
 
 
 # Deviation values - TEST SET (matching generate_samples.py)
