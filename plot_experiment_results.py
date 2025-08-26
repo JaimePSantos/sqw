@@ -115,7 +115,7 @@ PROBDIST_PLOT_CONFIG = {
 SURVIVAL_PLOT_CONFIG = {
     'enabled': True,                    # Enable/disable this specific plot
     'use_loglog': True,                # Use log-log scale instead of linear
-    'use_semilogy': True,              # Use log-linear (semilogy) scale
+    'use_semilogy': False,              # Use log-linear (semilogy) scale
     'figure_size': (12, 8),            # Figure size in inches (width, height)
     'save_figure': True,                # Save plot to file
     'filename_linear': 'survival_prob_linear_N{N}_steps{steps}_samples{samples}_theta{theta:.3f}.png',
@@ -139,7 +139,7 @@ SURVIVAL_PLOT_CONFIG = {
     'grid_linestyle': '-',
     'dpi': 300,                         # DPI for saved figures
     'bbox_inches': 'tight',             # Bbox setting for saved figures
-    'survival_range': 'center'          # Default survival range to plot
+    'survival_range': 'range_80_80'     # Default survival range to plot
 }
 
 # Label formatting configuration
