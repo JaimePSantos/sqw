@@ -50,7 +50,7 @@ N = 20000                # System size
 steps = N//4           # Time steps
 # samples = 40         # Samples per deviation (small for testing)
 # theta = math.pi/3      # Theta parameter for static noise
-samples = 5          # Samples per deviation (small for testing)
+samples = 40
 theta = math.pi/4     # Theta parameter for static noise
 
 # Deviation values - TEST SET (matching other scripts)

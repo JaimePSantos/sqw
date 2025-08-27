@@ -53,7 +53,7 @@ N = 20000                # System size (small for testing)
 steps = N//4           # Time steps (25 for N=100)
 # samples = 40         # Samples per deviation (small for testing)
 # theta = math.pi/3      # Theta parameter for static noise
-samples = 5          # Samples per deviation (small for testing)
+samples = 40
 theta = math.pi/4     # Theta parameter for static noise
 
 # Note: Sample generation often includes initial step (step 0) + evolution steps
