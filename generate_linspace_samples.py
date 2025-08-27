@@ -42,19 +42,19 @@ import gc
 # ============================================================================
 
 # Experiment parameters - EDIT THESE TO MATCH YOUR SETUP
-N = 100                 # System size (reduced from 20000)
+N = 4000                 # System size (reduced from 20000)
 steps = N//4             # Time steps
-samples = 2             # Samples per deviation
+samples = 20             # Samples per deviation
 theta = math.pi/3        # Theta parameter for static noise
 
 # Deviation values - LINSPACE BETWEEN 0.6 AND 1.0 WITH 100 VALUES
 DEV_MIN = 0.6
 DEV_MAX = 1.0
-DEV_COUNT = 20
+DEV_COUNT = 100
 devs = [(0, dev) for dev in np.linspace(DEV_MIN, DEV_MAX, DEV_COUNT)]
 
 # Multiprocessing configuration
-NUM_PROCESSES = 5        # Number of processes to use (CONFIGURABLE)
+NUM_PROCESSES = 10        # Number of processes to use (CONFIGURABLE)
 PROCESS_TIMEOUT = 3600   # 1 hour timeout per process
 
 # Directory configuration
