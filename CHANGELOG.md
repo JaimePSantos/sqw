@@ -2,6 +2,20 @@
 
 ## 📋 **COMPACT SUMMARY - Recent Major Achievements**
 
+### 🔬 **Linspace Deviation Experiment Suite** (August 27, 2025)
+- **Complete Linspace Pipeline**: Developed comprehensive 4-script experimental pipeline for studying quantum walk behavior across continuous deviation ranges using linspace sampling
+- **Configurable Multiprocessing Architecture**: Implemented chunked deviation processing where user can specify number of processes and each process handles multiple deviation values for optimal resource utilization
+- **Linspace Sample Generation**: Created `generate_samples_linspace.py` with 100 deviation values linearly spaced between 0.6-1.0, reduced system size to N=4000 for feasible computation while maintaining statistical significance
+- **Probability Distribution Recreation**: Developed `generate_linspace_probdist_from_samples.py` that converts sample files to probability distributions using chunk-based multiprocessing with smart file validation and skipping
+- **Standard Deviation Analysis**: Built `generate_std_from_probdist_linspace.py` for calculating standard deviations across time from probability distributions, enabling diffusion behavior analysis across deviation spectrum
+- **Survival Probability Calculation**: Implemented `generate_survival_probability_linspace.py` with configurable node ranges (center, range_80_80, system) for studying probability localization effects
+- **Directory Structure Innovation**: Introduced `static_noise_linspace` directory structure to distinguish linspace experiments from traditional discrete deviation experiments
+- **Unified Archiving System**: All linspace scripts save archives to shared `experiments_archive_linspace` directory with timestamped tar files for experiment result management
+- **Comprehensive Plotting Suite**: Created `plot_experiment_results_linspace.py` with specialized data loading for linspace directory structure, supporting log-log, semi-log, and linear plotting modes
+- **Error Resolution & Debugging**: Fixed critical tuple formatting errors in logging functions, corrected directory path matching between scripts, and resolved archive creation issues
+- **Parameter Consistency**: Ensured all linspace scripts use consistent parameters (N=100/4000, samples=2/5, theta=π/3 or π/4, 20-100 deviation values) for reproducible experiments
+- **Smart File Validation**: Implemented intelligent file existence checking and data validation to enable resumable experiments and avoid redundant computation
+
 ### 🏗️ **Production-Ready Cluster System Overhaul** (August 20, 2025)
 - **Unified Folder Structure**: Eliminated confusing separation between noise/no-noise experiments, now all experiments use consistent `dev_X.XXX` folder naming (including `dev_0.000` for no-noise cases)
 - **Sparse Matrix Revolution**: Solved critical cluster memory issues with sparse matrix implementation, achieving 99.97% memory reduction (from 6.4GB to 1.7MB per process for N=20000)
