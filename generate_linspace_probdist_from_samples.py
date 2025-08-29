@@ -66,7 +66,7 @@ DEV_COUNT = 100
 devs = [(0, dev) for dev in np.linspace(DEV_MIN, DEV_MAX, DEV_COUNT)]
 
 # Multiprocessing configuration
-NUM_PROCESSES = 5        # Number of processes to use (CONFIGURABLE)
+NUM_PROCESSES = 10        # Number of processes to use (CONFIGURABLE)
 
 # Timeout configuration - Scale with problem size
 BASE_TIMEOUT_PER_SAMPLE = 30  # seconds per sample for small N
