@@ -2,6 +2,20 @@
 
 ## 📋 **COMPACT SUMMARY - Recent Major Achievements**
 
+### 🎯 **Dynamic Noise Experiment Implementation** (August 29, 2025)
+- **Dynamic Noise Script Creation**: Developed `generate_dynamic_samples.py` for dynamic quantum walk experiments using angle noise instead of static noise
+- **Dynamic vs Static Differentiation**: Distinguished dynamic experiments using `random_angle_deviation` to generate different angles per time step from static experiments using fixed theta parameters
+- **Directory Structure Innovation**: Created `experiments_data_samples_dynamic` with hierarchical structure: `dynamic_angle_noise/[noise|no_noise]/basetheta_X/dev_X/N_X/`
+- **Modular Function Architecture**: Refactored monolithic worker function into 10 focused, human-readable functions for improved maintainability and testability
+- **Angle Parameter Management**: Implemented base_theta parameter system for dynamic experiments using the existing `sqw.experiments_expanded.running` function
+- **Rounded Deviation Naming**: Enhanced directory naming with 6-decimal-place rounding for cleaner, consistent file organization
+- **Memory-Efficient Implementation**: Used step-by-step state saving with garbage collection for stable memory usage during dynamic simulations
+- **Process Stability**: Limited multiprocessing to 2 processes for stability, tested with reduced parameters (N=100, samples=5) for validation
+- **Function Modularity**: Broke down complex worker into focused functions: `setup_process_environment`, `log_process_startup`, `setup_experiment_environment`, `check_sample_exists`, `generate_sample_angles`, `create_step_saver`, `run_single_sample_simulation`, `process_single_sample`, `create_success_result`, `create_error_result`
+- **Human-Readable Code**: Emphasized function names that clearly describe purpose without relying on comments, following software engineering best practices
+- **Test Validation**: Successfully generated 15 dynamic samples (3 deviations × 5 samples) with proper file structure and error handling
+- **Dynamic Implementation Analysis**: Analyzed existing angle noise implementation in `Jaime-Fig1_angles_clean.py` to understand dynamic noise approach using tessellations and random angle deviations
+
 ### 🔬 **Linspace Deviation Experiment Suite** (August 27, 2025)
 - **Complete Linspace Pipeline**: Developed comprehensive 4-script experimental pipeline for studying quantum walk behavior across continuous deviation ranges using linspace sampling
 - **Configurable Multiprocessing Architecture**: Implemented chunked deviation processing where user can specify number of processes and each process handles multiple deviation values for optimal resource utilization
@@ -112,7 +126,95 @@
 
 ---
 
-## [Latest Session] - August 20, 2025 - Production-Ready Cluster System Overhaul
+## [Latest Session] - August 29, 2025 - Dynamic Noise Experiment Implementation & Code Modularization
+
+### 🎯 **Session Overview**
+This session focused on implementing dynamic noise experiments as the third major experiment type (alongside static noise and tessellation noise). The main achievement was creating a comprehensive dynamic noise sample generation system with highly modular, human-readable code architecture.
+
+### 🔬 **Dynamic Noise Implementation**
+- **Analyzed Existing Dynamic Approach**: Studied `Jaime-Fig1_angles_clean.py` to understand how dynamic noise works using `random_angle_deviation` to generate different angles per time step
+- **Distinguished from Static Noise**: Identified key differences where static noise uses fixed theta parameters while dynamic noise varies angles throughout the quantum walk evolution
+- **Created Dynamic Sample Generator**: Developed `generate_dynamic_samples.py` that implements dynamic noise experiments using the `sqw.experiments_expanded.running` function with tessellations
+
+### 📁 **Directory Structure Innovation**
+```
+experiments_data_samples_dynamic/
+└── dynamic_angle_noise/
+    ├── no_noise/
+    │   └── basetheta_1p047198/
+    │       └── dev_0p000000/
+    │           └── N_100/
+    └── noise/
+        └── basetheta_1p047198/
+            ├── dev_0p261799/
+            │   └── N_100/
+            └── dev_0p523599/
+                └── N_100/
+```
+
+### 🏗️ **Code Modularization Achievement**
+Refactored the monolithic `generate_dynamic_samples_for_dev` function into 10 focused, human-readable modules:
+
+#### **Core Modular Functions Created:**
+1. **`setup_process_environment`** - Handles imports and logging setup
+2. **`log_process_startup`** - Logs process information and parameters  
+3. **`setup_experiment_environment`** - Sets up directories and imports experiment modules
+4. **`check_sample_exists`** - Checks if sample files already exist
+5. **`generate_sample_angles`** - Creates angle arrays based on noise parameters
+6. **`create_step_saver`** - Returns callback function for saving individual steps
+7. **`run_single_sample_simulation`** - Executes quantum walk simulation
+8. **`process_single_sample`** - Orchestrates computation and saving of one sample
+9. **`create_success_result`** - Creates standardized success result dictionaries
+10. **`create_error_result`** - Creates standardized error result dictionaries
+
+#### **Modularization Benefits:**
+- **Single Responsibility Principle**: Each function has one clear purpose
+- **Human Readability**: Function names describe functionality without comments
+- **Testability**: Each function can be tested independently
+- **Maintainability**: Changes to specific functionality are isolated
+- **Reusability**: Functions can be reused in other contexts
+
+### 📊 **Parameter Management & Testing**
+- **Reduced Test Parameters**: Used N=100, steps=25, samples=5 for stable testing
+- **Rounded Deviation Names**: Implemented 6-decimal-place rounding for cleaner directory naming (e.g., `dev_0p261799` instead of long decimal strings)
+- **Memory Management**: Added garbage collection and step-by-step saving for memory efficiency
+- **Process Stability**: Limited to 2 concurrent processes to prevent system instability
+
+### 🧪 **Experimental Validation**
+```
+=== DYNAMIC GENERATION SUMMARY ===
+Total time: 4.6s
+Processes: 3 successful, 0 failed  
+Samples: 15 computed, 0 skipped
+```
+
+- **Successfully Generated**: 3 deviations × 5 samples = 15 total samples
+- **Deviation Values**: [0, 0.261799, 0.523599] with base_theta=π/3
+- **File Structure**: Proper hierarchical organization with step-by-step state saving
+- **Process Management**: Robust error handling and graceful shutdown capabilities
+
+### 🔧 **Technical Implementation Details**
+- **Dynamic Angle Generation**: Used `random_angle_deviation([base_theta, base_theta], [dev, dev], steps)` for noise injection
+- **Tessellation Integration**: Used `even_line_two_tesselation` with fixed tessellation order `[[0, 1]]` for each step
+- **State Management**: Implemented callback-based saving with immediate cleanup to prevent memory accumulation
+- **Error Handling**: Comprehensive exception handling with detailed logging for debugging
+
+### 💡 **Code Quality Improvements**
+- **Eliminated Comments Dependency**: Function names are self-documenting (e.g., `check_sample_exists`, `generate_sample_angles`)
+- **Clear Workflow**: Main function reads like a clear sequence of operations
+- **Standardized Results**: Consistent result dictionary format for success/error cases
+- **Resource Management**: Proper cleanup and garbage collection throughout
+
+### 🎯 **Session Outcomes**
+1. **Third Experiment Type**: Successfully implemented dynamic noise experiments alongside existing static and tessellation experiments
+2. **Modular Architecture**: Created highly maintainable, readable codebase following software engineering best practices
+3. **Validated Implementation**: Confirmed dynamic noise generation works correctly with proper file organization
+4. **Foundation for Scaling**: Established modular structure ready for larger-scale dynamic noise experiments
+5. **Code Quality Enhancement**: Demonstrated how to write self-documenting, human-readable code without comment dependency
+
+This session establishes dynamic noise experiments as a production-ready capability while setting new standards for code modularity and readability in the quantum walk experiment suite.
+
+## [Previous Session] - August 20, 2025 - Production-Ready Cluster System Overhaul
 
 ### 🏗️ **Unified Folder Structure Implementation**
 
