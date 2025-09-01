@@ -48,7 +48,7 @@ from datetime import datetime
 # CONFIGURATION PARAMETERS - EDIT THESE TO MATCH YOUR EXPERIMENT SETUP
 # ============================================================================
 
-CLUSTER PARAMETERS (for large-scale production runs)
+# CLUSTER PARAMETERS (for large-scale production runs)
 N = 20000                # System size
 steps = N//4             # Time steps  
 samples = 40             # Samples per deviation
