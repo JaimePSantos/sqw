@@ -287,15 +287,33 @@ def setup_experiment_environment(dev, N, base_theta_param):
     
     return exp_dir
 
-def check_sample_exists(exp_dir, steps, sample_idx):
-    """Check if all step files for a sample already exist"""
+def check_sample_completion_status(exp_dir, steps, sample_idx):
+    """
+    Check which steps of a sample are already completed.
+    Returns (all_complete, last_completed_step) where:
+    - all_complete: True if all steps exist
+    - last_completed_step: Index of last completed step (-1 if none completed)
+    """
+    last_completed_step = -1
+    
     for step_idx in range(steps):
         step_dir = os.path.join(exp_dir, f"step_{step_idx}")
         filename = f"final_step_{step_idx}_sample{sample_idx}.pkl"
         filepath = os.path.join(step_dir, filename)
-        if not os.path.exists(filepath):
-            return False
-    return True
+        
+        if os.path.exists(filepath):
+            last_completed_step = step_idx
+        else:
+            # Found first missing step
+            break
+    
+    all_complete = (last_completed_step == steps - 1)
+    return all_complete, last_completed_step
+
+def check_sample_exists(exp_dir, steps, sample_idx):
+    """Check if all step files for a sample already exist (backwards compatibility)"""
+    all_complete, _ = check_sample_completion_status(exp_dir, steps, sample_idx)
+    return all_complete
 
 def generate_sample_angles(dev, base_theta_param, steps, random_angle_deviation):
     """Generate angles for a single sample based on deviation parameters"""
@@ -313,6 +331,14 @@ def create_step_saver(exp_dir, sample_idx, steps, logger):
         filename = f"final_step_{step_idx}_sample{sample_idx}.pkl"
         filepath = os.path.join(step_dir, filename)
         
+        # Check if this step already exists - if so, skip saving
+        if os.path.exists(filepath):
+            logger.debug(f"    Step {step_idx+1}/{steps} already exists, skipping save...")
+            del state
+            gc.collect()
+            return
+        
+        # Save the step file
         with open(filepath, 'wb') as f:
             pickle.dump(state, f)
         
@@ -353,11 +379,16 @@ def process_single_sample(sample_idx, samples_count, exp_dir, steps, dev, base_t
     """Process computation and saving for a single sample using optimized approach"""
     sample_start_time = time.time()
     
-    if check_sample_exists(exp_dir, steps, sample_idx):
-        logger.info(f"Sample {sample_idx+1}/{samples_count} already exists, skipping...")
-        return False, 0
+    # Check completion status of this sample
+    all_complete, last_completed_step = check_sample_completion_status(exp_dir, steps, sample_idx)
     
-    logger.info(f"Computing sample {sample_idx+1}/{samples_count}...")
+    if all_complete:
+        logger.info(f"Sample {sample_idx+1}/{samples_count} already exists (all {steps} steps complete), skipping...")
+        return False, 0
+    elif last_completed_step >= 0:
+        logger.info(f"Sample {sample_idx+1}/{samples_count} partially complete (steps 0-{last_completed_step} done), continuing from step {last_completed_step+1}...")
+    else:
+        logger.info(f"Computing sample {sample_idx+1}/{samples_count} from beginning...")
     
     angles = generate_sample_angles(dev, base_theta_param, steps, random_angle_deviation)
     save_step_callback = create_step_saver(exp_dir, sample_idx, steps, logger)
