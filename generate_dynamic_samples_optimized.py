@@ -251,13 +251,13 @@ def setup_process_environment(dev, process_id, base_theta_param):
     from sqw.tesselations import even_line_two_tesselation
     from sqw.states import uniform_initial_state
     from sqw.utils import random_angle_deviation
-    from sqw.experiments_expanded_dynamic_eigenvalue_based import running_streaming_dynamic_eigenvalue_based
+    from sqw.experiments_expanded_dynamic_sparse import running_streaming_dynamic_optimized_structure
     
     dev_rounded = round(dev, 6)
     dev_str = f"{dev_rounded:.6f}"
     logger, log_file = setup_process_logging(dev_str, process_id, base_theta_param)
     
-    return logger, log_file, nx, even_line_two_tesselation, uniform_initial_state, random_angle_deviation, running_streaming_dynamic_eigenvalue_based
+    return logger, log_file, nx, even_line_two_tesselation, uniform_initial_state, random_angle_deviation, running_streaming_dynamic_optimized_structure
 
 def log_process_startup(logger, dev, N, steps, samples_count, base_theta_param):
     """Log process startup information and parameters"""
@@ -328,7 +328,7 @@ def create_step_saver(exp_dir, sample_idx, steps, logger):
     return save_step_callback
 
 def run_single_sample_simulation_optimized(G, T, steps, initial_state, angles, tesselation_order, step_callback):
-    """Execute the EIGENVALUE-BASED quantum walk simulation for a single sample"""
+    """Execute the STRUCTURE-OPTIMIZED quantum walk simulation for a single sample"""
     import os
     import sys
     
@@ -337,17 +337,17 @@ def run_single_sample_simulation_optimized(G, T, steps, initial_state, angles, t
     if sqw_parent_dir not in sys.path:
         sys.path.insert(0, sqw_parent_dir)
     
-    from sqw.experiments_expanded_dynamic_eigenvalue_based import running_streaming_dynamic_eigenvalue_based
+    from sqw.experiments_expanded_dynamic_sparse import running_streaming_dynamic_optimized_structure
     
-    # Use the eigenvalue-based implementation that matches original performance
-    final_state = running_streaming_dynamic_eigenvalue_based(
+    # Use the structure-optimized implementation that scales much better
+    final_state = running_streaming_dynamic_optimized_structure(
         G, T, steps, initial_state, angles, tesselation_order, 
         step_callback=step_callback
     )
     return final_state
 
 def process_single_sample(sample_idx, samples_count, exp_dir, steps, dev, base_theta_param, 
-                         initial_nodes, logger, running_streaming_dynamic_eigenvalue_based, 
+                         initial_nodes, logger, running_streaming_dynamic_optimized_structure, 
                          even_line_two_tesselation, uniform_initial_state, random_angle_deviation, N, nx):
     """Process computation and saving for a single sample using optimized approach"""
     sample_start_time = time.time()
@@ -370,10 +370,10 @@ def process_single_sample(sample_idx, samples_count, exp_dir, steps, dev, base_t
         T = even_line_two_tesselation(N)
         initial_state = uniform_initial_state(N, nodes=initial_nodes)
         
-        # Run the eigenvalue-based simulation - pre-computes eigendecompositions, then fast evolution
-        final_state = running_streaming_dynamic_eigenvalue_based(
+        # Run the structure-optimized simulation - scales much better than eigenvalue approach
+        final_state = running_streaming_dynamic_optimized_structure(
             G, T, steps, initial_state, angles, tesselation_order,
-            step_callback=save_step_callback
+            matrix_representation='adjacency', searching=[], step_callback=save_step_callback
         )
         
         logger.debug(f"Optimized dynamic quantum walk simulation completed for sample {sample_idx} ({steps} time steps streamed)")
@@ -440,7 +440,7 @@ def generate_dynamic_samples_for_dev(dev_args):
     
     try:
         # Setup process environment
-        logger, log_file, nx, even_line_two_tesselation, uniform_initial_state, random_angle_deviation, running_streaming_dynamic_eigenvalue_based = setup_process_environment(dev, process_id, base_theta_param)
+        logger, log_file, nx, even_line_two_tesselation, uniform_initial_state, random_angle_deviation, running_streaming_dynamic_optimized_structure = setup_process_environment(dev, process_id, base_theta_param)
         
         # Log startup information
         log_process_startup(logger, dev, N, steps, samples_count, base_theta_param)
@@ -464,7 +464,7 @@ def generate_dynamic_samples_for_dev(dev_args):
                 
             computed, sample_time = process_single_sample(
                 sample_idx, samples_count, exp_dir, steps, dev, base_theta_param,
-                initial_nodes, logger, running_streaming_dynamic_eigenvalue_based,
+                initial_nodes, logger, running_streaming_dynamic_optimized_structure,
                 even_line_two_tesselation, uniform_initial_state, random_angle_deviation, N, nx
             )
             
