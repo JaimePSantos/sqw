@@ -705,13 +705,11 @@ def main():
         main_tar_name = f"experiments_data_survival_linspace_N{N}_samples{samples}_theta{theta:.6f}_{timestamp}.tar"
         main_tar_path = os.path.join(ARCHIVE_DIR, main_tar_name)
         
-        print(f"Creating archive: {main_tar_path}")
         master_logger.info(f"Creating archive: {main_tar_path}")
         
         try:
             with tarfile.open(main_tar_path, "w") as tar:
                 tar.add(SURVIVAL_BASE_DIR, arcname=os.path.basename(SURVIVAL_BASE_DIR))
-            print(f"Created main archive: {main_tar_path}")
             master_logger.info(f"Created main archive: {main_tar_path}")
         except Exception as e:
             master_logger.error(f"Failed to create archive: {e}")

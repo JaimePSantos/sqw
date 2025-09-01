@@ -35,15 +35,15 @@ from datetime import datetime
 # ============================================================================
 
 # Experiment parameters - EDIT THESE TO MATCH YOUR SETUP
-N = 100                  # System size (matching your linspace experiment)
+N = 4000                 # System size (reduced from 20000)
 steps = N//4             # Time steps
-samples = 2              # Samples per deviation (matching your linspace experiment)
+samples = 20             # Samples per deviation
 theta = math.pi/3        # Theta parameter for static noise
 
-# Deviation values - LINSPACE BETWEEN 0.6 AND 1.0 WITH 20 VALUES (matching your existing data)
+# Deviation values - LINSPACE BETWEEN 0.6 AND 1.0 WITH 100 VALUES (updated for new experiment)
 DEV_MIN = 0.6
 DEV_MAX = 1.0
-DEV_COUNT = 20
+DEV_COUNT = 100
 devs = [(0, dev) for dev in np.linspace(DEV_MIN, DEV_MAX, DEV_COUNT)]
 
 # Directory configuration (matching the linspace generation scripts)
@@ -56,6 +56,9 @@ FIG_SAVE_PATH = "plot_experiments_fig_linspace"
 
 # Global plotting control
 ENABLE_PLOTTING = True  # Master switch for all plotting
+
+# Simple large dataset handling - just control legend display
+LEGEND_THRESHOLD = 10   # Show legends only if fewer deviations than this
 
 # Standard Deviation vs Time Plot Configuration
 STD_PLOT_CONFIG = {
@@ -356,7 +359,12 @@ def plot_standard_deviation_vs_time_linspace(stds, devs, steps):
                 plt.grid(True, alpha=config['grid_alpha'])
                 plot_filename = config['filename_linear'].format(N=N, steps=steps, samples=samples, theta=theta)
             
-            plt.legend(fontsize=config['fontsize_legend'])
+            # Only show legend if we have few enough deviations
+            if len(devs) <= LEGEND_THRESHOLD:
+                plt.legend(fontsize=config['fontsize_legend'])
+            else:
+                print(f"[INFO] Skipping legend display - too many deviations ({len(devs)} > {LEGEND_THRESHOLD})")
+            
             plt.tight_layout()
             
             # Save the plot (if enabled)
@@ -419,7 +427,12 @@ def plot_final_probability_distributions_linspace(final_results, devs, steps, N)
             if config['ylim_min'] is not None or config['ylim_max'] is not None:
                 plt.ylim(config['ylim_min'], config['ylim_max'])
             
-            plt.legend(fontsize=config['fontsize_legend'])
+            # Only show legend if we have few enough deviations
+            if len(devs) <= LEGEND_THRESHOLD:
+                plt.legend(fontsize=config['fontsize_legend'])
+            else:
+                print(f"[INFO] Skipping legend display - too many deviations ({len(devs)} > {LEGEND_THRESHOLD})")
+            
             plt.grid(True, alpha=config['grid_alpha'])
             plt.tight_layout()
             
@@ -530,7 +543,12 @@ def plot_survival_probabilities_linspace(survival_probs, devs, steps, survival_r
                 if plot_type != 'loglog':
                     plt.grid(True, alpha=config['grid_alpha'])
                 
-                plt.legend(fontsize=config['fontsize_legend'])
+                # Only show legend if we have few enough deviations
+                if len(devs) <= LEGEND_THRESHOLD:
+                    plt.legend(fontsize=config['fontsize_legend'])
+                else:
+                    print(f"[INFO] Skipping legend display - too many deviations ({len(devs)} > {LEGEND_THRESHOLD})")
+                
                 plt.tight_layout()
                 
                 # Save the plot (if enabled)
@@ -574,6 +592,10 @@ def main():
     print(f"Deviation range: {DEV_MIN} to {DEV_MAX} with {DEV_COUNT} values")
     print(f"Theta parameter: {theta:.6f}")
     print("")
+    
+    if DEV_COUNT > LEGEND_THRESHOLD:
+        print(f"INFO: Legend display disabled for large datasets ({DEV_COUNT} > {LEGEND_THRESHOLD} deviations)")
+        print("")
     
     print("Configuration:")
     print(f"  ENABLE_PLOTTING = {ENABLE_PLOTTING}")

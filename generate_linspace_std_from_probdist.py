@@ -41,7 +41,7 @@ import tarfile
 # ============================================================================
 
 CREATE_TAR = True  # If True, create per-chunk and main tar archives
-ARCHIVE_DIR = "experiments_archive_linspace_std"
+ARCHIVE_DIR = "experiments_archive_linspace"
 
 # ============================================================================
 # CONFIGURATION PARAMETERS
