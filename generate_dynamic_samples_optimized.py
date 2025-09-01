@@ -327,7 +327,7 @@ def create_step_saver(exp_dir, sample_idx, steps, logger):
     
     return save_step_callback
 
-def run_single_sample_simulation_optimized(G, T, steps, initial_state, angles, tesselation_order, step_callback):
+def run_single_sample_simulation_optimized(G, T, steps, initial_state, angles, tesselation_order, step_callback, logger=None):
     """Execute the STRUCTURE-OPTIMIZED quantum walk simulation for a single sample"""
     import os
     import sys
@@ -342,7 +342,7 @@ def run_single_sample_simulation_optimized(G, T, steps, initial_state, angles, t
     # Use the structure-optimized implementation that scales much better
     final_state = running_streaming_dynamic_optimized_structure(
         G, T, steps, initial_state, angles, tesselation_order, 
-        step_callback=step_callback
+        step_callback=step_callback, logger=logger
     )
     return final_state
 
@@ -373,7 +373,7 @@ def process_single_sample(sample_idx, samples_count, exp_dir, steps, dev, base_t
         # Run the structure-optimized simulation - scales much better than eigenvalue approach
         final_state = running_streaming_dynamic_optimized_structure(
             G, T, steps, initial_state, angles, tesselation_order,
-            matrix_representation='adjacency', searching=[], step_callback=save_step_callback
+            matrix_representation='adjacency', searching=[], step_callback=save_step_callback, logger=logger
         )
         
         logger.debug(f"Optimized dynamic quantum walk simulation completed for sample {sample_idx} ({steps} time steps streamed)")
