@@ -42,9 +42,9 @@ from datetime import datetime
 # ============================================================================
 
 # Experiment parameters - EDIT THESE TO MATCH YOUR SETUP
-N = 100                # System size (small for local testing)
-steps = 25             # Time steps (small for testing)
-samples = 1            # Samples per deviation (small for testing)
+N = 20000                # System size (small for local testing)
+steps = N//4             # Time steps (small for testing)
+samples = 40           # Samples per deviation (small for testing)
 base_theta = math.pi/3 # Base theta parameter for dynamic angle noise
 
 # Deviation values - Dynamic noise format (angle deviations) - Reduced for testing
