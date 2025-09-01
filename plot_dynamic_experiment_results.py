@@ -34,11 +34,18 @@ from datetime import datetime
 # CONFIGURATION PARAMETERS
 # ============================================================================
 
+# # Experiment parameters - EDIT THESE TO MATCH YOUR SETUP
+# N = 20000              # System size (production scale for cluster)
+# steps = N//4           # Time steps (5000 for N=20000)
+# samples = 40           # Samples per deviation (full production count)
+# basetheta = math.pi/3  # Base theta parameter for dynamic angle noise
+
 # Experiment parameters - EDIT THESE TO MATCH YOUR SETUP
-N = 20000              # System size (production scale for cluster)
+N = 100              # System size (production scale for cluster)
 steps = N//4           # Time steps (5000 for N=20000)
-samples = 40           # Samples per deviation (full production count)
-basetheta = math.pi/3  # Base theta parameter for dynamic angle noise
+samples = 1          # Samples per deviation (full production count)
+base_theta = math.pi/3 # Base theta parameter for dynamic angle noise
+
 
 # Deviation values - Dynamic noise format (angle deviations) - Matching original static experiment
 devs = [
@@ -141,7 +148,7 @@ SURVIVAL_PLOT_CONFIG = {
     'grid_linestyle': '-',
     'dpi': 300,                         # DPI for saved figures
     'bbox_inches': 'tight',             # Bbox setting for saved figures
-    'survival_range': 'system'     # Default survival range to plot
+    'survival_range': 'center'     # Default survival range to plot
 }
 
 # Label formatting configuration
@@ -169,7 +176,7 @@ def format_deviation_label(dev):
     else:
         return f"{float(dev):.6f}"
 
-def get_dynamic_experiment_dir(N, basetheta, deviation, base_dir="experiments_data_samples_dynamic", samples=None):
+def get_dynamic_experiment_dir(N, base_theta, deviation, base_dir="experiments_data_samples_dynamic", samples=None):
     """
     Get dynamic experiment directory path with proper structure.
     
@@ -190,7 +197,7 @@ def get_dynamic_experiment_dir(N, basetheta, deviation, base_dir="experiments_da
         noise_dir = os.path.join(exp_base, "no_noise")
     
     # Add base theta information (replace decimal points with 'p')
-    theta_str = f"basetheta_{basetheta:.6f}".replace(".", "p")
+    theta_str = f"basetheta_{base_theta:.6f}".replace(".", "p")
     theta_dir = os.path.join(noise_dir, theta_str)
     
     # Add deviation-specific directory (replace decimal points with 'p')
@@ -203,24 +210,24 @@ def get_dynamic_experiment_dir(N, basetheta, deviation, base_dir="experiments_da
     
     return final_dir
 
-def find_dynamic_experiment_dir_flexible(N, basetheta, deviation, base_dir="experiments_data_samples_dynamic", samples=None):
+def find_dynamic_experiment_dir_flexible(N, base_theta, deviation, base_dir="experiments_data_samples_dynamic", samples=None):
     """
     Find dynamic experiment directory with flexible format matching.
     Tries different directory structures to find existing data.
     """
     # Try with the correct dynamic structure
-    exp_dir = get_dynamic_experiment_dir(N, basetheta, deviation, base_dir, samples)
+    exp_dir = get_dynamic_experiment_dir(N, base_theta, deviation, base_dir, samples)
     if os.path.exists(exp_dir):
         return exp_dir, "dynamic_format"
     
     # If nothing found, return the target path (will be created if needed)
-    return get_dynamic_experiment_dir(N, basetheta, deviation, base_dir, samples), "dynamic_format"
+    return get_dynamic_experiment_dir(N, base_theta, deviation, base_dir, samples), "dynamic_format"
 
 # ============================================================================
 # DATA LOADING FUNCTIONS
 # ============================================================================
 
-def load_dynamic_std_data_directly(devs, N, basetheta, std_base_dir, samples=None):
+def load_dynamic_std_data_directly(devs, N, base_theta, std_base_dir, samples=None):
     """
     Load standard deviation data directly from dynamic std files.
     """
@@ -230,7 +237,7 @@ def load_dynamic_std_data_directly(devs, N, basetheta, std_base_dir, samples=Non
     
     for i, dev in enumerate(devs):
         exp_dir, format_type = find_dynamic_experiment_dir_flexible(
-            N, basetheta, dev, base_dir=std_base_dir, samples=samples
+            N, base_theta, dev, base_dir=std_base_dir, samples=samples
         )
         
         std_file = os.path.join(exp_dir, "std_vs_time.pkl")
@@ -251,7 +258,7 @@ def load_dynamic_std_data_directly(devs, N, basetheta, std_base_dir, samples=Non
     print(f"[OK] Dynamic standard deviation data loading completed!")
     return stds
 
-def load_dynamic_final_step_probability_distributions(N, basetheta, steps, parameter_list, probdist_base_dir, samples=None):
+def load_dynamic_final_step_probability_distributions(N, base_theta, steps, parameter_list, probdist_base_dir, samples=None):
     """
     Load only the final step probability distributions from the dynamic probDist folder.
     """
@@ -261,7 +268,7 @@ def load_dynamic_final_step_probability_distributions(N, basetheta, steps, param
     results = []
     for i, dev in enumerate(parameter_list):
         exp_dir, format_type = find_dynamic_experiment_dir_flexible(
-            N, basetheta, dev, base_dir=probdist_base_dir, samples=samples
+            N, base_theta, dev, base_dir=probdist_base_dir, samples=samples
         )
         
         prob_file = os.path.join(exp_dir, f"mean_step_{final_step}.pkl")
@@ -282,7 +289,7 @@ def load_dynamic_final_step_probability_distributions(N, basetheta, steps, param
     print(f"[OK] Dynamic final step probability distribution loading completed!")
     return results
 
-def load_dynamic_survival_probability_data(devs, N, basetheta, survival_base_dir, survival_range="center", samples=None):
+def load_dynamic_survival_probability_data(devs, N, base_theta, survival_base_dir, survival_range="center", samples=None):
     """
     Load survival probability data directly from dynamic survival probability files.
     """
@@ -293,7 +300,7 @@ def load_dynamic_survival_probability_data(devs, N, basetheta, survival_base_dir
     
     for i, dev in enumerate(devs):
         exp_dir, format_type = find_dynamic_experiment_dir_flexible(
-            N, basetheta, dev, base_dir=survival_base_dir, samples=samples
+            N, base_theta, dev, base_dir=survival_base_dir, samples=samples
         )
         
         survival_file = os.path.join(exp_dir, "survival_vs_time.pkl")
@@ -372,14 +379,14 @@ def plot_dynamic_standard_deviation_vs_time(stds, devs, steps):
             plt.ylabel(config['ylabel'], fontsize=config['fontsize_labels'])
             
             if config['use_loglog']:
-                plt.title(config['title_loglog'].format(basetheta=basetheta), fontsize=config['fontsize_title'])
+                plt.title(config['title_loglog'].format(basetheta=base_theta), fontsize=config['fontsize_title'])
                 plt.grid(True, alpha=config['grid_alpha'], which=config['grid_which'], 
                         linestyle=config['grid_linestyle'])
-                plot_filename = config['filename_loglog'].format(N=N, steps=steps, samples=samples, basetheta=basetheta)
+                plot_filename = config['filename_loglog'].format(N=N, steps=steps, samples=samples, basetheta=base_theta)
             else:
-                plt.title(config['title_linear'].format(basetheta=basetheta), fontsize=config['fontsize_title'])
+                plt.title(config['title_linear'].format(basetheta=base_theta), fontsize=config['fontsize_title'])
                 plt.grid(True, alpha=config['grid_alpha'])
-                plot_filename = config['filename_linear'].format(N=N, steps=steps, samples=samples, basetheta=basetheta)
+                plot_filename = config['filename_linear'].format(N=N, steps=steps, samples=samples, basetheta=base_theta)
             
             plt.legend(fontsize=config['fontsize_legend'])
             plt.tight_layout()
@@ -436,7 +443,7 @@ def plot_dynamic_final_probability_distributions(final_results, devs, steps, N):
             
             plt.xlabel(config['xlabel'], fontsize=config['fontsize_labels'])
             plt.ylabel(config['ylabel'], fontsize=config['fontsize_labels'])
-            plt.title(config['title'].format(final_step=final_step, basetheta=basetheta), fontsize=config['fontsize_title'])
+            plt.title(config['title'].format(final_step=final_step, basetheta=base_theta), fontsize=config['fontsize_title'])
             
             # Set axis limits based on config
             if config['xlim']:
@@ -452,7 +459,7 @@ def plot_dynamic_final_probability_distributions(final_results, devs, steps, N):
             if config['save_figure']:
                 # Ensure the figure save directory exists
                 os.makedirs(FIG_SAVE_PATH, exist_ok=True)
-                plot_filename = config['filename'].format(N=N, steps=steps, samples=samples, basetheta=basetheta)
+                plot_filename = config['filename'].format(N=N, steps=steps, samples=samples, basetheta=base_theta)
                 full_plot_path = os.path.join(FIG_SAVE_PATH, plot_filename)
                 plt.savefig(full_plot_path, dpi=config['dpi'], bbox_inches=config['bbox_inches'])
                 print(f"[OK] Dynamic probability distribution plot saved as '{full_plot_path}'")
@@ -532,21 +539,21 @@ def plot_dynamic_survival_probabilities(survival_probs, devs, steps, survival_ra
                 if plot_type == 'linear':
                     plt.xlabel(config['xlabel'], fontsize=config['fontsize_labels'])
                     plt.ylabel(config['ylabel_linear'], fontsize=config['fontsize_labels'])
-                    plt.title(config['title_linear'].format(basetheta=basetheta) + f" - {survival_range.replace('_', ' ').title()}", 
+                    plt.title(config['title_linear'].format(basetheta=base_theta) + f" - {survival_range.replace('_', ' ').title()}", 
                              fontsize=config['fontsize_title'])
-                    plot_filename = config['filename_linear'].format(N=N, steps=steps, samples=samples, basetheta=basetheta)
+                    plot_filename = config['filename_linear'].format(N=N, steps=steps, samples=samples, basetheta=base_theta)
                 elif plot_type == 'semilogy':
                     plt.xlabel(config['xlabel'], fontsize=config['fontsize_labels'])
                     plt.ylabel(config['ylabel_semilogy'], fontsize=config['fontsize_labels'])
-                    plt.title(config['title_semilogy'].format(basetheta=basetheta) + f" - {survival_range.replace('_', ' ').title()}", 
+                    plt.title(config['title_semilogy'].format(basetheta=base_theta) + f" - {survival_range.replace('_', ' ').title()}", 
                              fontsize=config['fontsize_title'])
-                    plot_filename = config['filename_semilogy'].format(N=N, steps=steps, samples=samples, basetheta=basetheta)
+                    plot_filename = config['filename_semilogy'].format(N=N, steps=steps, samples=samples, basetheta=base_theta)
                 elif plot_type == 'loglog':
                     plt.xlabel(config['xlabel'] + " (log scale)", fontsize=config['fontsize_labels'])
                     plt.ylabel(config['ylabel_loglog'], fontsize=config['fontsize_labels'])
-                    plt.title(config['title_loglog'].format(basetheta=basetheta) + f" - {survival_range.replace('_', ' ').title()}", 
+                    plt.title(config['title_loglog'].format(basetheta=base_theta) + f" - {survival_range.replace('_', ' ').title()}", 
                              fontsize=config['fontsize_title'])
-                    plot_filename = config['filename_loglog'].format(N=N, steps=steps, samples=samples, basetheta=basetheta)
+                    plot_filename = config['filename_loglog'].format(N=N, steps=steps, samples=samples, basetheta=base_theta)
                     plt.grid(True, alpha=config['grid_alpha'], which=config['grid_which'], 
                             linestyle=config['grid_linestyle'])
                 else:
@@ -597,7 +604,7 @@ def main():
     print(f"Time steps: {steps}")
     print(f"Samples per deviation: {samples}")
     print(f"Deviation values: {devs}")
-    print(f"Base theta parameter: {basetheta:.6f}")
+    print(f"Base theta parameter: {base_theta:.6f}")
     print("")
     
     print("Configuration:")
@@ -615,7 +622,7 @@ def main():
     # Step 1: Load dynamic standard deviation data
     print("[STEP 1] Loading dynamic standard deviation data...")
     try:
-        stds = load_dynamic_std_data_directly(devs, N, basetheta, STD_BASE_DIR, samples)
+        stds = load_dynamic_std_data_directly(devs, N, base_theta, STD_BASE_DIR, samples)
         print(f"[OK] Dynamic standard deviation data ready for {len([s for s in stds if len(s) > 0])} / {len(devs)} deviations")
     except Exception as e:
         print(f"[ERROR] Failed to load dynamic standard deviation data: {e}")
@@ -627,7 +634,7 @@ def main():
         print("[STEP 2] Loading dynamic final step probability distributions...")
         try:
             final_results = load_dynamic_final_step_probability_distributions(
-                N, basetheta, steps, devs, PROBDIST_BASE_DIR, samples
+                N, base_theta, steps, devs, PROBDIST_BASE_DIR, samples
             )
             print(f"[OK] Loaded dynamic final step distributions for {len([r for r in final_results if r is not None])} / {len(devs)} deviations")
         except Exception as e:
@@ -643,7 +650,7 @@ def main():
         try:
             survival_range = SURVIVAL_PLOT_CONFIG['survival_range']
             survival_probs = load_dynamic_survival_probability_data(
-                devs, N, basetheta, SURVIVAL_BASE_DIR, survival_range, samples
+                devs, N, base_theta, SURVIVAL_BASE_DIR, survival_range, samples
             )
             print(f"[OK] Prepared dynamic survival probabilities for {len([s for s in survival_probs if len(s) > 0])} / {len(devs)} deviations")
         except Exception as e:

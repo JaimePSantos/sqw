@@ -44,10 +44,16 @@ from datetime import datetime
 CREATE_TAR = True  # If True, create per-dev and main tar archives
 ARCHIVE_DIR = "experiments_archive_dynamic"
 
+# # Experiment parameters - EDIT THESE TO MATCH YOUR SETUP
+# N = 20000              # System size (production scale for cluster)
+# steps = N//4           # Time steps (5000 for N=20000)
+# samples = 40           # Samples per deviation (full production count)
+# base_theta = math.pi/3 # Base theta parameter for dynamic angle noise
+
 # Experiment parameters - EDIT THESE TO MATCH YOUR SETUP
-N = 20000              # System size (production scale for cluster)
+N = 100              # System size (production scale for cluster)
 steps = N//4           # Time steps (5000 for N=20000)
-samples = 40           # Samples per deviation (full production count)
+samples = 1          # Samples per deviation (full production count)
 base_theta = math.pi/3 # Base theta parameter for dynamic angle noise
 
 # Deviation values - Dynamic noise format (angle deviations) - Matching original static experiment
