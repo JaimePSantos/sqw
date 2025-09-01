@@ -318,8 +318,12 @@ def create_step_saver(exp_dir, sample_idx, steps, logger):
         del state
         gc.collect()
         
-        if step_idx % 100 == 0 or step_idx == steps - 1:
-            logger.info(f"    Saving step {step_idx}/{steps - 1} (quantum walk state for time step {step_idx})")
+        # Log more frequently for large step counts
+        log_interval = min(100, max(10, steps // 50))  # Adaptive logging interval
+        
+        if step_idx % log_interval == 0 or step_idx == steps - 1:
+            progress_pct = (step_idx + 1) / steps * 100
+            logger.info(f"    Step {step_idx+1}/{steps} ({progress_pct:.1f}%) - Saved quantum walk state")
     
     return save_step_callback
 
