@@ -37,16 +37,18 @@ from datetime import datetime
 # ============================================================================
 
 # Experiment parameters - EDIT THESE TO MATCH YOUR SETUP
-N = 100                # System size (small for testing dynamic noise)
-steps = N//4           # Time steps
-samples = 5            # Samples per deviation (reduced for testing)
+N = 20000              # System size (production scale for cluster)
+steps = N//4           # Time steps (5000 for N=20000)
+samples = 40           # Samples per deviation (full production count)
 base_theta = math.pi/3 # Base theta parameter for dynamic angle noise
 
-# Deviation values - Dynamic noise format (angle deviations)
+# Deviation values - Dynamic noise format (angle deviations) - Matching original static experiment
 devs = [
-    0,                  # No noise
-    (math.pi/3)/4,      # Small noise
-    (math.pi/3)/2,      # Medium noise  
+    0,                  # No noise (equivalent to (0,0))
+    0.2,                # Small noise (equivalent to (0, 0.2))
+    0.6,                # Medium noise (equivalent to (0, 0.6))
+    0.8,                # Medium noise (equivalent to (0, 0.8))
+    1.0,                # Large noise (equivalent to (0, 1))
 ]
 
 # Directory configuration
@@ -57,8 +59,8 @@ current_date = datetime.now().strftime("%d-%m-%y")
 PROCESS_LOG_DIR = os.path.join("logs", current_date, "dynamic_sample_generation")
 
 # Multiprocessing configuration
-MAX_PROCESSES = min(len(devs), 2)  # Limit to 2 processes for stability
-PROCESS_TIMEOUT = 1800  # 30 minutes timeout per process
+MAX_PROCESSES = min(len(devs), mp.cpu_count())  # Use all available cores for cluster
+PROCESS_TIMEOUT = 7200  # 2 hours timeout per process for large N
 
 # Logging configuration
 MASTER_LOG_FILE = os.path.join("logs", current_date, "dynamic_sample_generation", "dynamic_sample_generation_master.log")

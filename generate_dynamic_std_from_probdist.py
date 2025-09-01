@@ -1,21 +1,21 @@
 #!/usr/bin/env python3
 
 """
-Generate Probability Distributions from Dynamic Samples
+Generate Standard Deviation Data from Dynamic Probability Distributions
 
-This script generates probability distribution (.pkl) files from existing dynamic sample data.
-It processes multiple deviation values in parallel, checking for missing or invalid
-probability distribution files and creating them from the corresponding sample files.
+This script generates standard deviation data from existing dynamic probability distribution files.
+It processes multiple deviation values in parallel, calculating standard deviations across
+time for each deviation and saving the results for later plotting.
 
 Key Features:
 - Multi-process execution (one process per deviation value)
-- Smart file validation (checks if probDist files exist and have valid data)
+- Smart file validation (checks if std files exist and have valid data)
 - Dynamic noise experiment directory structure handling
 - Comprehensive logging for each process
 - Graceful error handling and recovery
 
 Usage:
-    python generate_dynamic_probdist_from_samples.py
+    python generate_dynamic_std_from_probdist.py
 
 Configuration:
     Edit the parameters section below to match your experiment setup.
@@ -31,8 +31,15 @@ import traceback
 import multiprocessing as mp
 import pickle
 import tarfile
+import numpy as np
 from concurrent.futures import ProcessPoolExecutor, as_completed, TimeoutError
 from datetime import datetime
+
+# Try to import psutil for system monitoring
+try:
+    import psutil
+except ImportError:
+    psutil = None
 
 # ============================================================================
 # CONFIGURATION PARAMETERS
@@ -59,17 +66,13 @@ devs = [
     1.0,                # Large noise (equivalent to (0, 1))
 ]
 
-# Note: Dynamic sample generation includes initial step (step 0) + evolution steps
-# So actual sample data has steps + 1 directories (0 to steps inclusive)
-EXPECT_INITIAL_STEP = True  # Set to True if samples include step_0 as initial state
-
 # Directory configuration
-SAMPLES_BASE_DIR = "experiments_data_samples_dynamic"
 PROBDIST_BASE_DIR = "experiments_data_samples_dynamic_probDist"
+STD_BASE_DIR = "experiments_data_samples_dynamic_std"
 
 # Create date-based logging directories
 current_date = datetime.now().strftime("%d-%m-%y")
-PROCESS_LOG_DIR = os.path.join("logs", current_date, "generate_dynamic_probdist")
+PROCESS_LOG_DIR = os.path.join("logs", current_date, "generate_dynamic_std")
 
 # Multiprocessing configuration
 MAX_PROCESSES = min(len(devs), mp.cpu_count())
@@ -84,7 +87,7 @@ print(f"[TIMEOUT] Based on N={N}, steps={steps}, samples={samples}")
 print(f"[RESOURCE] Using {MAX_PROCESSES} processes out of {mp.cpu_count()} CPUs")
 
 # Logging configuration
-MASTER_LOG_FILE = os.path.join("logs", current_date, "generate_dynamic_probdist", "dynamic_probdist_generation_master.log")
+MASTER_LOG_FILE = os.path.join("logs", current_date, "generate_dynamic_std", "dynamic_std_generation_master.log")
 
 # Global shutdown flag
 SHUTDOWN_REQUESTED = False
@@ -109,6 +112,60 @@ def dummy_tesselation_func(N):
     return None
 
 # ============================================================================
+# SYSTEM MONITORING AND LOGGING UTILITIES
+# ============================================================================
+
+def log_system_resources(logger=None, prefix="[SYSTEM]"):
+    """Log current system resource usage"""
+    try:
+        if psutil:
+            memory = psutil.virtual_memory()
+            cpu_percent = psutil.cpu_percent(interval=1)
+            
+            msg = f"{prefix} Memory: {memory.percent:.1f}% used ({memory.available / (1024**3):.1f}GB free), CPU: {cpu_percent:.1f}%"
+            if logger:
+                logger.info(msg)
+            else:
+                print(msg)
+            
+            # Check for concerning resource usage
+            if memory.percent > 90:
+                logger.warning(f"{prefix} High memory usage: {memory.percent:.1f}%") if logger else print(f"WARNING: {prefix} High memory usage: {memory.percent:.1f}%")
+            
+            if cpu_percent > 95:
+                logger.warning(f"{prefix} High CPU usage: {cpu_percent:.1f}%") if logger else print(f"WARNING: {prefix} High CPU usage: {cpu_percent:.1f}%")
+                
+    except ImportError:
+        msg = f"{prefix} psutil not available - cannot monitor resources"
+        if logger:
+            logger.info(msg)
+        else:
+            print(msg)
+    except Exception as e:
+        msg = f"{prefix} Error monitoring resources: {e}"
+        if logger:
+            logger.error(msg)
+        else:
+            print(msg)
+
+def log_progress_update(phase, completed, total, start_time, logger=None):
+    """Log detailed progress update with ETA"""
+    elapsed = time.time() - start_time
+    if completed > 0:
+        eta = (elapsed / completed) * (total - completed)
+        eta_str = f"{eta/60:.1f}m" if eta < 3600 else f"{eta/3600:.1f}h"
+        progress_pct = (completed / total) * 100
+        
+        msg = f"[{phase}] Progress: {completed}/{total} ({progress_pct:.1f}%) - Elapsed: {elapsed/60:.1f}m - ETA: {eta_str}"
+    else:
+        msg = f"[{phase}] Progress: {completed}/{total} (0.0%) - Elapsed: {elapsed/60:.1f}m - ETA: unknown"
+    
+    if logger:
+        logger.info(msg)
+    else:
+        print(msg)
+
+# ============================================================================
 # LOGGING SETUP
 # ============================================================================
 
@@ -126,10 +183,10 @@ def setup_process_logging(dev_value, process_id, base_theta=None):
     else:
         theta_str = ""
     
-    log_filename = os.path.join(PROCESS_LOG_DIR, f"process_dev_{dev_str}{theta_str}_dynamic_probdist.log")
+    log_filename = os.path.join(PROCESS_LOG_DIR, f"process_dev_{dev_str}{theta_str}_dynamic_std.log")
     
     # Create logger for this process
-    logger = logging.getLogger(f"dev_{dev_str}_dynamic_probdist")
+    logger = logging.getLogger(f"dev_{dev_str}_dynamic_std")
     logger.setLevel(logging.INFO)
     
     # Remove any existing handlers
@@ -238,52 +295,46 @@ def get_dynamic_experiment_dir(tesselation_func, has_noise, N, noise_params=None
     
     return final_dir
 
-def find_dynamic_samples_directory_for_config(base_dir, N, base_theta, dev, samples_count, logger):
+def find_dynamic_probdist_directory_for_config(base_dir, N, base_theta, dev, logger):
     """
-    Find the dynamic samples directory that contains data for the specified configuration.
+    Find the dynamic probability distribution directory that contains data for the specified configuration.
     
     Returns:
-        tuple: (samples_dir_path, format_type) or (None, None) if not found
+        tuple: (probdist_dir_path, format_type) or (None, None) if not found
     """
-    logger.info(f"Searching for dynamic samples directory: N={N}, samples={samples_count}, dev={dev}, base_theta={base_theta:.6f}")
+    logger.info(f"Searching for dynamic probdist directory: N={N}, dev={dev}, base_theta={base_theta:.6f}")
     
     # Dynamic format structure
     has_noise = dev > 0
     noise_params = [dev]
     
-    samples_path = get_dynamic_experiment_dir(
+    probdist_path = get_dynamic_experiment_dir(
         dummy_tesselation_func, has_noise, N, 
         noise_params=noise_params, 
         base_dir=base_dir, 
         base_theta=base_theta
     )
     
-    if os.path.exists(samples_path):
-        # Check if we have the expected number of step directories
-        step_dirs = [d for d in os.listdir(samples_path) if os.path.isdir(os.path.join(samples_path, d)) and d.startswith("step_")]
-        found_steps = len(step_dirs)
+    if os.path.exists(probdist_path):
+        # Check if we have probability distribution files
+        probdist_files = [f for f in os.listdir(probdist_path) if f.startswith("mean_step_") and f.endswith(".pkl")]
+        found_steps = len(probdist_files)
         
-        # Check sample count in first step directory
-        if step_dirs:
-            first_step_dir = os.path.join(samples_path, step_dirs[0])
-            sample_files = [f for f in os.listdir(first_step_dir) if f.startswith("final_step_") and f.endswith(".pkl")]
-            found_samples = len(sample_files)
-            
-            logger.info(f"Found dynamic samples directory: {samples_path}")
-            logger.info(f"  Steps: {found_steps}, Samples: {found_samples}")
-            
-            return samples_path, "dynamic_format"
+        logger.info(f"Found dynamic probdist directory: {probdist_path}")
+        logger.info(f"  Steps: {found_steps}")
+        
+        return probdist_path, "dynamic_format"
     
-    logger.warning(f"No valid dynamic samples directory found for configuration: N={N}, samples={samples_count}, dev={dev}")
+    logger.warning(f"No valid dynamic probdist directory found for configuration: N={N}, dev={dev}")
     return None, None
 
 # ============================================================================
 # DIRECTORY AND FILE MANAGEMENT
 # ============================================================================
 
-def validate_probdist_file(file_path):
+def validate_std_file(file_path):
     """
-    Validate that a probability distribution file exists and contains valid data.
+    Validate that a standard deviation file exists and contains valid data.
     
     Returns:
         bool: True if file is valid, False otherwise
@@ -294,201 +345,137 @@ def validate_probdist_file(file_path):
     try:
         with open(file_path, 'rb') as f:
             data = pickle.load(f)
-            # Check if data is a valid numpy array or list with reasonable content
-            if data is None:
-                return False
-            return True
+        
+        # Check if data is a valid array with expected properties
+        if isinstance(data, (list, np.ndarray)) and len(data) > 0:
+            # Additional validation: check for reasonable std values (allow 0, but not negative)
+            if hasattr(data, '__iter__') and all(x >= 0 for x in data if x is not None):
+                return True
+        
+        return False
+        
     except (pickle.PickleError, EOFError, ValueError, TypeError) as e:
         return False
 
-def load_sample_file(file_path):
+def load_probability_distributions_for_dev(probdist_dir, N, steps, logger):
     """
-    Load a sample file and return the state data.
-    
-    Returns:
-        numpy.ndarray or None: The sample state data, or None if loading failed
-    """
-    if not os.path.exists(file_path):
-        return None
-    
-    try:
-        with open(file_path, 'rb') as f:
-            return pickle.load(f)
-    except (pickle.PickleError, EOFError, ValueError, TypeError):
-        return None
-
-def validate_dynamic_samples_configuration(samples_exp_dir, expected_samples, expected_steps, expected_N, expected_base_theta, logger):
-    """
-    Validate that the dynamic samples directory contains data for the expected configuration.
-    Checks both the directory structure and a sample of files to ensure consistency.
-    
-    Note: Accepts either expected_steps or expected_steps + 1 to handle cases where
-    sample generation includes an initial step (step_0) plus evolution steps.
-    
-    Returns:
-        dict: {"valid": bool, "found_samples": int, "found_steps": int, "issues": [str]}
-    """
-    issues = []
-    found_steps = 0
-    found_samples = 0
-    
-    logger.info(f"Validating dynamic samples configuration:")
-    logger.info(f"  Expected: N={expected_N}, steps={expected_steps} (or {expected_steps + 1}), samples={expected_samples}, base_theta={expected_base_theta:.6f}")
-    logger.info(f"  Directory: {samples_exp_dir}")
-    
-    if not os.path.exists(samples_exp_dir):
-        issues.append(f"Samples directory does not exist: {samples_exp_dir}")
-        return {"valid": False, "found_samples": 0, "found_steps": 0, "issues": issues}
-    
-    # Count available steps
-    step_dirs = [d for d in os.listdir(samples_exp_dir) if os.path.isdir(os.path.join(samples_exp_dir, d)) and d.startswith("step_")]
-    found_steps = len(step_dirs)
-    
-    if found_steps == 0:
-        issues.append("No step directories found")
-        return {"valid": False, "found_samples": 0, "found_steps": 0, "issues": issues}
-    
-    # Check a few steps to determine sample count
-    sample_counts = []
-    for step_dir_name in sorted(step_dirs)[:min(5, len(step_dirs))]:
-        step_dir = os.path.join(samples_exp_dir, step_dir_name)
-        sample_files = [f for f in os.listdir(step_dir) if f.startswith("final_step_") and f.endswith(".pkl")]
-        sample_counts.append(len(sample_files))
-    
-    # Determine the actual sample count
-    if sample_counts:
-        found_samples = max(sample_counts)  # Use the maximum found
-        if len(set(sample_counts)) > 1:
-            issues.append(f"Inconsistent sample counts across steps: {set(sample_counts)}")
-    
-    # Validate against expected values - allow for steps or steps + 1
-    if found_steps != expected_steps and found_steps != (expected_steps + 1):
-        issues.append(f"Step count mismatch: expected {expected_steps} (or {expected_steps + 1}), found {found_steps}")
-    
-    if found_samples != expected_samples:
-        issues.append(f"Sample count mismatch: expected {expected_samples}, found {found_samples}")
-    
-    # Log results
-    if issues:
-        logger.warning(f"Validation issues found: {issues}")
-    else:
-        logger.info(f"Validation passed: {found_steps} steps, {found_samples} samples")
-    
-    return {
-        "valid": len(issues) == 0,
-        "found_samples": found_samples,
-        "found_steps": found_steps,
-        "issues": issues
-    }
-
-# ============================================================================
-# PROBABILITY DISTRIBUTION GENERATION FUNCTIONS
-# ============================================================================
-
-def generate_step_probdist(samples_dir, target_dir, step_idx, N, samples_count, logger):
-    """
-    Generate probability distribution for a specific step from sample files.
-    Uses optimized streaming processing with incremental mean calculation to minimize memory usage.
+    Load all probability distributions for a single deviation from probDist files.
     
     Args:
-        samples_dir: Directory containing sample files
-        target_dir: Directory to save probability distribution
-        step_idx: Step index to process
+        probdist_dir: Directory containing probability distribution files
         N: System size
-        samples_count: Number of samples
+        steps: Number of time steps
         logger: Logger for this process
     
     Returns:
-        tuple: (success: bool, was_skipped: bool) - (True, True) if skipped, (True, False) if computed, (False, False) if failed
+        list: List of probability distributions for each time step
     """
     try:
-        import numpy as np
+        logger.info(f"Loading probability distributions from: {probdist_dir}")
         
-        # Create target directory if it doesn't exist
-        os.makedirs(target_dir, exist_ok=True)
+        prob_distributions = []
         
-        # Check if output file already exists and is valid
-        output_file = os.path.join(target_dir, f"mean_step_{step_idx}.pkl")
-        if validate_probdist_file(output_file):
-            logger.info(f"    Step {step_idx}: Already exists and valid, skipping")
-            return True, True  # success=True, was_skipped=True
-        
-        # Find step directory
-        step_dir = os.path.join(samples_dir, f"step_{step_idx}")
-        if not os.path.exists(step_dir):
-            logger.error(f"    Step {step_idx}: Step directory not found: {step_dir}")
-            return False, False  # success=False, was_skipped=False
-        
-        logger.debug(f"    Step {step_idx}: Processing {samples_count} samples...")
-        
-        # Initialize running mean calculation
-        running_mean = None
-        valid_samples = 0
-        
-        # Process each sample file
-        for sample_idx in range(samples_count):
-            sample_file = os.path.join(step_dir, f"final_step_{step_idx}_sample{sample_idx}.pkl")
-            
-            # Load sample data
-            sample_data = load_sample_file(sample_file)
-            if sample_data is None:
-                logger.warning(f"    Step {step_idx}: Failed to load sample {sample_idx}")
+        # Get available probdist files
+        probdist_files = [f for f in os.listdir(probdist_dir) if f.startswith("mean_step_") and f.endswith(".pkl")]
+        available_steps = []
+        for f in probdist_files:
+            try:
+                step_num = int(f.replace("mean_step_", "").replace(".pkl", ""))
+                available_steps.append(step_num)
+            except ValueError:
                 continue
+        
+        available_steps.sort()
+        max_step = max(available_steps) if available_steps else 0
+        actual_steps = max_step + 1  # Steps are 0-indexed
+        
+        logger.info(f"Found {len(available_steps)} probdist files, max step: {max_step}")
+        
+        for step_idx in range(actual_steps):
+            prob_file = os.path.join(probdist_dir, f"mean_step_{step_idx}.pkl")
             
-            # Convert to numpy array if needed
-            if not isinstance(sample_data, np.ndarray):
+            if os.path.exists(prob_file):
                 try:
-                    sample_data = np.array(sample_data)
-                except:
-                    logger.warning(f"    Step {step_idx}: Could not convert sample {sample_idx} to numpy array")
-                    continue
-            
-            # Get probability distribution (magnitude squared)
-            prob_dist = np.abs(sample_data) ** 2
-            
-            # Update running mean
-            if running_mean is None:
-                running_mean = prob_dist.copy()
-                valid_samples = 1
+                    with open(prob_file, 'rb') as f:
+                        prob_dist = pickle.load(f)
+                    prob_distributions.append(prob_dist)
+                except Exception as e:
+                    logger.warning(f"Failed to load probability distribution for step {step_idx}: {e}")
+                    prob_distributions.append(None)
             else:
-                # Incremental mean: new_mean = old_mean + (new_value - old_mean) / (count + 1)
-                valid_samples += 1
-                running_mean += (prob_dist - running_mean) / valid_samples
-            
-            # Clean up
-            del sample_data, prob_dist
-            gc.collect()
+                logger.warning(f"Probability distribution file not found for step {step_idx}: {prob_file}")
+                prob_distributions.append(None)
         
-        if valid_samples == 0:
-            logger.error(f"    Step {step_idx}: No valid samples found")
-            return False, False  # success=False, was_skipped=False
+        valid_steps = sum(1 for p in prob_distributions if p is not None)
+        logger.info(f"Loaded {valid_steps}/{len(prob_distributions)} valid probability distributions")
         
-        if valid_samples != samples_count:
-            logger.warning(f"    Step {step_idx}: Only {valid_samples}/{samples_count} samples were valid")
-        
-        # Save the mean probability distribution
-        with open(output_file, 'wb') as f:
-            pickle.dump(running_mean, f)
-        
-        logger.debug(f"    Step {step_idx}: Generated probdist from {valid_samples} samples")
-        
-        # Clean up
-        del running_mean
-        gc.collect()
-        
-        return True, False  # success=True, was_skipped=False (actually computed)
+        return prob_distributions
         
     except Exception as e:
-        logger.error(f"    Step {step_idx}: Error generating probdist: {e}")
-        logger.error(traceback.format_exc())
-        return False, False  # success=False, was_skipped=False
+        logger.error(f"Error loading probability distributions: {str(e)}")
+        return []
 
-def generate_dynamic_probdist_for_dev(dev_args):
+# ============================================================================
+# STANDARD DEVIATION CALCULATION FUNCTIONS
+# ============================================================================
+
+def prob_distributions2std(prob_distributions, domain):
     """
-    Worker function to generate probability distributions for a single deviation value.
-    dev_args: (dev, process_id, N, steps, samples, base_theta, source_base_dir, target_base_dir)
+    Calculate standard deviations from probability distributions.
+    
+    Args:
+        prob_distributions: List of probability distributions for each time step
+        domain: Domain array (positions)
+    
+    Returns:
+        List of standard deviation values for each time step
     """
-    dev, process_id, N, steps, samples_count, base_theta_param, source_base_dir, target_base_dir = dev_args
+    std_values = []
+    
+    for prob_dist in prob_distributions:
+        if prob_dist is None:
+            std_values.append(0)
+            continue
+            
+        try:
+            # Ensure probability distribution is properly formatted
+            prob_dist_flat = prob_dist.flatten()
+            total_prob = np.sum(prob_dist_flat)
+            
+            if total_prob == 0:
+                std_values.append(0)
+                continue
+                
+            # Always normalize to ensure proper probability distribution
+            prob_dist_flat = prob_dist_flat / total_prob
+            
+            # Calculate 1st moment (mean position)
+            moment_1 = np.sum(domain * prob_dist_flat)
+            
+            # Calculate 2nd moment
+            moment_2 = np.sum(domain**2 * prob_dist_flat)
+            
+            # Calculate standard deviation: sqrt(moment(2) - moment(1)^2)
+            stDev = moment_2 - moment_1**2
+            std = np.sqrt(stDev) if stDev > 0 else 0
+            std_values.append(std)
+            
+        except Exception as e:
+            std_values.append(0)
+    
+    return std_values
+
+def generate_dynamic_std_for_dev(dev_args):
+    """
+    Worker function to generate standard deviation data for a single deviation value.
+    
+    Args:
+        dev_args: Tuple containing (dev, process_id, N, steps, samples, base_theta)
+    
+    Returns:
+        dict: Results from the standard deviation generation process
+    """
+    dev, process_id, N, steps, samples_count, base_theta_param = dev_args
     
     # Setup logging for this process
     dev_rounded = round(dev, 6)
@@ -496,113 +483,140 @@ def generate_dynamic_probdist_for_dev(dev_args):
     logger, log_file = setup_process_logging(dev_str, process_id, base_theta_param)
     
     try:
-        logger.info(f"=== DYNAMIC PROBDIST GENERATION STARTED ===")
+        logger.info(f"=== DYNAMIC STANDARD DEVIATION GENERATION STARTED ===")
         logger.info(f"PID: {os.getpid()}")
         logger.info(f"Deviation: {dev}")
         logger.info(f"Parameters: N={N}, steps={steps}, samples={samples_count}, base_theta={base_theta_param:.6f}")
         
         dev_start_time = time.time()
         
-        # Find samples directory
-        samples_dir, format_type = find_dynamic_samples_directory_for_config(
-            source_base_dir, N, base_theta_param, dev, samples_count, logger
-        )
+        # Log initial system resources
+        log_system_resources(logger, "[WORKER]")
         
-        if samples_dir is None:
-            error_msg = f"No valid samples directory found for dev {dev_str}"
-            logger.error(error_msg)
-            return {
-                "dev": dev, "process_id": process_id, "success": False, "error": error_msg,
-                "computed_steps": 0, "skipped_steps": 0, "total_steps": steps + 1,
-                "total_time": 0, "log_file": log_file, "dev_tar_path": None
-            }
-        
-        # Validate samples configuration
-        validation_result = validate_dynamic_samples_configuration(
-            samples_dir, samples_count, steps, N, base_theta_param, logger
-        )
-        
-        if not validation_result["valid"]:
-            error_msg = f"Samples validation failed: {validation_result['issues']}"
-            logger.error(error_msg)
-            return {
-                "dev": dev, "process_id": process_id, "success": False, "error": error_msg,
-                "computed_steps": 0, "skipped_steps": 0, "total_steps": steps + 1,
-                "total_time": 0, "log_file": log_file, "dev_tar_path": None
-            }
-        
-        # Determine target directory for probability distributions
+        # Handle deviation format for has_noise check
         has_noise = dev > 0
-        noise_params = [dev]
         
-        target_dir = get_dynamic_experiment_dir(
+        # Get source and target directories
+        noise_params = [dev]
+        probdist_exp_dir, probdist_format = find_dynamic_probdist_directory_for_config(
+            PROBDIST_BASE_DIR, N, base_theta_param, dev, logger
+        )
+        
+        std_exp_dir = get_dynamic_experiment_dir(
             dummy_tesselation_func, has_noise, N, 
             noise_params=noise_params, 
-            base_dir=target_base_dir, 
+            base_dir=STD_BASE_DIR, 
             base_theta=base_theta_param
         )
         
-        logger.info(f"Source directory: {samples_dir}")
-        logger.info(f"Target directory: {target_dir}")
-        logger.info(f"Processing {validation_result['found_steps']} steps with {validation_result['found_samples']} samples each")
+        logger.info(f"ProbDist source: {probdist_exp_dir}")
+        logger.info(f"Std target: {std_exp_dir}")
+        logger.info(f"Source format: {probdist_format}")
         
-        # Process each step
-        actual_steps = validation_result['found_steps']
-        computed_steps = 0
-        skipped_steps = 0
+        # Check if probDist directory exists
+        if probdist_exp_dir is None or not os.path.exists(probdist_exp_dir):
+            logger.error(f"ProbDist directory not found: {probdist_exp_dir}")
+            return {
+                "dev": dev, "process_id": process_id, "success": False,
+                "error": f"ProbDist directory not found: {probdist_exp_dir}",
+                "log_file": log_file, "total_time": 0, "dev_tar_path": None
+            }
         
-        for step_idx in range(actual_steps):
-            step_success, was_skipped = generate_step_probdist(samples_dir, target_dir, step_idx, N, samples_count, logger)
+        # Check if std file already exists and is valid
+        os.makedirs(std_exp_dir, exist_ok=True)
+        std_file = os.path.join(std_exp_dir, "std_vs_time.pkl")
+        
+        skipped = False
+        if validate_std_file(std_file):
+            logger.info(f"Valid std file already exists: {std_file}")
+            skipped = True
+        
+        valid_std_count = 0
+        std_values = []
+        if not skipped:
+            # Load probability distributions
+            prob_distributions = load_probability_distributions_for_dev(probdist_exp_dir, N, steps, logger)
+            if not prob_distributions or len(prob_distributions) == 0:
+                logger.error(f"No probability distributions loaded")
+                return {
+                    "dev": dev, "process_id": process_id, "success": False,
+                    "error": "No probability distributions loaded",
+                    "log_file": log_file, "total_time": 0, "dev_tar_path": None
+                }
             
-            if step_success:
-                if was_skipped:
-                    skipped_steps += 1
-                else:
-                    computed_steps += 1
-                if step_idx % 5 == 0 or step_idx == actual_steps - 1:
-                    logger.info(f"Progress: {step_idx + 1}/{actual_steps} steps processed")
-            else:
-                logger.warning(f"Failed to process step {step_idx}")
-                # Count failures separately, don't add to computed or skipped
-        
+            # Calculate standard deviations
+            logger.info(f"Calculating standard deviations for {len(prob_distributions)} time steps...")
+            domain = np.arange(N) - N//2  # Center domain around 0
+            std_values = prob_distributions2std(prob_distributions, domain)
+            valid_std_count = sum(1 for s in std_values if s is not None and s > 0)
+            
+            logger.info(f"Calculated {valid_std_count}/{len(std_values)} valid standard deviations")
+            
+            if valid_std_count == 0:
+                logger.error(f"No valid standard deviations calculated")
+                return {
+                    "dev": dev, "process_id": process_id, "success": False,
+                    "error": "No valid standard deviations calculated",
+                    "log_file": log_file, "total_time": 0, "dev_tar_path": None
+                }
+            
+            # Save standard deviation data
+            with open(std_file, 'wb') as f:
+                pickle.dump(std_values, f)
+            logger.info(f"Standard deviation data saved to: {std_file}")
+            
+            if valid_std_count > 0:
+                final_std = [s for s in std_values if s is not None and s > 0][-1]
+                logger.info(f"Final std value: {final_std:.4f}")
+
+        else:
+            # If skipped, load the std_values for reporting
+            try:
+                with open(std_file, 'rb') as f:
+                    std_values = pickle.load(f)
+                valid_std_count = sum(1 for s in std_values if s is not None and s > 0)
+            except Exception:
+                std_values = []
+                valid_std_count = 0
+
         dev_time = time.time() - dev_start_time
-        
-        logger.info(f"=== DYNAMIC PROBDIST GENERATION COMPLETED ===")
-        logger.info(f"Deviation {dev_str}: {computed_steps} computed, {skipped_steps} skipped")
+        logger.info(f"=== DYNAMIC STANDARD DEVIATION GENERATION COMPLETED ===")
+        logger.info(f"Valid std values: {valid_std_count}/{len(std_values)}")
         logger.info(f"Total time: {dev_time:.1f}s")
-        
-        # Archive this dev's probdist directory if requested (always, even if skipped)
+
+        # Archive this dev's std directory if requested (always, even if skipped)
         dev_tar_path = None
         if CREATE_TAR:
             os.makedirs(ARCHIVE_DIR, exist_ok=True)
             # Format dev string for filename
             devstr = f"{dev_rounded:.6f}".replace(".", "p")
-            # Create archive of the target directory
-            dev_tar_path = os.path.join(ARCHIVE_DIR, f"probdist_dynamic_basetheta{base_theta_param:.6f}_dev_{devstr}_N{N}.tar")
-            if os.path.exists(target_dir):
+            # Create archive of the std directory
+            dev_tar_path = os.path.join(ARCHIVE_DIR, f"std_dynamic_basetheta{base_theta_param:.6f}_dev_{devstr}_N{N}.tar")
+            if os.path.exists(std_exp_dir):
                 with tarfile.open(dev_tar_path, "w") as tar:
-                    tar.add(target_dir, arcname=f"dynamic_probdist_dev_{devstr}_N{N}")
+                    tar.add(std_exp_dir, arcname=f"dynamic_std_dev_{devstr}_N{N}")
                 logger.info(f"Created temporary archive: {dev_tar_path}")
             else:
-                logger.warning(f"Target directory does not exist for archiving: {target_dir}")
-        
+                logger.warning(f"Std directory does not exist for archiving: {std_exp_dir}")
+
         return {
             "dev": dev,
             "process_id": process_id,
             "success": True,
             "error": None,
-            "computed_steps": computed_steps,
-            "skipped_steps": skipped_steps,
-            "total_steps": actual_steps,
-            "total_time": dev_time,
+            "valid_std_count": valid_std_count,
+            "total_std_count": len(std_values),
             "log_file": log_file,
+            "total_time": dev_time,
+            "action": "skipped" if skipped else "generated",
+            "message": "Valid std file already exists" if skipped else f"Generated {valid_std_count} valid std values",
             "dev_tar_path": dev_tar_path
         }
         
     except Exception as e:
         dev_rounded = round(dev, 6)
         dev_str = f"{dev_rounded:.4f}"
-        error_msg = f"Error in dynamic probdist generation for dev {dev_str}: {str(e)}"
+        error_msg = f"Error in dynamic std generation for dev {dev_str}: {str(e)}"
         logger.error(error_msg)
         logger.error(traceback.format_exc())
         
@@ -611,11 +625,8 @@ def generate_dynamic_probdist_for_dev(dev_args):
             "process_id": process_id,
             "success": False,
             "error": error_msg,
-            "computed_steps": 0,
-            "skipped_steps": 0,
-            "total_steps": steps + 1,
-            "total_time": 0,
             "log_file": log_file,
+            "total_time": 0,
             "dev_tar_path": None
         }
 
@@ -624,21 +635,21 @@ def generate_dynamic_probdist_for_dev(dev_args):
 # ============================================================================
 
 def main():
-    """Main execution function for dynamic probability distribution generation."""
+    """Main execution function for dynamic standard deviation generation."""
     
-    print("=== DYNAMIC PROBABILITY DISTRIBUTION GENERATION ===")
+    print("=== DYNAMIC STANDARD DEVIATION GENERATION ===")
     print(f"System parameters: N={N}, steps={steps}, samples={samples}, base_theta={base_theta:.6f}")
     print(f"Deviation values: {devs}")
     print(f"Multiprocessing: {MAX_PROCESSES} processes")
-    print(f"Samples source: {SAMPLES_BASE_DIR}")
-    print(f"ProbDist target: {PROBDIST_BASE_DIR}")
+    print(f"ProbDist source: {PROBDIST_BASE_DIR}")
+    print(f"Std target: {STD_BASE_DIR}")
     if CREATE_TAR:
         print(f"Archiving: {ARCHIVE_DIR}")
     print("=" * 60)
     
     # Setup master logging
     master_logger = setup_master_logging()
-    master_logger.info("=== DYNAMIC PROBABILITY DISTRIBUTION GENERATION STARTED ===")
+    master_logger.info("=== DYNAMIC STANDARD DEVIATION GENERATION STARTED ===")
     master_logger.info(f"Parameters: N={N}, steps={steps}, samples={samples}, base_theta={base_theta:.6f}")
     master_logger.info(f"Deviations: {devs}")
     master_logger.info(f"Max processes: {MAX_PROCESSES}")
@@ -647,22 +658,29 @@ def main():
     
     # Prepare arguments for each process
     process_args = []
-    
     for process_id, dev in enumerate(devs):
-        args = (dev, process_id, N, steps, samples, base_theta, SAMPLES_BASE_DIR, PROBDIST_BASE_DIR)
+        args = (dev, process_id, N, steps, samples, base_theta)
         process_args.append(args)
     
-    print(f"\nStarting {len(process_args)} processes for dynamic probdist generation...")
+    print(f"\nStarting {len(process_args)} processes for dynamic std generation...")
     
     process_results = []
+    
+    # Track process information
+    process_info = {}
+    for i, (dev, process_id, *_) in enumerate(process_args):
+        process_info[dev] = {"index": i, "process_id": process_id, "status": "queued"}
     
     try:
         with ProcessPoolExecutor(max_workers=MAX_PROCESSES) as executor:
             # Submit all processes
             future_to_dev = {}
             for args in process_args:
-                future = executor.submit(generate_dynamic_probdist_for_dev, args)
+                future = executor.submit(generate_dynamic_std_for_dev, args)
                 future_to_dev[future] = args[0]  # dev value
+                
+                # Update process status
+                process_info[args[0]]["status"] = "running"
             
             # Collect results with timeout handling
             for future in as_completed(future_to_dev, timeout=PROCESS_TIMEOUT * len(devs)):
@@ -672,11 +690,15 @@ def main():
                     result = future.result(timeout=PROCESS_TIMEOUT)
                     process_results.append(result)
                     
+                    # Update process status
+                    process_info[dev]["status"] = "completed"
+                    
                     if result["success"]:
                         dev_rounded = round(dev, 6)
+                        action = result.get("action", "processed")
+                        message = result.get("message", "")
                         master_logger.info(f"Dev {dev_rounded:.4f}: SUCCESS - "
-                                         f"Computed: {result['computed_steps']}, "
-                                         f"Skipped: {result['skipped_steps']}, "
+                                         f"{action.upper()} - {message}, "
                                          f"Time: {result['total_time']:.1f}s")
                     else:
                         dev_rounded = round(dev, 6)
@@ -688,18 +710,20 @@ def main():
                     master_logger.error(error_msg)
                     process_results.append({
                         "dev": dev, "success": False, "error": error_msg,
-                        "computed_steps": 0, "skipped_steps": 0, "total_time": 0,
+                        "valid_std_count": 0, "total_std_count": 0, "total_time": 0,
                         "dev_tar_path": None
                     })
+                    process_info[dev]["status"] = "timeout"
                 except Exception as e:
                     dev_rounded = round(dev, 6)
                     error_msg = f"Dev {dev_rounded:.4f}: EXCEPTION - {str(e)}"
                     master_logger.error(error_msg)
                     process_results.append({
                         "dev": dev, "success": False, "error": error_msg,
-                        "computed_steps": 0, "skipped_steps": 0, "total_time": 0,
+                        "valid_std_count": 0, "total_std_count": 0, "total_time": 0,
                         "dev_tar_path": None
                     })
+                    process_info[dev]["status"] = "error"
     
     except KeyboardInterrupt:
         master_logger.warning("Interrupted by user")
@@ -707,12 +731,12 @@ def main():
     except Exception as e:
         master_logger.error(f"Critical error in multiprocessing: {str(e)}")
         raise
-    
+
     # === MAIN ARCHIVE CREATION ===
     if CREATE_TAR:
         os.makedirs(ARCHIVE_DIR, exist_ok=True)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        main_tar_name = f"experiments_data_dynamic_probdist_N{N}_samples{samples}_basetheta{base_theta:.6f}_{timestamp}.tar"
+        main_tar_name = f"experiments_data_dynamic_std_N{N}_samples{samples}_basetheta{base_theta:.6f}_{timestamp}.tar"
         main_tar_path = os.path.join(ARCHIVE_DIR, main_tar_name)
         dev_tar_paths = [r.get("dev_tar_path") for r in process_results if r.get("dev_tar_path")]
         if dev_tar_paths:
@@ -737,29 +761,30 @@ def main():
     # Generate summary
     successful_processes = sum(1 for r in process_results if r["success"])
     failed_processes = len(process_results) - successful_processes
-    total_computed = sum(r.get("computed_steps", 0) for r in process_results)
-    total_skipped = sum(r.get("skipped_steps", 0) for r in process_results)
+    generated_count = sum(1 for r in process_results if r.get("action") == "generated")
+    skipped_count = sum(1 for r in process_results if r.get("action") == "skipped")
     
-    print(f"\n=== DYNAMIC PROBDIST GENERATION SUMMARY ===")
+    print(f"\n=== DYNAMIC STD GENERATION SUMMARY ===")
     print(f"Total time: {total_time:.1f}s")
     print(f"Processes: {successful_processes} successful, {failed_processes} failed")
-    print(f"Steps: {total_computed} computed, {total_skipped} skipped")
+    print(f"Actions: {generated_count} generated, {skipped_count} skipped")
     if CREATE_TAR:
         print(f"Archives: {ARCHIVE_DIR}/")
     print(f"Log files: {MASTER_LOG_FILE}, {PROCESS_LOG_DIR}/")
     
-    master_logger.info("=== DYNAMIC PROBDIST GENERATION SUMMARY ===")
+    master_logger.info("=== DYNAMIC STD GENERATION SUMMARY ===")
     master_logger.info(f"Total time: {total_time:.1f}s")
     master_logger.info(f"Processes: {successful_processes} successful, {failed_processes} failed")
-    master_logger.info(f"Steps: {total_computed} computed, {total_skipped} skipped")
+    master_logger.info(f"Actions: {generated_count} generated, {skipped_count} skipped")
     
     # Log individual process results
     master_logger.info("INDIVIDUAL PROCESS RESULTS:")
     for result in process_results:
         if result["success"]:
+            action = result.get("action", "processed")
+            message = result.get("message", "")
             master_logger.info(f"  Dev {result['dev']}: SUCCESS - "
-                             f"Computed: {result.get('computed_steps', 0)}, "
-                             f"Skipped: {result.get('skipped_steps', 0)}, "
+                             f"{action.upper()} - {message}, "
                              f"Time: {result.get('total_time', 0):.1f}s")
         else:
             master_logger.info(f"  Dev {result['dev']}: FAILED - {result.get('error', 'Unknown error')}")
@@ -768,8 +793,8 @@ def main():
         "total_time": total_time,
         "successful_processes": successful_processes,
         "failed_processes": failed_processes,
-        "total_computed": total_computed,
-        "total_skipped": total_skipped,
+        "generated_count": generated_count,
+        "skipped_count": skipped_count,
         "process_results": process_results
     }
 

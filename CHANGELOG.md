@@ -2,6 +2,20 @@
 
 ## 📋 **COMPACT SUMMARY - Recent Major Achievements**
 
+### 🎨 **Dynamic Experiment Analysis & Plotting Suite** (September 1, 2025)
+- **Complete Dynamic Analysis Pipeline**: Created comprehensive analysis suite for dynamic noise experiments with `generate_dynamic_probdist_from_samples.py`, `generate_dynamic_std_from_probdist.py`, and `generate_dynamic_survival_probability.py`
+- **Dynamic Probability Distribution Generation**: Developed script to convert dynamic sample data into probability distributions using multiprocessing with per-deviation archiving and validation
+- **Dynamic Standard Deviation Analysis**: Implemented statistical analysis script that calculates standard deviations across time from dynamic probability distributions, enabling diffusion behavior analysis for dynamic experiments
+- **Dynamic Survival Probability Calculation**: Built comprehensive survival probability analysis with configurable node ranges (center, range_80_80, system) for studying probability localization in dynamic noise experiments
+- **Unified Archiving System**: All dynamic analysis scripts save archives to shared `experiments_archive_dynamic` directory with timestamped tar files and per-deviation archiving for experiment result management
+- **Dynamic Plotting Suite**: Created `plot_dynamic_experiment_results.py` specifically adapted for dynamic experiment directory structure and scalar deviation values
+- **Directory Structure Adaptation**: Implemented correct dynamic directory handling with `dynamic_angle_noise/[noise|no_noise]/basetheta_X/dev_X/N_X/` structure and decimal point replacement with 'p'
+- **Scalar Deviation Handling**: Adapted plotting functions to work with scalar deviation values (0, π/32, π/16, π/8, π/4) instead of tuple ranges, matching dynamic experiment parameter format
+- **Production-Scale Parameters**: Updated all dynamic scripts for cluster deployment with production parameters (N=20000, samples=40, basetheta=π/4, 5 deviation values) matching static experiment scale
+- **Cluster-Ready Configuration**: Enhanced multiprocessing configuration with full CPU utilization and 2-hour timeouts for large-scale cluster computation
+- **Smart Data Loading**: Implemented flexible directory finding and data validation for dynamic experiments with proper error handling and progress reporting
+- **Complete Analysis Workflow**: Established full pipeline from dynamic samples → probability distributions → standard deviation/survival analysis → visualization for comprehensive dynamic quantum walk analysis
+
 ### � **Linspace Plotting Optimization for Large Datasets** (September 1, 2025)
 - **Large Dataset Legend Management**: Updated `plot_linspace_experiment_results.py` to handle 100+ deviations by implementing `LEGEND_THRESHOLD = 10` to automatically disable legend display when plotting more than 10 deviations, preventing visual clutter
 - **Minimal Code Changes Approach**: Maintained original plotting style and functionality while only modifying legend behavior, avoiding complex visualization schemes that would change the fundamental plotting approach
