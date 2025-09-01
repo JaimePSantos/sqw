@@ -413,6 +413,10 @@ def load_probability_distributions_for_dev(probdist_dir, N, steps, logger):
         logger.info(f"Found {len(available_steps)} probdist files, max step: {max_step}")
         
         for step_idx in range(actual_steps):
+            # Log every 100th step or first/last step
+            if step_idx % 100 == 0 or step_idx == actual_steps - 1:
+                logger.info(f"Loading step {step_idx}/{actual_steps - 1} (probability distribution for time step {step_idx})")
+            
             prob_file = os.path.join(probdist_dir, f"mean_step_{step_idx}.pkl")
             
             if os.path.exists(prob_file):
@@ -426,6 +430,11 @@ def load_probability_distributions_for_dev(probdist_dir, N, steps, logger):
             else:
                 logger.warning(f"Probability distribution file not found for step {step_idx}: {prob_file}")
                 prob_distributions.append(None)
+            
+            # Progress summary every 100 steps or at the end
+            if step_idx % 100 == 0 or step_idx == actual_steps - 1:
+                valid_steps_so_far = sum(1 for p in prob_distributions if p is not None)
+                logger.info(f"Progress: {step_idx + 1}/{actual_steps} steps loaded ({valid_steps_so_far} valid distributions)")
         
         valid_steps = sum(1 for p in prob_distributions if p is not None)
         logger.info(f"Loaded {valid_steps}/{len(prob_distributions)} valid probability distributions")
@@ -489,6 +498,11 @@ def calculate_survival_probabilities_for_range(prob_distributions, node_range, l
         logger.debug(f"Calculating survival for nodes: {min(node_indices)} to {max(node_indices)} ({len(node_indices)} nodes)")
     
     for step_idx, prob_dist in enumerate(prob_distributions):
+        # Log every 100th step for survival calculation
+        if step_idx % 100 == 0 or step_idx == len(prob_distributions) - 1:
+            if logger:
+                logger.debug(f"Calculating survival probability for step {step_idx}/{len(prob_distributions) - 1}")
+        
         if prob_dist is not None and len(prob_dist) > 0:
             try:
                 # Sum probabilities over the specified range

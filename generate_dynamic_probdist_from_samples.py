@@ -427,6 +427,10 @@ def generate_step_probdist(samples_dir, target_dir, step_idx, N, samples_count, 
         
         # Process each sample file
         for sample_idx in range(samples_count):
+            # Log progress every 10 samples for detailed tracking
+            if sample_idx % 10 == 0 and sample_idx > 0:
+                logger.debug(f"    Step {step_idx}: Processing sample {sample_idx}/{samples_count}")
+            
             sample_file = os.path.join(step_dir, f"final_step_{step_idx}_sample{sample_idx}.pkl")
             
             # Load sample data
@@ -552,6 +556,10 @@ def generate_dynamic_probdist_for_dev(dev_args):
         skipped_steps = 0
         
         for step_idx in range(actual_steps):
+            # Log every 100th step or first/last step
+            if step_idx % 100 == 0 or step_idx == actual_steps - 1:
+                logger.info(f"Processing step {step_idx}/{actual_steps - 1} (computing probability distribution for time step {step_idx})")
+            
             step_success, was_skipped = generate_step_probdist(samples_dir, target_dir, step_idx, N, samples_count, logger)
             
             if step_success:
@@ -559,8 +567,9 @@ def generate_dynamic_probdist_for_dev(dev_args):
                     skipped_steps += 1
                 else:
                     computed_steps += 1
-                if step_idx % 5 == 0 or step_idx == actual_steps - 1:
-                    logger.info(f"Progress: {step_idx + 1}/{actual_steps} steps processed")
+                # Progress summary every 100 steps or at the end
+                if step_idx % 100 == 0 or step_idx == actual_steps - 1:
+                    logger.info(f"Progress: {step_idx + 1}/{actual_steps} steps processed ({computed_steps} computed, {skipped_steps} skipped)")
             else:
                 logger.warning(f"Failed to process step {step_idx}")
                 # Count failures separately, don't add to computed or skipped

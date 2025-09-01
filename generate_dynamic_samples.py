@@ -298,8 +298,8 @@ def create_step_saver(exp_dir, sample_idx, steps, logger):
         del state
         gc.collect()
         
-        if step_idx % 100 == 0 or step_idx == steps:
-            logger.info(f"    Saved step {step_idx}/{steps}")
+        if step_idx % 100 == 0 or step_idx == steps - 1:
+            logger.info(f"    Saving step {step_idx}/{steps - 1} (quantum walk state for time step {step_idx})")
     
     return save_step_callback
 
@@ -340,7 +340,7 @@ def process_single_sample(sample_idx, samples_count, exp_dir, steps, dev, base_t
         for step_idx, state in enumerate(evolution_states):
             save_step_callback(step_idx, state)
         
-        logger.debug(f"Dynamic quantum walk simulation completed for sample {sample_idx}")
+        logger.debug(f"Dynamic quantum walk simulation completed for sample {sample_idx} ({steps} time steps saved)")
         
     except MemoryError as mem_error:
         logger.error(f"Memory error in sample {sample_idx}: {mem_error}")
@@ -416,6 +416,10 @@ def generate_dynamic_samples_for_dev(dev_args):
                 dev_computed_samples += 1
             else:
                 dev_skipped_samples += 1
+            
+            # Progress summary every 5 samples or at the end
+            if (sample_idx + 1) % 5 == 0 or sample_idx == samples_count - 1:
+                logger.info(f"Sample progress: {sample_idx + 1}/{samples_count} processed ({dev_computed_samples} computed, {dev_skipped_samples} skipped)")
         
         dev_time = time.time() - dev_start_time
         dev_rounded = round(dev, 6)
