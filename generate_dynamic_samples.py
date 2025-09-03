@@ -40,7 +40,7 @@ from datetime import datetime
 N = 20000              # System size (production scale for cluster)
 steps = N//4           # Time steps (5000 for N=20000)
 samples = 40           # Samples per deviation (full production count)
-base_theta = math.pi/3 # Base theta parameter for dynamic angle noise
+base_theta = math.pi/4 # Base theta parameter for dynamic angle noise
 
 # Deviation values - Dynamic noise format (angle deviations) - Matching original static experiment
 devs = [

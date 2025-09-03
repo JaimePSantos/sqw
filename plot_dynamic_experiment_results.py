@@ -38,7 +38,7 @@ from datetime import datetime
 N = 20000              # System size (production scale for cluster)
 steps = N//4           # Time steps (5000 for N=20000)
 samples = 40           # Samples per deviation (full production count)
-basetheta = math.pi/3  # Base theta parameter for dynamic angle noise
+base_theta = math.pi/3  # Base theta parameter for dynamic angle noise
 
 # # Experiment parameters - EDIT THESE TO MATCH YOUR SETUP
 # N = 100              # System size (production scale for cluster)
@@ -112,7 +112,7 @@ PROBDIST_PLOT_CONFIG = {
     'fontsize_legend': 10,
     'linewidth': 2,
     'alpha': 0.8,
-    'xlim': (-80, 80),                 # X-axis limits
+    'xlim': (-500, 500),                 # X-axis limits
     'ylim_min': 1e-5,                  # Y-axis minimum (None for auto)
     'ylim_max': 1e0,                   # Y-axis maximum (None for auto)
     'grid_alpha': 0.3,
@@ -148,7 +148,7 @@ SURVIVAL_PLOT_CONFIG = {
     'grid_linestyle': '-',
     'dpi': 300,                         # DPI for saved figures
     'bbox_inches': 'tight',             # Bbox setting for saved figures
-    'survival_range': 'center'     # Default survival range to plot
+    'survival_range': 'range_80_80'     # Default survival range to plot
 }
 
 # Label formatting configuration
