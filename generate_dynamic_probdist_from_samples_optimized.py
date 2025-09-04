@@ -431,10 +431,18 @@ def generate_step_probdist_optimized(samples_dir, target_dir, step_idx, N, sampl
         if os.path.exists(output_file):
             # Quick file size check only (skip complex validation)
             try:
-                if os.path.getsize(output_file) > 50:  # Reasonable minimum size
+                file_size = os.path.getsize(output_file)
+                if file_size > 50:  # Reasonable minimum size
+                    if step_idx % 100 == 0 or step_idx < 10:  # Log for first 10 steps and every 100th step
+                        logger.info(f"    Step {step_idx}: Skipping - valid file exists ({file_size} bytes)")
                     return True, True  # success=True, was_skipped=True
-            except:
-                pass  # If check fails, proceed to regenerate
+                else:
+                    logger.info(f"    Step {step_idx}: Regenerating - file too small ({file_size} bytes)")
+            except Exception as e:
+                logger.info(f"    Step {step_idx}: Regenerating - file check failed: {e}")
+        else:
+            if step_idx % 100 == 0 or step_idx < 10:  # Log for first 10 steps and every 100th step
+                logger.info(f"    Step {step_idx}: Computing - file does not exist")
         
         # Find step directory
         step_dir = os.path.join(samples_dir, f"step_{step_idx}")
@@ -553,6 +561,8 @@ def generate_dynamic_probdist_for_dev_optimized(dev_args):
             base_theta=base_theta_param
         )
         
+        logger.info(f"Target probDist directory: {target_dir}")
+        
         # Process each step with optimized computation
         actual_steps = validation_result['found_steps']
         computed_steps = 0
@@ -560,6 +570,7 @@ def generate_dynamic_probdist_for_dev_optimized(dev_args):
         
         # Track performance metrics
         logger.info(f"Processing {actual_steps} steps for dev {dev_str}...")
+        logger.info(f"Checking for existing probDist files and computing missing ones...")
         
         for step_idx in range(actual_steps):
             # Add progress logging every 100 steps
