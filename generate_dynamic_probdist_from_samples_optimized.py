@@ -559,8 +559,14 @@ def generate_dynamic_probdist_for_dev_optimized(dev_args):
         skipped_steps = 0
         
         # Track performance metrics
+        logger.info(f"Processing {actual_steps} steps for dev {dev_str}...")
         
         for step_idx in range(actual_steps):
+            # Add progress logging every 100 steps
+            if step_idx % 100 == 0 or step_idx == actual_steps - 1:
+                progress_pct = (step_idx / actual_steps) * 100
+                logger.info(f"  Processing step {step_idx}/{actual_steps} ({progress_pct:.1f}%)")
+            
             step_success, was_skipped = generate_step_probdist_optimized(samples_dir, target_dir, step_idx, N, samples_count, logger)
             
             if step_success:
@@ -568,6 +574,8 @@ def generate_dynamic_probdist_for_dev_optimized(dev_args):
                     skipped_steps += 1
                 else:
                     computed_steps += 1
+        
+        logger.info(f"Completed processing {actual_steps} steps. Computed: {computed_steps}, Skipped: {skipped_steps}")
         
         dev_time = time.time() - dev_start_time
         
