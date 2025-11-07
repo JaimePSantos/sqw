@@ -51,8 +51,9 @@ from datetime import datetime
 # CLUSTER PARAMETERS (for large-scale production runs)
 N = 20000                # System size
 steps = N//4             # Time steps  
-samples = 40             # Samples per deviation
-base_theta = math.pi/4   # Base theta parameter for dynamic angle noise
+samples = 80             # Samples per deviation
+base_theta = math.pi/3   # Base theta parameter for dynamic angle noise
+# base_theta = math.pi/4   # Base theta parameter for dynamic angle noise
 
 # # TESTING PARAMETERS (currently active - safe for development)
 # N = 100                # System size (small for local testing)
