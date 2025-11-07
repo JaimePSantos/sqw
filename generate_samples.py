@@ -44,10 +44,10 @@ import gc
 # Experiment parameters - EDIT THESE TO MATCH YOUR SETUP
 N = 20000                # System size (small for testing)
 steps = N//4           # Time steps (25 for N=100)
-# samples = 80         # Samples per deviation (small for testing)
-# theta = math.pi/3      # Theta parameter for static noise
-samples = 80
-theta = math.pi/4     # Theta parameter for static noise
+samples = 20         # Samples per deviation (small for testing)
+theta = math.pi/3      # Theta parameter for static noise
+# samples = 80
+# theta = math.pi/4     # Theta parameter for static noise
 
 # Deviation values - TEST SET (matching generate_samples.py)
 # devs = [
@@ -67,11 +67,11 @@ devs = [
 
 
 # Directory configuration
-SAMPLES_BASE_DIR = "experiments_data_samples"
+SAMPLES_BASE_DIR = "experiments_data_samples_superposition"
 
 # Create date-based logging directories
 current_date = datetime.now().strftime("%d-%m-%y")
-PROCESS_LOG_DIR = os.path.join("logs", current_date, "sample_generation")
+PROCESS_LOG_DIR = os.path.join("logs", current_date, "sample_generation_superposition")
 
 # Multiprocessing configuration
 MAX_PROCESSES = min(len(devs), mp.cpu_count())
@@ -84,7 +84,7 @@ MASTER_LOG_FILE = os.path.join("logs", current_date, "sample_generation", "sampl
 SHUTDOWN_REQUESTED = False
 
 # Initial state configuration
-initial_state_kwargs = {"nodes": [N//2]}
+initial_state_kwargs = {"nodes": [N//2, N//2 + 1]}
 
 # ============================================================================
 # SIGNAL HANDLING AND UTILITIES
