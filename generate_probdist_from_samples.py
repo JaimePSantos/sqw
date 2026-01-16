@@ -41,7 +41,7 @@ import glob
 # ============================================================================
 
 CREATE_TAR = True  # If True, create per-dev and main tar archives
-ARCHIVE_DIR = "experiments_archive"
+ARCHIVE_DIR = "experiments_archive_superposition"
 
 
 # ============================================================================
@@ -51,10 +51,10 @@ ARCHIVE_DIR = "experiments_archive"
 # Experiment parameters - EDIT THESE TO MATCH YOUR SETUP
 N = 20000                # System size (small for testing)
 steps = N//4           # Time steps (25 for N=100)
-# samples = 40         # Samples per deviation (small for testing)
-# theta = math.pi/3      # Theta parameter for static noise
-samples = 40
-theta = math.pi/4     # Theta parameter for static noise
+samples = 20         # Samples per deviation (small for testing)
+theta = math.pi/3      # Theta parameter for static noise
+# samples = 40
+# theta = math.pi/4     # Theta parameter for static noise
 
 # Note: Sample generation often includes initial step (step 0) + evolution steps
 # So actual sample data may have steps + 1 directories (0 to steps inclusive)
@@ -78,12 +78,12 @@ devs = [
 ]
 
 # Directory configuration
-SAMPLES_BASE_DIR = "experiments_data_samples"
-PROBDIST_BASE_DIR = "experiments_data_samples_probDist"
+SAMPLES_BASE_DIR = "experiments_data_samples_superposition"
+PROBDIST_BASE_DIR = "experiments_data_samples_probDist_superposition"
 
 # Create date-based logging directories
 current_date = datetime.now().strftime("%d-%m-%y")
-PROCESS_LOG_DIR = os.path.join("logs", current_date, "generate_probdist")
+PROCESS_LOG_DIR = os.path.join("logs", current_date, "generate_probdist_superposition")
 
 # Multiprocessing configuration
 MAX_PROCESSES = min(len(devs), mp.cpu_count())
@@ -99,7 +99,7 @@ print(f"[TIMEOUT] Based on N={N}, steps={steps}, samples={samples}")
 print(f"[RESOURCE] Using {MAX_PROCESSES} processes out of {mp.cpu_count()} CPUs")
 
 # Logging configuration
-MASTER_LOG_FILE = os.path.join("logs", current_date, "generate_probdist", "probdist_generation_master.log")
+MASTER_LOG_FILE = os.path.join("logs", current_date, "generate_probdist_superposition", "probdist_generation_master.log")
 
 # Global shutdown flag
 SHUTDOWN_REQUESTED = False
