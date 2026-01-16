@@ -44,7 +44,7 @@ import gc
 # Experiment parameters - EDIT THESE TO MATCH YOUR SETUP
 N = 20000                # System size (small for testing)
 steps = N//4           # Time steps (25 for N=100)
-samples = 20         # Samples per deviation (small for testing)
+samples = 5         # Samples per deviation (small for testing)
 theta = math.pi/3      # Theta parameter for static noise
 # samples = 80
 # theta = math.pi/4     # Theta parameter for static noise
