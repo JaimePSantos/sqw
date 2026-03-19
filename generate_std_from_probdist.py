@@ -48,10 +48,10 @@ ARCHIVE_DIR = "experiments_archive_superposition"
 # Experiment parameters - EDIT THESE TO MATCH YOUR SETUP
 N = 20000                # System size
 steps = N//4           # Time steps
-samples = 20        # Samples per deviation (small for testing)
-theta = math.pi/3      # Theta parameter for static noise
-# samples = 40
-# theta = math.pi/4     # Theta parameter for static noise
+# samples = 20        # Samples per deviation (small for testing)
+# theta = math.pi/3      # Theta parameter for static noise
+samples = 20
+theta = math.pi/4     # Theta parameter for static noise
 
 # Deviation values - TEST SET (matching other scripts)
 devs = [
