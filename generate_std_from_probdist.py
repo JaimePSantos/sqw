@@ -40,7 +40,7 @@ import tarfile
 # ============================================================================
 
 CREATE_TAR = True  # If True, create per-dev and main tar archives
-ARCHIVE_DIR = "experiments_archive"
+ARCHIVE_DIR = "experiments_archive_superposition"
 
 # CONFIGURATION PARAMETERS
 # ============================================================================
@@ -48,10 +48,10 @@ ARCHIVE_DIR = "experiments_archive"
 # Experiment parameters - EDIT THESE TO MATCH YOUR SETUP
 N = 20000                # System size
 steps = N//4           # Time steps
-# samples = 40         # Samples per deviation (small for testing)
-# theta = math.pi/3      # Theta parameter for static noise
-samples = 40
-theta = math.pi/4     # Theta parameter for static noise
+samples = 40         # Samples per deviation (small for testing)
+theta = math.pi/3      # Theta parameter for static noise
+# samples = 40
+# theta = math.pi/4     # Theta parameter for static noise
 
 # Deviation values - TEST SET (matching other scripts)
 devs = [
@@ -64,12 +64,12 @@ devs = [
 
 
 # Directory configuration
-PROBDIST_BASE_DIR = "experiments_data_samples_probDist"
-STD_BASE_DIR = "experiments_data_samples_std"
+PROBDIST_BASE_DIR = "experiments_data_samples_probDist_superposition"
+STD_BASE_DIR = "experiments_data_samples_std_superposition"
 
 # Create date-based logging directories
 current_date = datetime.now().strftime("%d-%m-%y")
-PROCESS_LOG_DIR = os.path.join("logs", current_date, "generate_std")
+PROCESS_LOG_DIR = os.path.join("logs", current_date, "generate_std_superposition")
 
 # Multiprocessing configuration
 MAX_PROCESSES = min(len(devs), mp.cpu_count())
@@ -85,7 +85,7 @@ print(f"[TIMEOUT] Based on N={N}, steps={steps}, samples={samples}")
 print(f"[RESOURCE] Using {MAX_PROCESSES} processes out of {mp.cpu_count()} CPUs")
 
 # Logging configuration
-MASTER_LOG_FILE = os.path.join("logs", current_date, "generate_std", "std_generation_master.log")
+MASTER_LOG_FILE = os.path.join("logs", current_date, "generate_std_superposition", "std_generation_master.log")
 
 # Global shutdown flag
 SHUTDOWN_REQUESTED = False
